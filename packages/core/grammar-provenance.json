@@ -1,0 +1,57 @@
+{
+  "$comment": [
+    "Provenance for the tree-sitter grammar .wasm blobs smelt bundles and therefore",
+    "redistributes. This file exists because the facts in it have no machine-readable",
+    "source on this machine: a .wasm blob carries no metadata, and the grammar packages",
+    "are tree-sitter-wasms' own devDependencies, so they are never installed here.",
+    "",
+    "It holds ONLY the irreducible facts. Everything else in THIRD-PARTY.md is derived:",
+    "the version ranges come from tree-sitter-wasms' package.json, the file list comes",
+    "from WASM_BY_LANGUAGE, and the sizes and hashes come from the bundled files.",
+    "scripts/generate-third-party.mjs fails if any bundled grammar has no entry here,",
+    "or if any entry names a grammar that is not bundled — the mapping is total, so a",
+    "new grammar cannot ship unattributed.",
+    "",
+    "Verified 2026-09-01 against the npm registry (license field) and each repository's",
+    "LICENSE file (copyright line). Re-verify when tree-sitter-wasms is upgraded."
+  ],
+  "verified": "2026-09-01",
+  "grammars": {
+    "tree-sitter-typescript.wasm": {
+      "package": "tree-sitter-typescript",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2017 Max Brunsfeld",
+      "repository": "https://github.com/tree-sitter/tree-sitter-typescript"
+    },
+    "tree-sitter-tsx.wasm": {
+      "package": "tree-sitter-typescript",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2017 Max Brunsfeld",
+      "repository": "https://github.com/tree-sitter/tree-sitter-typescript"
+    },
+    "tree-sitter-javascript.wasm": {
+      "package": "tree-sitter-javascript",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2014 Max Brunsfeld",
+      "repository": "https://github.com/tree-sitter/tree-sitter-javascript"
+    },
+    "tree-sitter-rust.wasm": {
+      "package": "tree-sitter-rust",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2017 Maxim Sokolov",
+      "repository": "https://github.com/tree-sitter/tree-sitter-rust"
+    },
+    "tree-sitter-python.wasm": {
+      "package": "tree-sitter-python",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2016 Max Brunsfeld",
+      "repository": "https://github.com/tree-sitter/tree-sitter-python"
+    },
+    "tree-sitter-go.wasm": {
+      "package": "tree-sitter-go",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2014 Max Brunsfeld",
+      "repository": "https://github.com/tree-sitter/tree-sitter-go"
+    }
+  }
+}

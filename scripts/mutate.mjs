@@ -12,9 +12,20 @@
  * It also runs every guard against the pristine tree first, because a guard that fails
  * on clean source proves nothing when it fails on broken source.
  *
+ * Two kinds of mutation exist, because not every guard guards source code:
+ *
+ *   - `kind: 'src'` (the default) breaks a file under `packages/core/src`, and the guard
+ *     is pointed at the broken copy via `SMELT_GUARD_SRC`.
+ *   - `kind: 'artifact'` breaks a *committed artefact* under `packages/core` — a
+ *     generated file, for instance — in a scratch root the guard reads via
+ *     `SMELT_GUARD_ROOT`. Nothing in the working tree is touched either way, which
+ *     matters: a mutation runner that edits tracked files and crashes leaves the repo
+ *     broken, and the whole point is that a failure here is safe.
+ *
  * Convention, for anyone adding a guard:
  *
- *   1. Import the library through `@guard/...` so the alias can be redirected.
+ *   1. Import the library through `@guard/...` so the alias can be redirected, and read
+ *      committed artefacts through `guardRoot()` so they can be too.
  *   2. Add an entry here naming the guard, the exact source string to break, and why
  *      that break matters.
  *   3. Run `pnpm mutate`. If the guard survives, the guard is wrong.
@@ -37,9 +48,14 @@ const GUARDS = [
   'test/guards/no-network.test.ts',
   'test/guards/reversibility.test.ts',
   'test/guards/expansion-counter.test.ts',
+  'test/guards/marker-format.test.ts',
+  'test/guards/third-party.test.ts',
 ];
 
-/** @type {{id: string, guard: string, file: string, find: string, replace: string, why: string}[]} */
+/**
+ * @type {{id: string, guard: string, file: string, find: string, replace: string,
+ *         why: string, kind?: 'src' | 'artifact'}[]}
+ */
 const MUTATIONS = [
   {
     id: 'law1-node-https-import',
@@ -101,12 +117,54 @@ const MUTATIONS = [
     replace: '    // this.#retrieveCalls += 1;',
     why: 'the expansion rate pinned at a flattering zero forever',
   },
+  {
+    id: 'degenerate-outcome-never-fires',
+    guard: 'test/guards/expansion-counter.test.ts',
+    file: 'store.ts',
+    find: '      allElisionsRetrieved: elisionsStored > 0 && uniqueRetrieved === elisionsStored,',
+    replace: '      allElisionsRetrieved: false,',
+    why: 'the one degenerate outcome smelt names, wired to a constant that can never fire',
+  },
+  {
+    id: 'law1-cli-network-import',
+    guard: 'test/guards/no-network.test.ts',
+    file: 'cli/args.ts',
+    find: "import { parseArgs } from 'node:util';",
+    replace: "import 'node:https';\nimport { parseArgs } from 'node:util';",
+    why: 'a transport in the CLI — the second front door, which a walk from index.ts alone would never scan',
+  },
+  {
+    id: 'marker-format-silent-change',
+    guard: 'test/guards/marker-format.test.ts',
+    file: 'apply.ts',
+    find: '  `<<smelt/${MARKER_FORMAT_VERSION}: ${explanation} (${String(bytes)}B) — retrieve("${hash}")>>`;',
+    replace:
+      '  `<<smelt/${MARKER_FORMAT_VERSION}: ${explanation} [${String(bytes)} bytes] retrieve=${hash}>>`;',
+    why: 'the wire surface a model sees, reshaped without its version moving — worse output, no error anywhere',
+  },
+  {
+    id: 'marker-version-not-frozen',
+    guard: 'test/guards/marker-format.test.ts',
+    file: 'apply.ts',
+    find: "export const MARKER_FORMAT_VERSION = 'v1';",
+    replace: "export const MARKER_FORMAT_VERSION = 'v2';",
+    why: 'a new marker version with no frozen rendering — the format table must be total, not advisory',
+  },
+  {
+    kind: 'artifact',
+    id: 'third-party-attribution-dropped',
+    guard: 'test/guards/third-party.test.ts',
+    file: 'THIRD-PARTY.md',
+    find: '| `tree-sitter-rust.wasm` |',
+    replace: '| `tree-sitter-omitted.wasm` |',
+    why: 'a bundled grammar losing its attribution in the committed notices — redistribution without a licence',
+  },
 ];
 
-function runGuard(guard, guardSrc) {
+function runGuard(guard, guardSrc, guardRoot = corePackage) {
   return spawnSync('./node_modules/.bin/vitest', ['run', guard, '--reporter=dot'], {
     cwd: corePackage,
-    env: { ...process.env, SMELT_GUARD_SRC: guardSrc },
+    env: { ...process.env, SMELT_GUARD_SRC: guardSrc, SMELT_GUARD_ROOT: guardRoot },
     encoding: 'utf8',
   });
 }
@@ -134,24 +192,42 @@ console.log('\n=== mutations: every guard must go red ===\n');
 rmSync(scratchDir, { recursive: true, force: true });
 
 for (const mutation of MUTATIONS) {
-  const mutantSrc = join(scratchDir, mutation.id, 'src');
-  mkdirSync(dirname(mutantSrc), { recursive: true });
-  cpSync(sourceDir, mutantSrc, { recursive: true });
+  const kind = mutation.kind ?? 'src';
+  const scratch = join(scratchDir, mutation.id);
+  let guardSrc = sourceDir;
+  let guardRoot = corePackage;
+  let target;
 
-  const target = join(mutantSrc, mutation.file);
+  if (kind === 'src') {
+    const mutantSrc = join(scratch, 'src');
+    mkdirSync(dirname(mutantSrc), { recursive: true });
+    cpSync(sourceDir, mutantSrc, { recursive: true });
+    guardSrc = mutantSrc;
+    target = join(mutantSrc, mutation.file);
+  } else {
+    // Only the artefact is copied. The guard still reads the real manifest, the real
+    // grammars and the real generator — the *committed* copy is the thing being staled.
+    const mutantRoot = join(scratch, 'root');
+    mkdirSync(mutantRoot, { recursive: true });
+    cpSync(join(corePackage, mutation.file), join(mutantRoot, mutation.file));
+    guardRoot = mutantRoot;
+    target = join(mutantRoot, mutation.file);
+  }
+
   const original = readFileSync(target, 'utf8');
   const occurrences = original.split(mutation.find).length - 1;
   if (occurrences !== 1) {
     console.log(
       `  BROKEN  ${mutation.id}: its anchor matches ${occurrences} times in ` +
-        `src/${mutation.file}, expected exactly 1. The source moved; fix the mutation.`,
+        `${kind === 'src' ? 'src/' : ''}${mutation.file}, expected exactly 1. The ` +
+        `source moved; fix the mutation.`,
     );
     failed += 1;
     continue;
   }
   writeFileSync(target, original.replace(mutation.find, mutation.replace));
 
-  const run = runGuard(mutation.guard, mutantSrc);
+  const run = runGuard(mutation.guard, guardSrc, guardRoot);
   const caught = run.status !== 0;
   if (!caught) failed += 1;
   results.push({ mutation, caught, output: run.stdout + run.stderr });

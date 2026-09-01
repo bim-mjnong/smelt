@@ -3,3 +3,6 @@ node_modules/
 .mutants/
 pnpm-lock.yaml
 assets/*.svg
+
+# generated — scripts/generate-third-party.mjs owns this file
+packages/core/THIRD-PARTY.md

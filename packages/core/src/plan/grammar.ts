@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -11,9 +12,12 @@ import type { LanguageId } from '../types.ts';
 /**
  * Grammar file for each language smelt claims to parse. This map is
  * `Record<LanguageId, string>` on purpose: adding a `LanguageId` without adding its
- * grammar is a type error, so the two cannot drift.
+ * grammar is a type error, so the two cannot drift. It is exported because
+ * `scripts/bundle-grammars.mjs` and the attribution generator both read it — a
+ * hand-written second list of grammar filenames would be exactly the drift this map
+ * exists to prevent.
  */
-const WASM_BY_LANGUAGE: Readonly<Record<LanguageId, string>> = {
+export const WASM_BY_LANGUAGE: Readonly<Record<LanguageId, string>> = {
   typescript: 'tree-sitter-typescript.wasm',
   tsx: 'tree-sitter-tsx.wasm',
   javascript: 'tree-sitter-javascript.wasm',
@@ -22,6 +26,18 @@ const WASM_BY_LANGUAGE: Readonly<Record<LanguageId, string>> = {
   go: 'tree-sitter-go.wasm',
 };
 
+/**
+ * Where the bundled grammars live, relative to this module.
+ *
+ * From `dist/plan/grammar.js` and from `src/plan/grammar.ts` alike, `../../grammars/`
+ * is this package's own `grammars/` directory — filled by `pnpm build` and shipped
+ * inside the npm tarball. That is what makes "zero native compilation, works offline"
+ * true rather than aspirational: whoever installs the package has the parsers, with no
+ * post-install download and no optional peer dependency to remember. It is also
+ * redistribution, which is why `THIRD-PARTY.md` exists and is generated.
+ */
+const BUNDLED_GRAMMAR_DIR = new URL('../../grammars/', import.meta.url);
+
 const require = createRequire(import.meta.url);
 const cache = new Map<LanguageId, Language>();
 let runtimeReady: Promise<void> | undefined;
@@ -29,22 +45,27 @@ let runtimeReady: Promise<void> | undefined;
 /**
  * Resolve a grammar to a path on this machine.
  *
- * Note what this function does *not* do: it never constructs a URL from a version
- * string, a CDN base, or anything else. Grammars come from a package the consumer
- * already installed. That is the whole reason `tree-sitter-wasms` is a dependency
- * rather than a download — a "fetch the grammar on first use" cache is the most natural
- * way to break Law 1 without noticing, because it works perfectly on the machine that
+ * The copy bundled in this package wins; `tree-sitter-wasms` is the fallback, for a
+ * source checkout that has not run `pnpm build` yet. Note what this function does *not*
+ * do: it never constructs a URL from a version string, a CDN base, or anything else.
+ * Grammars come off disk — either the ones shipped here or the ones a package manager
+ * already installed. A "fetch the grammar on first use" cache is the most natural way
+ * to break Law 1 without noticing, because it works perfectly on the machine that
  * wrote it.
  */
 export function grammarPath(language: LanguageId): string {
   const file = WASM_BY_LANGUAGE[language];
+
+  const bundled = fileURLToPath(new URL(file, BUNDLED_GRAMMAR_DIR));
+  if (existsSync(bundled)) return bundled;
+
   try {
     return require.resolve(`tree-sitter-wasms/out/${file}`);
   } catch {
     throw new GrammarUnavailableError(
-      `smelt: no grammar for "${language}". Install the optional peer dependency ` +
-        `\`tree-sitter-wasms\` to enable structural planning, or pass ` +
-        `\`language: 'unknown'\` to use the lexical planner.`,
+      `smelt: no grammar for "${language}". The bundled copy is missing (run ` +
+        `\`pnpm build\` in a source checkout) and \`tree-sitter-wasms\` is not installed ` +
+        `either. Pass \`language: 'unknown'\` to use the lexical planner.`,
     );
   }
 }
