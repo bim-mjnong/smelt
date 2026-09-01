@@ -11,6 +11,7 @@ import { MemoryElisionStore } from './store.ts';
 import type {
   DetectedLanguage,
   ElisionStore,
+  Measure,
   PlanInput,
   Planner,
   RetrieveStats,
@@ -19,7 +20,7 @@ import type {
 } from './types.ts';
 
 export type { ApplyOptions, MarkerBuilder, MarkerInfo };
-export { applyPlan, defaultMarker, reconstruct } from './apply.ts';
+export { applyPlan, defaultMarker, MARKER_FORMAT_VERSION, reconstruct } from './apply.ts';
 export { detectLanguage, SUPPORTED_LANGUAGES } from './detect.ts';
 export * from './errors.ts';
 export { contentHash, HASH_LENGTH } from './hash.ts';
@@ -32,7 +33,7 @@ export {
   FORBIDDEN_NODE_MODULES,
   FORBIDDEN_PACKAGES,
 } from './net/policy.ts';
-export { clearGrammarCache, grammarPath, loadGrammar } from './plan/grammar.ts';
+export { clearGrammarCache, grammarPath, loadGrammar, WASM_BY_LANGUAGE } from './plan/grammar.ts';
 export { LEXICAL_PLANNER_ID, LexicalPlanner, planLexical } from './plan/lexical.ts';
 export type { LexicalPlannerOptions } from './plan/lexical.ts';
 export { STRUCTURAL_PLANNER_ID, StructuralPlanner } from './plan/structural.ts';
@@ -41,6 +42,16 @@ export { createRetrieveTool, RETRIEVE_TOOL_NAME } from './retrieve.ts';
 export { unconfiguredDistillStage, unconfiguredRerankStage } from './stages.ts';
 export { MemoryElisionStore } from './store.ts';
 export * from './types.ts';
+export {
+  CLI_JSON_FORMAT,
+  CLI_NAME,
+  cliUsage,
+  EXIT,
+  formatReport,
+  parseSmeltArgs,
+  runCli,
+} from './cli/run.ts';
+export type { CliIo, CliJsonEnvelope, SmeltInvocation } from './cli/run.ts';
 
 /** Which planner a smelter uses. `'structural'` throws in v1 — see {@link StructuralPlanner}. */
 export type Strategy = 'lexical' | 'structural';
@@ -52,6 +63,11 @@ export interface SmelterConfig {
   readonly defaultBudgetBytes?: number;
   readonly strategy?: Strategy;
   readonly marker?: MarkerBuilder;
+  /**
+   * Your own counter, so results carry a number in your unit as well as in bytes.
+   * The budget stays in bytes — see {@link Measure} and `docs/HANDOFF.md` § "Decision 1".
+   */
+  readonly measure?: Measure;
   readonly lexical?: LexicalPlannerOptions;
   readonly structural?: StructuralPlannerOptions;
 }
@@ -106,7 +122,10 @@ export function createSmelter(config: SmelterConfig = {}): Smelter {
     strategy === 'structural'
       ? new StructuralPlanner(config.structural ?? {})
       : new LexicalPlanner(config.lexical ?? {});
-  const applyOptions: ApplyOptions = config.marker === undefined ? {} : { marker: config.marker };
+  const applyOptions: ApplyOptions = {
+    ...(config.marker === undefined ? {} : { marker: config.marker }),
+    ...(config.measure === undefined ? {} : { measure: config.measure }),
+  };
 
   return {
     store,

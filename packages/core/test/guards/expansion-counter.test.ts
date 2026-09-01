@@ -15,6 +15,8 @@ import { MemoryElisionStore } from '@guard/store';
  * project exists to refuse.
  *
  * Mutation: `pnpm mutate` deletes the increment in `store.ts`, and this must go red.
+ * A second mutation nails the degenerate-outcome flag flat to `false`, because a flag
+ * that can never fire is the same silence in a different shape.
  */
 
 describe('the expansion rate is actually counted', () => {
@@ -27,6 +29,7 @@ describe('the expansion rate is actually counted', () => {
       uniqueRetrieved: 0,
       misses: 0,
       expansionRate: 0,
+      allElisionsRetrieved: false,
     });
   });
 
@@ -92,5 +95,37 @@ describe('the expansion rate is actually counted', () => {
     expect(smelter.stats().retrieveCalls).toBe(1);
     expect(smelter.stats().expansionRate).toBeGreaterThan(0);
     expect(smelter.tool.name).toBe('smelt_retrieve');
+  });
+
+  /**
+   * The one degenerate outcome smelt names, and the reason it is a *fact* and not a
+   * threshold: at `uniqueRetrieved === elisionsStored` every distinct blob smelt hid was
+   * asked for again, so the elision saved nothing and cost a round trip. smelt still
+   * ships no warning and no default rate to warn at — that would be a policy claim it
+   * has not measured — but a flag that can never fire is exactly as useless as a
+   * counter that never increments.
+   */
+  it('names the degenerate outcome: everything hidden was pulled back', () => {
+    const store = new MemoryElisionStore();
+    const a = store.put('alpha content');
+    const b = store.put('beta content');
+
+    expect(store.stats().allElisionsRetrieved).toBe(false);
+
+    store.retrieve(a);
+    expect(store.stats()).toMatchObject({ expansionRate: 0.5, allElisionsRetrieved: false });
+
+    store.retrieve(b);
+    expect(store.stats()).toMatchObject({ expansionRate: 1, allElisionsRetrieved: true });
+
+    // A repeat cannot un-set it, and a new elision nobody asked for does.
+    store.retrieve(a);
+    expect(store.stats().allElisionsRetrieved).toBe(true);
+    store.put('gamma content');
+    expect(store.stats().allElisionsRetrieved).toBe(false);
+  });
+
+  it('is false for an empty store — nothing was hidden, so nothing was defeated', () => {
+    expect(new MemoryElisionStore().stats().allElisionsRetrieved).toBe(false);
   });
 });

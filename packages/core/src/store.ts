@@ -77,6 +77,7 @@ export class MemoryElisionStore implements ElisionStore {
       uniqueRetrieved,
       misses: this.#misses,
       expansionRate: elisionsStored === 0 ? 0 : uniqueRetrieved / elisionsStored,
+      allElisionsRetrieved: elisionsStored > 0 && uniqueRetrieved === elisionsStored,
     };
   }
 }

@@ -1,5 +1,12 @@
 import { OverlappingElisionError, RangeOutOfBoundsError } from './errors.ts';
-import type { AppliedElision, ByteRange, ElisionPlan, ElisionStore, SmeltResult } from './types.ts';
+import type {
+  AppliedElision,
+  ByteRange,
+  ElisionPlan,
+  ElisionStore,
+  Measure,
+  SmeltResult,
+} from './types.ts';
 
 /** Everything the marker text is allowed to depend on. */
 export interface MarkerInfo {
@@ -12,21 +19,40 @@ export interface MarkerInfo {
 export type MarkerBuilder = (info: MarkerInfo) => string;
 
 /**
+ * The version of the marker format itself, carried **in band** in every marker.
+ *
+ * The marker is the one part of smelt a *model* sees, and it goes into prompts.
+ * Changing its shape changes model behaviour downstream and shows up as worse output
+ * with no error anywhere — this project's signature failure mode, shipped as a patch
+ * release. So the wire surface is frozen from 0.1 and treated as 1.0
+ * (`CONTRIBUTING.md` § "Two promises, not one"), and a future format is *additive and
+ * identifiable*: `smelt/v2` markers can coexist with `smelt/v1` ones, and a consumer
+ * parsing markers can tell which it is holding. A format that changed silently would
+ * be a substitution; this makes it a declaration.
+ *
+ * `test/guards/marker-format.test.ts` pins the rendered marker per version and fails if
+ * the format moves without the version moving.
+ */
+export const MARKER_FORMAT_VERSION = 'v1';
+
+/**
  * The default marker.
  *
  * Its shape is the user-facing form of Laws 2 and 3, in one line the model reads:
- * *what was removed* (the explanation), *how much* (the byte count), and *how to get it
- * back* (the hash). Anything that cannot fill in all three is not allowed to be an
- * elision.
+ * *which format this is* (the version), *what was removed* (the explanation), *how
+ * much* (the byte count), and *how to get it back* (the hash). Anything that cannot
+ * fill in all of those is not allowed to be an elision.
  *
  * `<<…>>` rather than a Unicode bracket because it survives every tokenizer, terminal,
  * and diff tool without becoming three tokens of nothing.
  */
 export const defaultMarker: MarkerBuilder = ({ explanation, bytes, hash }) =>
-  `<<smelt: ${explanation} (${bytes}B) — retrieve("${hash}")>>`;
+  `<<smelt/${MARKER_FORMAT_VERSION}: ${explanation} (${String(bytes)}B) — retrieve("${hash}")>>`;
 
 export interface ApplyOptions {
   readonly marker?: MarkerBuilder;
+  /** A consumer-supplied counter. See {@link Measure}; the budget stays in bytes. */
+  readonly measure?: Measure;
 }
 
 /**
@@ -102,13 +128,26 @@ export function applyPlan(
   pieces.push(tail);
   outputBytes += tail.length;
 
+  const output = Buffer.concat(pieces).toString('utf8');
+  const measure = options.measure;
+
   return {
-    text: Buffer.concat(pieces).toString('utf8'),
+    text: output,
     inputBytes: input.length,
     outputBytes,
     planner: plan.planner,
     language: plan.language,
     elisions: applied,
+    ...(measure === undefined
+      ? {}
+      : {
+          measured: {
+            measure: measure.id,
+            unit: measure.unit,
+            input: measure.count(text),
+            output: measure.count(output),
+          },
+        }),
   };
 }
 

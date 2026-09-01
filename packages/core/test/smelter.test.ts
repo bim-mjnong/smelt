@@ -113,6 +113,6 @@ describe('the default marker', () => {
         rule: 'r',
         explanation: 'collapsed 3 sibling functions',
       }),
-    ).toBe('<<smelt: collapsed 3 sibling functions (412B) — retrieve("abcdef0123456789")>>');
+    ).toBe('<<smelt/v1: collapsed 3 sibling functions (412B) — retrieve("abcdef0123456789")>>');
   });
 });

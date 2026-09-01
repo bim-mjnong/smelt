@@ -81,6 +81,45 @@ export interface AppliedElision {
   readonly marker: string;
 }
 
+/**
+ * A consumer-supplied counter, so a caller who bills in tokens can *see* tokens.
+ *
+ * Budgets in smelt's core are UTF-8 bytes, permanently — bytes are the only unit that
+ * is computable locally for every model, and they mean the same thing in five years.
+ * See `docs/HANDOFF.md` § "Decision 1". This hook does not change that: it adds a
+ * second, labelled number to the result. The plan is still made in bytes.
+ *
+ * Both `id` and `unit` are required, and that is a Law 4 decision rather than
+ * bookkeeping: a token count is meaningless without naming the tokenizer that produced
+ * it. Anthropic's own docs record that Claude 4.7 and later use a newer tokenizer where
+ * the same text yields roughly 30% more tokens than on earlier models — so `1,204
+ * tokens` is not a fact, and `1,204 tokens (claude-4.7/count_tokens)` is.
+ *
+ * **This hook does not relax Law 1.** smelt imports no transport and the guard proves
+ * that about smelt's own modules; it cannot prove it about a function you hand in. A
+ * `count()` that calls an API makes *your* process call an API, from a line in *your*
+ * source — exactly the arrangement {@link RerankStage} already describes. `count` is
+ * synchronous on purpose: local tokenizers are synchronous, and network clients are not.
+ */
+export interface Measure {
+  /** Names the counter, e.g. `'tiktoken/o200k_base'` or `'claude-4.7/count_tokens'`. */
+  readonly id: string;
+  /** The unit `count()` returns, e.g. `'tokens'`. Printed next to the number. */
+  readonly unit: string;
+  /** Local, synchronous count over the whole string. */
+  count(text: string): number;
+}
+
+/** A second size for a result, in someone else's unit, with the counter named. */
+export interface MeasuredSize {
+  /** {@link Measure.id} of the counter that produced these numbers. */
+  readonly measure: string;
+  /** {@link Measure.unit}. */
+  readonly unit: string;
+  readonly input: number;
+  readonly output: number;
+}
+
 /** The result of smelting one blob of text. */
 export interface SmeltResult {
   readonly text: string;
@@ -89,6 +128,8 @@ export interface SmeltResult {
   readonly planner: string;
   readonly language: DetectedLanguage;
   readonly elisions: readonly AppliedElision[];
+  /** Present only when the caller supplied a {@link Measure}. Never invented. */
+  readonly measured?: MeasuredSize;
 }
 
 /** Options for a single `smelt()` call. */
@@ -144,6 +185,20 @@ export interface RetrieveStats {
    * not measured. Rising across a workload is the signal.
    */
   readonly expansionRate: number;
+  /**
+   * The one degenerate outcome smelt is willing to name: **every distinct blob it hid
+   * was asked for again.**
+   *
+   * smelt ships no expansion-rate threshold, because a threshold is a policy claim it
+   * has no basis for and the right rate depends on how aggressive a budget the caller
+   * chose — and a library printing warnings into someone else's process is bad manners.
+   * This is not a threshold. At `uniqueRetrieved === elisionsStored` the elision
+   * achieved nothing and cost a round trip: an arithmetic fact, not a preference. What
+   * to do about it is the caller's call.
+   *
+   * `false` for an empty store — nothing was hidden, so nothing was defeated.
+   */
+  readonly allElisionsRetrieved: boolean;
 }
 
 /**

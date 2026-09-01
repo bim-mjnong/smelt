@@ -1,0 +1,104 @@
+import { describe, expect, it } from 'vitest';
+
+import { defaultMarker, MARKER_FORMAT_VERSION } from '@guard/apply';
+
+/**
+ * MARKER-FORMAT GUARD — the wire surface a *model* sees.
+ *
+ * The marker is not an API. It goes into prompts. Changing its shape changes model
+ * behaviour downstream, and that manifests as **worse output with no error anywhere** —
+ * this project's signature failure mode, shipped as a version bump. So the marker
+ * format is frozen from 0.1 and treated as 1.0 (`CONTRIBUTING.md` § "Two promises, not
+ * one"), while the TypeScript API stays `0.x` and may move.
+ *
+ * This guard is a drift guard of the shape the repo prefers: one truth (the rendered
+ * marker) written in two places (the code, and the frozen table below), with a check
+ * that they agree. It closes three holes:
+ *
+ *  1. *Silent format change* — the template moves, the version does not. The
+ *     fingerprint stops matching.
+ *  2. *Unknown version* — the version moves to something the table does not know. The
+ *     lookup fails, so a new format is **additive**: a new row, never an edit.
+ *  3. *Silent substitution* — two versions rendering the same string, so a consumer
+ *     could not tell which format it is holding. Every frozen string must be distinct
+ *     and must carry its own version in band.
+ *
+ * The fixture is fixed on purpose: the same inputs must render the same bytes forever
+ * for a given version.
+ */
+
+const FIXTURE = {
+  hash: 'abcdef0123456789',
+  bytes: 412,
+  rule: 'sibling-collapse',
+  explanation: 'collapsed 3 sibling functions',
+} as const;
+
+/**
+ * The frozen rendering of {@link FIXTURE}, per marker-format version.
+ *
+ * **Never edit a row.** A format change adds a row and bumps
+ * `MARKER_FORMAT_VERSION`; the old row stays, because old markers stay valid in
+ * transcripts, caches and other people's prompts. Editing a row in place is the silent
+ * substitution this guard exists to prevent.
+ */
+const FROZEN: Readonly<Record<string, string>> = {
+  v1: '<<smelt/v1: collapsed 3 sibling functions (412B) — retrieve("abcdef0123456789")>>',
+};
+
+describe('the marker format is frozen, and versioned in band', () => {
+  it('renders exactly the frozen string for its declared version', () => {
+    const expected = FROZEN[MARKER_FORMAT_VERSION];
+    expect(
+      expected,
+      `MARKER_FORMAT_VERSION is "${MARKER_FORMAT_VERSION}", which this table does not ` +
+        `know. A new marker format is additive: add a row to FROZEN with the exact ` +
+        `rendering, and leave the existing rows alone. Read the note above first — the ` +
+        `marker goes into prompts, so changing it changes model behaviour with no error ` +
+        `anywhere.`,
+    ).toBeDefined();
+    expect(
+      defaultMarker(FIXTURE),
+      `the marker format changed without its version changing. Either revert the format, ` +
+        `or bump MARKER_FORMAT_VERSION and add a FROZEN row — a format that changes ` +
+        `silently is a substitution, not a release.`,
+    ).toBe(expected);
+  });
+
+  it('carries its own version inside the marker, so a reader can tell which it has', () => {
+    const marker = defaultMarker(FIXTURE);
+    expect(marker).toContain(`smelt/${MARKER_FORMAT_VERSION}`);
+    expect(marker.startsWith('<<smelt/')).toBe(true);
+    expect(marker.endsWith('>>')).toBe(true);
+  });
+
+  it('stays machine-readable: version, byte count and hash all parse back out', () => {
+    const marker = defaultMarker(FIXTURE);
+    const parsed =
+      /^<<smelt\/(?<version>[^:]+): (?<explanation>.+) \((?<bytes>\d+)B\) — retrieve\("(?<hash>[0-9a-f]+)"\)>>$/.exec(
+        marker,
+      );
+    expect(parsed, `the marker no longer parses: ${marker}`).not.toBeNull();
+    expect(parsed?.groups?.['version']).toBe(MARKER_FORMAT_VERSION);
+    expect(parsed?.groups?.['explanation']).toBe(FIXTURE.explanation);
+    expect(parsed?.groups?.['bytes']).toBe(String(FIXTURE.bytes));
+    expect(parsed?.groups?.['hash']).toBe(FIXTURE.hash);
+  });
+
+  it('never lets two versions render the same bytes', () => {
+    const renderings = Object.values(FROZEN);
+    expect(new Set(renderings).size).toBe(renderings.length);
+    for (const [version, rendering] of Object.entries(FROZEN)) {
+      expect(rendering, `the ${version} row does not identify itself`).toContain(
+        `smelt/${version}`,
+      );
+    }
+  });
+
+  it('states every fact Laws 2 and 3 require, in the one line the model reads', () => {
+    const marker = defaultMarker(FIXTURE);
+    expect(marker).toContain(FIXTURE.explanation); // Law 2: what went
+    expect(marker).toContain(`${String(FIXTURE.bytes)}B`); // how much
+    expect(marker).toContain(FIXTURE.hash); // Law 3: how to get it back
+  });
+});
