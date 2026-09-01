@@ -71,6 +71,29 @@ export type {
   PromptTool,
 } from './cache/prefix.ts';
 export { MARKER_LINE_COMMENT_LEADERS, markerForLanguage } from './apply.ts';
+export {
+  buildRepoMap,
+  DEFAULT_REPO_IGNORE,
+  REPO_MAP_CACHE_CORRUPT_RULE,
+  REPO_MAP_ID,
+  REPO_MAP_PATH_ONLY_RULE,
+  REPO_MAP_RANKED_RULE,
+  REPO_MAP_UNREFERENCED_RULE,
+} from './repomap/map.ts';
+export type {
+  RepoMap,
+  RepoMapCacheCounts,
+  RepoMapEntry,
+  RepoMapOptions,
+  RepoMapPathEntry,
+  RepoMapReason,
+  RepoMapWarning,
+} from './repomap/map.ts';
+export { PAGERANK_DAMPING, PAGERANK_ITERATIONS, rankDefinitions } from './repomap/rank.ts';
+export type { FileTagsEntry, RankedDefinition } from './repomap/rank.ts';
+export { extractTags } from './repomap/tags.ts';
+export type { DefinitionTag, FileTags, ReferenceTag } from './repomap/tags.ts';
+export { TAGS_CACHE_FORMAT, TAGS_CACHE_VERSION, tagsCacheKey } from './repomap/cache.ts';
 
 /**
  * Which planner a smelter uses. `'structural'` parses TypeScript, TSX, Rust, Python

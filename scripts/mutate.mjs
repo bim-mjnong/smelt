@@ -54,6 +54,7 @@ const GUARDS = [
   'test/guards/cache-hygiene.test.ts',
   'test/guards/structural.test.ts',
   'test/guards/bench-results.test.ts',
+  'test/guards/repo-map.test.ts',
 ];
 
 /**
@@ -363,6 +364,47 @@ const MUTATIONS = [
     find: '  const buildMarker = options.marker ?? markerForLanguage(plan.language);',
     replace: '  const buildMarker = options.marker ?? defaultMarker;',
     why: 'bare applyPlan reverted to the bare marker — the documented planStructural → applyPlan composition would land `<<smelt/v1…>>` in a python survivor and break its parse',
+  },
+  {
+    id: 'repomap-budget-unenforced',
+    guard: 'test/guards/repo-map.test.ts',
+    file: 'repomap/map.ts',
+    find: '    if (bytes + lineBytes > budgetBytes) return false;',
+    replace: '    if (false) return false;',
+    why: 'the repo-map byte budget ignored — a map that overruns the budget it was handed breaks the planner contract silently',
+  },
+  {
+    id: 'repomap-tiebreak-dropped',
+    guard: 'test/guards/repo-map.test.ts',
+    file: 'repomap/rank.ts',
+    find: '  if (a.name !== b.name) return a.name < b.name ? -1 : 1;',
+    replace: '  // name tie-break removed',
+    why: 'the stable path+name tie-break loses its name leg — equal-rank symbols fall back to incidental document order, and byte-for-byte determinism quietly dies',
+  },
+  {
+    id: 'repomap-cache-key-ignores-content',
+    guard: 'test/guards/repo-map.test.ts',
+    file: 'repomap/cache.ts',
+    find: '  return contentHash(`${TAGS_CACHE_FORMAT}/${String(TAGS_CACHE_VERSION)}\\0${language}\\0${content}`);',
+    replace:
+      '  return contentHash(`${TAGS_CACHE_FORMAT}/${String(TAGS_CACHE_VERSION)}\\0${language}`);',
+    why: 'the cache key no longer derived from file content — an edited file is answered with stale tags, the exact staleness a content-hash key exists to make impossible',
+  },
+  {
+    id: 'repomap-corrupt-cache-trusted',
+    guard: 'test/guards/repo-map.test.ts',
+    file: 'repomap/cache.ts',
+    find: "    if (tags === undefined) {\n      this.#discard(key);\n      return 'corrupt';\n    }",
+    replace: '    if (tags === undefined) {\n      return { defs: [], refs: [] };\n    }',
+    why: 'a corrupt cache entry quietly trusted as empty tags instead of discarded loudly — symbols vanish from the map with no warning anywhere',
+  },
+  {
+    id: 'repomap-refsout-per-definer',
+    guard: 'test/guards/repo-map.test.ts',
+    file: 'repomap/rank.ts',
+    find: '    refsOut: refsOutByFile.get(def.path) ?? 0,',
+    replace: '    refsOut: outWeight.get(def.path) ?? 0,',
+    why: 'refsOut reported from the PageRank edge denominator, which grows once per definer file — a reference to a name two files define counts double, and every Law 2 explanation states a number nothing measured',
   },
 ];
 
