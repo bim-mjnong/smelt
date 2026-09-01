@@ -236,6 +236,11 @@ describe('Law 3 — every structural elision is reversible', () => {
         ...(focus === undefined ? {} : { focus }),
       });
       expect(result.planner).toBe('structural/v1');
+      // Without this, a planner change that elides nothing keeps every round trip
+      // trivially green while the coverage claim above goes false.
+      expect(result.elisions.length, 'nothing elided — this round trip is vacuous').toBeGreaterThan(
+        0,
+      );
       expect(smelter.reconstruct(result)).toBe(text);
     });
   }

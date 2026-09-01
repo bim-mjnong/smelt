@@ -1,7 +1,9 @@
 import { Parser } from 'web-tree-sitter';
 import type { Node, Tree } from 'web-tree-sitter';
 
+import { defaultMarker } from '../apply.ts';
 import { GrammarUnavailableError } from '../errors.ts';
+import { HASH_LENGTH } from '../hash.ts';
 import type { ElisionPlan, PlanInput, PlannedElision, Planner } from '../types.ts';
 
 import { loadGrammar } from './grammar.ts';
@@ -17,11 +19,17 @@ const STRUCTURAL_LANGUAGES = ['typescript', 'tsx'] as const;
 type StructuralLanguage = (typeof STRUCTURAL_LANGUAGES)[number];
 
 /**
- * Rough cost of a marker, in bytes — the same profitability arithmetic the lexical
- * planner uses: cutting fewer bytes than the marker itself costs makes the output
- * bigger, and a context optimizer that grows its input is worse than none.
+ * Every elision this planner produces carries this rule id, and the profitability
+ * check below renders the marker that rule would earn — so the two must not drift.
  */
-const MARKER_BYTE_ESTIMATE = 64;
+const SIBLING_COLLAPSE_RULE = 'sibling-collapse';
+
+/**
+ * A stand-in hash of the real length, so the profitability check can render the
+ * marker a cut would earn before the cut exists. Marker cost depends on the hash's
+ * *length*, never its value.
+ */
+const PLACEHOLDER_HASH = '0'.repeat(HASH_LENGTH);
 
 export interface StructuralPlannerOptions {
   /**
@@ -160,11 +168,25 @@ function planFromTree(
     if (group.length < minSiblings) return;
     const start = toByte.get(group[0]!.start)!;
     const end = toByte.get(group[group.length - 1]!.end)!;
-    // Profitability: a marker that costs more than it removes grows the output.
-    if (end - start < MARKER_BYTE_ESTIMATE * 2) return;
+    const cutBytes = end - start;
+    const explanation = explain(group);
+    // Profitability, measured rather than estimated: render the exact marker this cut
+    // would earn — the explanation's length varies with kind diversity, so a fixed
+    // estimate can pass a cut whose marker is bigger than what it removes, and a
+    // marker that costs more than it removes grows the output.
+    const markerBytes = Buffer.byteLength(
+      defaultMarker({
+        hash: PLACEHOLDER_HASH,
+        bytes: cutBytes,
+        rule: SIBLING_COLLAPSE_RULE,
+        explanation,
+      }),
+      'utf8',
+    );
+    if (cutBytes <= markerBytes) return;
     elisions.push({
       range: { start, end },
-      reason: { rule: 'sibling-collapse', explanation: explain(group) },
+      reason: { rule: SIBLING_COLLAPSE_RULE, explanation },
     });
   };
 
@@ -259,7 +281,9 @@ function matchUnits(
  * Law 2, for this rule: the explanation names the *kind* and the *count*, read off the
  * parse tree — `collapsed 3 sibling functions` — never a line count as the claim. A
  * mixed run says what it mixed: `collapsed 4 sibling declarations (3 functions,
- * 1 class)`.
+ * 1 class)` — and when the run holds anything that is not a declaration (a statement,
+ * a floating comment, an unparsed region), the heading says `nodes`, because calling
+ * a parse error a declaration would be the marker lying about the tree.
  */
 function explain(group: readonly Unit[]): string {
   const counts = new Map<string, number>();
@@ -273,8 +297,18 @@ function explain(group: readonly Unit[]): string {
   const parts = [...counts.entries()].map(
     ([kind, count]) => `${String(count)} ${countNoun(kind, count)}`,
   );
-  return `collapsed ${String(total)} sibling declarations (${parts.join(', ')})`;
+  const heading = [...counts.keys()].every((kind) => !NON_DECLARATION_KINDS.has(kind))
+    ? 'declarations'
+    : 'nodes';
+  return `collapsed ${String(total)} sibling ${heading} (${parts.join(', ')})`;
 }
+
+/** The kind labels that are not declarations, so a mixed heading never overclaims. */
+const NON_DECLARATION_KINDS: ReadonlySet<string> = new Set([
+  'statement',
+  'comment',
+  'unparsed region',
+]);
 
 function countNoun(kind: string, count: number): string {
   if (count === 1) return kind;
@@ -283,7 +317,10 @@ function countNoun(kind: string, count: number): string {
 
 /**
  * Human words for the tree-sitter node types this planner expects at the top level of
- * a TypeScript or TSX file. Anything unmapped is a `'declaration'` — honest, if vague.
+ * a TypeScript or TSX file. What the map does not name, {@link kindOf} still labels
+ * honestly: an `ERROR` node is an `'unparsed region'`, any other statement kind is a
+ * `'statement'`, and only what remains is called a `'declaration'` — a marker that
+ * calls a parse error or a log line a declaration would be lying about the tree.
  */
 const KIND_LABELS: Readonly<Record<string, string>> = {
   function_declaration: 'function',
@@ -314,7 +351,11 @@ function kindOf(node: Node): string {
     }
     return 'export';
   }
-  return KIND_LABELS[node.type] ?? 'declaration';
+  const label = KIND_LABELS[node.type];
+  if (label !== undefined) return label;
+  if (node.type === 'ERROR') return 'unparsed region';
+  if (node.type.endsWith('_statement') || node.type === 'statement_block') return 'statement';
+  return 'declaration';
 }
 
 /**

@@ -226,6 +226,37 @@ const MUTATIONS = [
     replace: '      range: { start, end: end - 1 },',
     why: 'an elision range that stops one byte inside the last collapsed declaration — output that lies about where the parse tree was cut',
   },
+  {
+    id: 'structural-grammar-load-fallback',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: '  const grammar = await loadGrammar(language);',
+    replace:
+      '  let grammar;\n' +
+      '  try {\n' +
+      '    grammar = await loadGrammar(language);\n' +
+      '  } catch {\n' +
+      "    const { planLexical } = await import('./lexical.ts');\n" +
+      '    return { ...planLexical(input), planner: STRUCTURAL_PLANNER_ID };\n' +
+      '  }',
+    why: 'a failed grammar load quietly answered with line windows labelled structural/v1 — the exact undetectable fallback the no-fallback rule forbids',
+  },
+  {
+    id: 'structural-error-node-called-declaration',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: "  if (node.type === 'ERROR') return 'unparsed region';",
+    replace: "  if (node.type === 'ERROR') return 'declaration';",
+    why: 'an ERROR node labelled a declaration — the marker telling the model that broken text was code that parsed',
+  },
+  {
+    id: 'structural-marker-cost-guessed',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: '    if (cutBytes <= markerBytes) return;',
+    replace: '    if (cutBytes < 128) return;',
+    why: 'the profitability check reverted to a guessed constant — a mixed-kind marker can cost more than the cut it replaces, and the output grows',
+  },
 ];
 
 function runGuard(guard, guardSrc, guardRoot = corePackage) {

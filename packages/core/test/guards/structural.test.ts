@@ -1,6 +1,6 @@
 import { Parser } from 'web-tree-sitter';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { applyPlan } from '@guard/apply';
 import { GrammarUnavailableError } from '@guard/errors';
@@ -15,28 +15,36 @@ import {
   FUNCTIONS_TS,
   LONG_DOC_COMMENT,
   LONG_DOC_TS,
+  MIXED_TSX,
 } from '../structural-fixtures.ts';
 
 /**
  * STRUCTURAL-PLANNER GUARD — the guarantees Slice 2 claims.
  *
- * Four properties, each of which could quietly rot into something that still *looks*
+ * Six properties, each of which could quietly rot into something that still *looks*
  * structural from the outside:
  *
  *  1. **The explanation names kind and count from the parse tree** — `collapsed 3
  *     sibling functions`, never a line count as the claim. Lose this and Law 2
  *     degrades into the `[...truncated...]` it exists to replace.
- *  2. **A kept declaration keeps its signature line and attached doc comment,
+ *  2. **The labels are honest for text that is not clean code.** A labeled_statement
+ *     is a statement and an ERROR node is an unparsed region — never a
+ *     "declaration", which would tell the model broken text was code that parsed.
+ *  3. **A kept declaration keeps its signature line and attached doc comment,
  *     always.** The fixture's doc comment is forty lines long, because the cheap bug
  *     is an attachment heuristic that silently hands a big comment to the collapse.
- *  3. **Ranges never cross a parse-node boundary.** Every elision endpoint must be a
+ *  4. **Ranges never cross a parse-node boundary.** Every elision endpoint must be a
  *     top-level node boundary of the real parse — a range that cuts into a
  *     declaration produces output that lies about the code's structure. (Node
  *     boundaries are character boundaries, so this also covers multi-byte safety,
  *     which the reversibility guard asserts separately.)
- *  4. **No silent fallback.** A grammar this planner cannot load, or a language it
- *     has not mapped, is an exception — never lexical output labelled
- *     `structural/v1`, which would be undetectable from the outside.
+ *  5. **No silent fallback, on either path.** A language this planner has not mapped
+ *     *and* a mapped language whose grammar fails to load are both exceptions —
+ *     never lexical output labelled `structural/v1`, which would be undetectable
+ *     from the outside.
+ *  6. **An elision never costs more than it removes.** The profitability check
+ *     renders the actual marker, because a mixed-kind explanation can outgrow a
+ *     small cut — and an optimizer that grows its input is worse than none.
  *
  * Plus the determinism claim: same file, same focus, byte-identical plan — asserted
  * by running it, not assumed. Mutations for all of these live in `scripts/mutate.mjs`;
@@ -98,16 +106,17 @@ describe('Slice 2 — the structural planner keeps its claims', () => {
   });
 
   it('never lets a range cross a top-level parse-node boundary', async () => {
-    for (const [text, focus] of [
-      [FUNCTIONS_TS, ['handleRequest']],
-      [BOUNDARY_TS, ['greetTarget']],
+    for (const [text, focus, language] of [
+      [FUNCTIONS_TS, ['handleRequest'], 'typescript'],
+      [BOUNDARY_TS, ['greetTarget'], 'typescript'],
+      [MIXED_TSX, ['Toolbar'], 'tsx'],
     ] as const) {
-      const plan = await structuralPlan(text, focus);
+      const plan = await structuralPlan(text, focus, language);
       expect(plan.elisions.length, 'no elisions — boundary check is vacuous').toBeGreaterThan(0);
 
       // An independent parse, and an independent code-unit → byte conversion: the
       // boundaries come from the tree itself, not from the planner under test.
-      const grammar = await loadGrammar('typescript');
+      const grammar = await loadGrammar(language);
       const parser = new Parser();
       parser.setLanguage(grammar);
       const tree = parser.parse(text);
@@ -142,6 +151,80 @@ describe('Slice 2 — the structural planner keeps its claims', () => {
     await expect(
       smelter.smelt('just some prose, no language at all', { budgetBytes: 100 }),
     ).rejects.toThrow(GrammarUnavailableError);
+  });
+
+  it('rejects when the grammar for a supported language cannot load — never lexical output', async () => {
+    // The other half of "no silent fallback": the language is mapped, but the grammar
+    // itself will not load — a corrupted or missing wasm in the field. The failure must
+    // surface as the loader's own error, never as line-window output labelled
+    // structural/v1, which is undetectable from the outside.
+    vi.resetModules();
+    vi.doMock('@guard/plan/grammar', () => ({
+      loadGrammar: () =>
+        Promise.reject(
+          new GrammarUnavailableError('smelt: induced grammar-load failure, for this guard'),
+        ),
+    }));
+    try {
+      const fresh =
+        (await import('@guard/plan/structural')) as typeof import('@guard/plan/structural');
+      await expect(
+        fresh.planStructural(inputFor(FUNCTIONS_TS, ['handleRequest'], 'typescript')),
+      ).rejects.toThrow(GrammarUnavailableError);
+    } finally {
+      vi.doUnmock('@guard/plan/grammar');
+      vi.resetModules();
+    }
+  });
+
+  it('labels statements and unparsed regions honestly, never as declarations', async () => {
+    // Log lines parsed as TypeScript are labeled_statement nodes; garbage is ERROR and
+    // empty_statement nodes. A marker that calls either a "declaration" tells the model
+    // the text was code that parsed — the parse tree says otherwise, and Law 2 says the
+    // explanation reads off the tree.
+    const log = Array.from({ length: 6 }, (_, i) => `line ${String(i)}: routine chatter here`).join(
+      '\n',
+    );
+    const logPlan = await structuralPlan(log, []);
+    expect(logPlan.elisions.length, 'log input planned nothing — vacuous').toBeGreaterThan(0);
+    for (const { reason } of logPlan.elisions) {
+      expect(reason.explanation).toMatch(/sibling statements$/);
+      expect(reason.explanation).not.toContain('declaration');
+    }
+
+    const garbage = Array.from({ length: 5 }, () => '%%%% not typescript at all ???!!! ;;; @@@')
+      .join('\n')
+      .concat('\n');
+    const garbagePlan = await structuralPlan(garbage, []);
+    expect(garbagePlan.elisions.length, 'garbage input planned nothing — vacuous').toBeGreaterThan(
+      0,
+    );
+    for (const { reason } of garbagePlan.elisions) {
+      expect(reason.explanation).not.toContain('declaration');
+      expect(reason.explanation).toContain('unparsed region');
+    }
+  });
+
+  it('never plans an elision whose marker costs more bytes than it removes', async () => {
+    // Eight tiny declarations of many kinds: the run is real, but the mixed-kind
+    // explanation makes the marker bigger than the cut. The honest move is to plan
+    // nothing — an optimizer that grows its input is worse than none.
+    const tiny = [
+      'type Alias = 1;',
+      'enum Level {}',
+      'interface Cfg { x: 1 }',
+      'class Box {}',
+      'const nine = 1;',
+      'declare const flag: 1;',
+      'function noop() {}',
+      'let extra = 2;',
+    ].join('\n');
+    const plan = await structuralPlan(tiny, []);
+    const result = applyPlan(tiny, plan, new MemoryElisionStore());
+    expect(
+      result.outputBytes,
+      'the output grew: a marker cost more than the bytes it removed',
+    ).toBeLessThanOrEqual(result.inputBytes);
   });
 
   it('labels every plan it does produce as its own', async () => {
