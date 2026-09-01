@@ -1,0 +1,66 @@
+name: ci
+
+# smelt is a public repo with a tiny dependency tree, so real CI is cheap and worth
+# having. Note what runs here and what does not: `pnpm verify` is the whole gate, and it
+# ends with `pnpm mutate` — the mutation suite that proves each guard can go red. A
+# green tick therefore means "the checks pass *and* the checks can still fail", which
+# are two different claims.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20.19', '22.12', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # format:check, lint, typecheck, build, test, mutate — one verdict.
+      - run: pnpm verify
+
+  fresh-clone:
+    name: fresh clone (tracked files only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      # Builds from `git archive` output — tracked files only. This catches the class of
+      # bug where the repo works because of something that was never committed: a
+      # generated file, a stray local grammar, an untracked config. Someone cloning this
+      # repo gets exactly what this job gets.
+      - run: bash scripts/check-fresh-clone.sh
