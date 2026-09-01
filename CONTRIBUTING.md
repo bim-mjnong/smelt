@@ -103,6 +103,7 @@ $ pnpm mutate
   PASS  test/guards/expansion-counter.test.ts
   PASS  test/guards/marker-format.test.ts
   PASS  test/guards/third-party.test.ts
+  PASS  test/guards/cache-hygiene.test.ts
 
 === mutations: every guard must go red ===
 
@@ -111,7 +112,7 @@ $ pnpm mutate
            guard:    test/guards/no-network.test.ts
            red on:   AssertionError: Law 1 violation: smelt v1 makes zero network calls: expected [ Array(1) ] to deeply equal []
   …
-=== 12/12 mutations caught across 5 guards ===
+=== 14/14 mutations caught across 6 guards ===
 ```
 
 **Adding a guard? The convention is three steps:**
@@ -135,7 +136,7 @@ artefact mutations copy the one file into a scratch root. A runner that edited t
 files and then crashed would leave the repository broken, which is the opposite of what a
 safe-to-fail check is for.
 
-The five guards today, and what each one would let through if it stopped working:
+The six guards today, and what each one would let through if it stopped working:
 
 | Guard                              | If it silently stopped working                                           |
 | ---------------------------------- | ------------------------------------------------------------------------ |
@@ -144,6 +145,7 @@ The five guards today, and what each one would let through if it stopped working
 | `guards/expansion-counter.test.ts` | the expansion rate pinned at a flattering zero                           |
 | `guards/marker-format.test.ts`     | the marker changing shape in everyone's prompts, with no error anywhere  |
 | `guards/third-party.test.ts`       | a bundled grammar being redistributed with no licence notice             |
+| `guards/cache-hygiene.test.ts`     | cache hygiene quietly rewriting prompts, or a hit-rate claim reappearing |
 
 ## Two promises, not one
 
