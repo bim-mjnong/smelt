@@ -8,8 +8,10 @@
 code. It says what smelt is, why each of its four laws exists, exactly what is scaffolded
 versus what is yours to build, and the order to build it in.
 
-**Status:** the spine is real and green. The two planners that make smelt interesting are
-stubs that throw. Nothing has been published to npm.
+**Status:** the spine is real and green, and the CLI (Slice 1) ships. The structural
+planner — the thing smelt is actually for — is still a stub that throws. Nothing has been
+published to npm; publishing is a founder action. The eight questions this document used
+to end with are answered, in "Decisions the founder has made" below.
 
 ---
 
@@ -127,19 +129,23 @@ Everything below exists, is typechecked, linted, and covered. `pnpm verify` is g
 
 ### Real implementations
 
-| File                                | What it does                                                                                                                                                                               |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `packages/core/src/types.ts`        | The vocabulary: `Planner`, `ElisionPlan`, `AppliedElision`, `ElisionStore`, `RetrieveStats`, `RerankStage`, `DistillStage`. Read this first — the doc comments carry the reasoning.        |
-| `packages/core/src/errors.ts`       | Every error is a `SmeltError`, so callers can tell "the library said no" from "something broke".                                                                                           |
-| `packages/core/src/hash.ts`         | 16 hex chars of sha256. Short because the hash goes in every marker and the model pays for it.                                                                                             |
-| `packages/core/src/detect.ts`       | Extension → language. `'unknown'` is a first-class answer, not a failure.                                                                                                                  |
-| `packages/core/src/store.ts`        | `MemoryElisionStore`: content-addressed, dedupes, refuses hash collisions, counts retrievals.                                                                                              |
-| `packages/core/src/retrieve.ts`     | `createRetrieveTool()` — the `smelt_retrieve` tool a consumer hands its model. Not MCP- or SDK-specific on purpose.                                                                        |
-| `packages/core/src/apply.ts`        | `applyPlan()` (the only function that removes anything) and `reconstruct()` (Law 3 as an equation). Contains no judgement at all.                                                          |
-| `packages/core/src/plan/lexical.ts` | The lexical planner: focus-window and head-tail rules, a context ladder under budget pressure, profitability check so a marker never costs more than the lines it replaces. Deterministic. |
-| `packages/core/src/plan/grammar.ts` | Loads a prebuilt grammar `.wasm` off disk, through `assertLocalResource`. Cached.                                                                                                          |
-| `packages/core/src/net/policy.ts`   | Law 1, written once: forbidden transports, forbidden globals, **and** the permitted sets — so the guard is a partition, not an allowlist.                                                  |
-| `packages/core/src/index.ts`        | `createSmelter()` and the public surface.                                                                                                                                                  |
+| File                                | What it does                                                                                                                                                                                   |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core/src/types.ts`        | The vocabulary: `Planner`, `ElisionPlan`, `AppliedElision`, `ElisionStore`, `RetrieveStats`, `Measure`, `RerankStage`, `DistillStage`. Read this first — the doc comments carry the reasoning. |
+| `packages/core/src/errors.ts`       | Every error is a `SmeltError`, so callers can tell "the library said no" from "something broke".                                                                                               |
+| `packages/core/src/hash.ts`         | 16 hex chars of sha256. Short because the hash goes in every marker and the model pays for it.                                                                                                 |
+| `packages/core/src/detect.ts`       | Extension → language. `'unknown'` is a first-class answer, not a failure.                                                                                                                      |
+| `packages/core/src/store.ts`        | `MemoryElisionStore`: content-addressed, dedupes, refuses hash collisions, counts retrievals.                                                                                                  |
+| `packages/core/src/retrieve.ts`     | `createRetrieveTool()` — the `smelt_retrieve` tool a consumer hands its model. Not MCP- or SDK-specific on purpose.                                                                            |
+| `packages/core/src/apply.ts`        | `applyPlan()` (the only function that removes anything), `reconstruct()` (Law 3 as an equation), and `MARKER_FORMAT_VERSION` — the wire surface, frozen. No judgement at all.                  |
+| `packages/core/src/plan/lexical.ts` | The lexical planner: focus-window and head-tail rules, a context ladder under budget pressure, profitability check so a marker never costs more than the lines it replaces. Deterministic.     |
+| `packages/core/src/plan/grammar.ts` | Loads a prebuilt grammar `.wasm` off disk, through `assertLocalResource`. Bundled copy first, `tree-sitter-wasms` as the source-checkout fallback. Cached.                                     |
+| `packages/core/src/net/policy.ts`   | Law 1, written once: forbidden transports, forbidden globals, **and** the permitted sets — so the guard is a partition, not an allowlist.                                                      |
+| `packages/core/src/cli/args.ts`     | `node:util.parseArgs`, zero new dependencies. `--budget` is required; its absence is a usage error, and so are `0`, `-1` and `4kb`. Also the help text.                                        |
+| `packages/core/src/cli/report.ts`   | The stderr report. Every total is read off the `SmeltResult`: two pieces of code counting the same bytes is how a report ends up disagreeing with its own library.                             |
+| `packages/core/src/cli/run.ts`      | The CLI as a function returning an exit code, so it runs in-process in tests. The `--json` envelope and the `--reconstruct` round trip live here.                                              |
+| `packages/core/src/cli/bin.ts`      | The `smelt` binary. Owns only what cannot be tested without a real process: the shebang, stdin on fd 0, the exit code.                                                                         |
+| `packages/core/src/index.ts`        | `createSmelter()` and the public surface.                                                                                                                                                      |
 
 ### Stubs that throw (by design — read `CONTRIBUTING.md` § "A stub throws")
 
@@ -150,19 +156,24 @@ Everything below exists, is typechecked, linted, and covered. `pnpm verify` is g
 
 ### The honesty machinery
 
-| File                                                  | What it guards                                                                                                                                   |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `packages/core/test/guards/no-network.test.ts`        | Law 1. Walks the import graph from `index.ts`; classifies every edge; also closes the vacuous-walk, unwalked-file and unvetted-dependency holes. |
-| `packages/core/test/guards/reversibility.test.ts`     | Law 3. `reconstruct(smelt(x)) === x` over multi-byte, CRLF, no-trailing-newline and one-20 kB-line inputs, plus every refusal.                   |
-| `packages/core/test/guards/expansion-counter.test.ts` | The retrieve counter, i.e. the observability half of Law 3.                                                                                      |
-| `packages/core/test/guards/_source.ts`                | Shared source-walking helpers, including the string/comment stripper that stops `net/policy.ts` reporting its own word list.                     |
-| `scripts/mutate.mjs`                                  | **The meta-guard.** Seven mutations across the three guards; each must go red. A survivor is reported as a hole in the guard.                    |
-| `scripts/check-fresh-clone.sh`                        | Installs and verifies from `git archive` output — tracked files only.                                                                            |
-| `.github/workflows/ci.yml`                            | `pnpm verify` on Node 20.19/22.12/24, plus the fresh-clone job.                                                                                  |
+| File                                                  | What it guards                                                                                                                                                                                                                                    |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core/test/guards/no-network.test.ts`        | Law 1. Walks the import graph from **every entrypoint the manifest advertises** (`exports` + `bin`, so the CLI is in the walk); classifies every edge; closes the vacuous-walk, unwalked-file, unvetted-dependency and unwalked-entrypoint holes. |
+| `packages/core/test/guards/reversibility.test.ts`     | Law 3. `reconstruct(smelt(x)) === x` over multi-byte, CRLF, no-trailing-newline and one-20 kB-line inputs, plus every refusal.                                                                                                                    |
+| `packages/core/test/guards/expansion-counter.test.ts` | The retrieve counter and `allElisionsRetrieved`, i.e. the observability half of Law 3.                                                                                                                                                            |
+| `packages/core/test/guards/marker-format.test.ts`     | The wire surface. The rendered marker is pinned per version: the format cannot change without the version changing, and an unknown version fails.                                                                                                 |
+| `packages/core/test/guards/third-party.test.ts`       | Attribution. Reruns the real generator and fails if the committed `THIRD-PARTY.md` differs; also proves the generator refuses an unattributed grammar.                                                                                            |
+| `packages/core/test/guards/_source.ts`                | Shared source-walking helpers: `guardSrcRoot()`, `guardRoot()`, and the string/comment stripper that stops `net/policy.ts` reporting its own word list.                                                                                           |
+| `scripts/mutate.mjs`                                  | **The meta-guard.** Twelve mutations across the five guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                                   |
+| `scripts/bundle-grammars.mjs`                         | Copies the grammars `WASM_BY_LANGUAGE` names into the package, so they ship. Reads the built map rather than keeping a second list.                                                                                                               |
+| `scripts/generate-third-party.mjs`                    | Generates `THIRD-PARTY.md`. The grammar ↔ provenance mapping is a partition: an unattributed grammar throws.                                                                                                                                      |
+| `scripts/check-fresh-clone.sh`                        | Installs and verifies from `git archive` output — tracked files only.                                                                                                                                                                             |
+| `.github/workflows/ci.yml`                            | `pnpm verify` on Node 20.19/22.12/24, plus the fresh-clone job.                                                                                                                                                                                   |
 
 ### Not built at all
 
-- No CLI, no demo, no way to see smelt work without writing a script. **Slice 1.**
+- No structural planning, so smelt cannot yet say "collapsed 3 sibling functions" about
+  real code. **Slice 2 — the reason the project exists.**
 - No benchmark, so no number smelt owns. **Slice 3.**
 - No persistent store, so elisions die with the process. **Slice 5.**
 - No cross-file reasoning: smelt sees one blob at a time. **Slice 7.**
@@ -175,11 +186,12 @@ Each slice is independently shippable and independently useful. Do them in order
 ordering is not arbitrary — Slice 1 is how you _see_ Slice 2, and Slice 3 is what lets
 you claim anything about Slice 2.
 
-### Slice 1 — the demo surface: `smelt` CLI + a report
+### Slice 1 — the demo surface: `smelt` CLI + a report — **SHIPPED**
 
-The smallest thing that makes the library visible. One day of work.
+The smallest thing that makes the library visible.
 
-**Build:** a `bin` on `@smeltjs/core` (or `packages/cli` — see open questions):
+**Shipped as** a `bin` on `@smeltjs/core` (Decision 2), on `node:util.parseArgs`, with no
+new dependencies:
 
 ```sh
 smelt src/server.ts --budget 4000 --focus handleRequest
@@ -188,23 +200,30 @@ smelt --budget 4000 --focus TypeError < build.log
 
 Prints the smelted text to stdout, and a report to stderr so the two can be piped apart:
 
-```
-smelt  src/server.ts  typescript  lexical/v1
-in 41,208 B → out 3,884 B   (-90.6%, 7 elisions)
+A real run, on this repository's own `plan/lexical.ts`:
 
-  rule            lines  bytes  hash              explanation
-  focus-window    412    18,904 a1b2c3d4e5f60718  collapsed 412 lines with no match…
-  …
+```
+smelt  packages/core/src/plan/lexical.ts  typescript  lexical/v1
+in 7,297 B → out 985 B   (-86.5%, 3 elisions)
+
+  rule          lines  bytes  hash              explanation
+  focus-window     53  2,224  84998967370f38bc  collapsed 53 lines with no match for the focu…
+  focus-window      4    253  cb63542ad561a25d  collapsed 4 lines with no match for the focus…
+  focus-window    128  4,155  786640c78c602123  collapsed 128 lines with no match for the foc…
 ```
 
 **Acceptance criteria**
 
-- [ ] `smelt <file>` and stdin both work; `--budget` is required and its absence is an error, not a default.
-- [ ] `--json` emits the `SmeltResult` verbatim, so it can be diffed in tests.
-- [ ] The report totals equal `inputBytes`/`outputBytes` from the result — no separate accounting.
-- [ ] `--reconstruct` reads a `--json` result back and prints the original, proving the round trip from the command line.
-- [ ] Exit code is non-zero when the plan came back over budget, and says so. Never silently over budget.
-- [ ] A screenshot of the built binary running on a real file is in the PR. Not the dev server, not the test output.
+- [x] `smelt <file>` and stdin both work; `--budget` is required and its absence is an error, not a default.
+- [x] `--json` emits the `SmeltResult` verbatim, so it can be diffed in tests. It is nested in a versioned envelope alongside the elided bytes, because a result without its store is not reconstructible; `test/cli.test.ts` asserts the nested result equals the library's own, field for field.
+- [x] The report totals equal `inputBytes`/`outputBytes` from the result — no separate accounting.
+- [x] `--reconstruct` reads a `--json` result back and prints the original, proving the round trip from the command line. It verifies every hash against the bytes it keys and the reconstructed length against the recorded `inputBytes`, so an almost-right round trip fails.
+- [x] Exit code is non-zero when the plan came back over budget, and says so. Never silently over budget. Codes are distinct: 1 over budget, 2 usage, 3 refused, 4 unexpected.
+- [x] A screenshot of the built binary running on a real file is in the PR. Not the dev server, not the test output.
+
+**Not in Slice 1, deliberately:** the CLI has no way to pass a `Measure`. A CLI flag
+cannot name a function, and a plugin loader would be a dependency and an eval surface.
+The report prints a measured line when the _library_ was given one.
 
 ### Slice 2 — the structural planner, TypeScript and TSX only
 
@@ -233,10 +252,18 @@ traces, `cargo build` output), a set of realistic tasks with known answers, and 
 that reports, per case: input bytes, output bytes, elisions, and — critically —
 **expansion rate**, by actually asking a model and counting its `smelt_retrieve` calls.
 
+**Tiers** — decided (Decision 8), not built. `count_tokens` is free, which is what makes
+this affordable: Tier 1 is bytes and elision counts, deterministic, no key, reproducible
+by any contributor offline. Tier 2 adds token counts through `count_tokens` — free, needs
+any key. Tier 3 is expansion rate, the only paid part: run it once and commit the
+retrieval log as an artifact so the rate is checkable from a committed file. Every row
+names its model, and re-running on a newer model is a **new row, not an edit** — Claude's
+tokenizer changed by ~30% between generations, and an edit would silently rewrite history.
+
 **Acceptance criteria**
 
 - [ ] The corpus is committed, or fetched from a pinned public commit. Reproducible by a stranger.
-- [ ] Reports bytes _and_ tokens. If a tokenizer dependency is unacceptable (see open questions), report bytes and say so rather than converting with a fudge factor.
+- [ ] Reports bytes _and_ tokens, per the tiers above. Never a byte count converted to tokens with a fudge factor.
 - [ ] Reports expansion rate per case, and the aggregate. A case where the model retrieved everything back is reported as a **loss**, with its input.
 - [ ] Output is a committed markdown table with the date, the corpus commit, and the model used. A number without those three is not a measurement.
 - [ ] The README's numbers section is written from this table or stays empty. No rounding up, no "up to".
@@ -299,7 +326,9 @@ pnpm verify        # format:check → lint → typecheck → build → test → 
 ```
 
 Individual gates: `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint`,
-`pnpm format`, `pnpm mutate`. Fresh-clone check:
+`pnpm format`, `pnpm mutate`. Generated files: `pnpm generate:third-party` rewrites
+`packages/core/THIRD-PARTY.md`, and `pnpm build` refills `packages/core/grammars/` —
+neither is hand-edited, and a stale `THIRD-PARTY.md` fails `pnpm test`. Fresh-clone check:
 `bash scripts/check-fresh-clone.sh` (installs from `git archive` output — tracked files
 only). CI runs `pnpm verify` on Node 20.19/22.12/24 plus the fresh-clone job.
 
@@ -312,9 +341,15 @@ pnpm mutate
 ```
 
 It copies `packages/core/src` to a scratch tree, applies one deliberate break, points the
-guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Seven
-mutations across three guards; a survivor is reported as a hole in the guard, not in the
+guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Twelve
+mutations across five guards; a survivor is reported as a hole in the guard, not in the
 mutation.
+
+Not every guard guards source code, so there is a second mutation kind: an `artifact`
+mutation stales a _committed artefact_ — `THIRD-PARTY.md`, for instance — in a scratch
+root the guard reads through `SMELT_GUARD_ROOT`. Nothing in the working tree is touched
+either way, which is the point: a mutation runner that edits tracked files and then
+crashes leaves the repository broken, and a failure here has to be safe.
 
 The hand-run transcript of the zero-network guard failing — a real `node:https` import and
 a real `fetch()` added to `plan/lexical.ts`, the exact output, then reverted — is in
@@ -357,13 +392,32 @@ const { name, description, inputSchema, invoke } = smelter.tool;
 //   tool error, never as empty text
 
 // 3. Watch the honest signal.
-const { expansionRate, retrieveCalls, elisionsStored } = smelter.stats();
+const { expansionRate, retrieveCalls, elisionsStored, allElisionsRetrieved } = smelter.stats();
+//   allElisionsRetrieved === true means every blob smelt hid was asked for again: the
+//   elision saved nothing and cost a round trip. There is no threshold below that,
+//   deliberately — see Decision 4.
 ```
+
+**Optional: count in your own unit.** Budgets stay bytes (Decision 1). If you want tokens
+in the result as well, hand smelt the counter you already have:
+
+```ts
+const smelter = createSmelter({
+  defaultBudgetBytes: 8_000,
+  measure: { id: 'tiktoken/o200k_base', unit: 'tokens', count: (text) => encode(text).length },
+});
+// → result.measured = { measure, unit, input, output }
+```
+
+**Also available:** the `smelt` binary, for seeing all of the above from a shell without
+writing a script. `smelt <file> --budget <bytes> --focus <term>` prints the text on stdout
+and the report on stderr; `--json` and `--reconstruct` round-trip through a file.
 
 **Guarantees a consumer may rely on:**
 
-1. `smelt()` makes no network calls, ever, in any version. If that changes, the package
-   name changes.
+1. `smelt()` makes no network calls of its own, ever, in any version. If that changes,
+   the package name changes. (A `measure` or `RerankStage` you supply is your code
+   running in your process; smelt's guard covers smelt's modules, not yours.)
 2. `smelt()` does not mutate its input and is deterministic for a given input, options
    and version.
 3. The tool name is `smelt_retrieve` and will not be renamed.
@@ -371,11 +425,22 @@ const { expansionRate, retrieveCalls, elisionsStored } = smelter.stats();
 5. `reconstruct(result)` returns the original text byte for byte, as long as the store
    still holds the bytes.
 6. Every thrown error is an `instanceof SmeltError`.
+7. **The marker format is stable from 0.1 and treated as 1.0.** `<<smelt/v1: … >>` will
+   not change shape. A future format arrives as `smelt/v2`, identifiable in band, never
+   as a quiet substitution — see Decision 3, and the guard that enforces it.
+8. Budgets are UTF-8 bytes, permanently. A `Measure` you supply adds a labelled second
+   number to the result; it never changes what the budget means.
 
-**What is explicitly _not_ stable pre-1.0:** the default marker string, the rule ids, the
+**Two promises, not one.** The **wire surface a model sees** — the marker format and the
+`smelt_retrieve` tool contract — is stable now. The **TypeScript API** is `0.x` and may
+move: expect renames and signature changes in the type surface between minors.
+
+**What is explicitly _not_ stable pre-1.0:** the TypeScript API, the rule ids, the
 lexical planner's tuning constants, and the exact set of elisions for a given input.
-A consumer that snapshot-tests smelt's output will break on a planner improvement — snapshot
-the _properties_ (round-trips, under budget, focus preserved) instead.
+A consumer that snapshot-tests smelt's output will break on a planner improvement —
+snapshot the _properties_ (round-trips, under budget, focus preserved) instead. Note what
+is **no longer** on this list: the marker string. It moved to the guarantees, because
+consumers put it in prompts.
 
 **What smelt will never do to a consumer:** intercept its traffic, read its config, write
 outside a store it was handed, or require a key.
@@ -392,6 +457,14 @@ outbound call is visible in their own source and their own review. There is no
 `SMELT_RERANK_API_KEY`, no bundled adapter, and no "just set this env var" — the first of
 those to appear turns a zero-network library into a library that is zero-network unless
 configured, which is not the same claim.
+
+**An example reranker in the repository.** Out (Decision 5). The README shows the snippet
+and `RerankStage` is the interface; there is nothing under `examples/`, and there will not
+be. The zero-network guard requires every discovered `.ts` file to be reachable from a
+manifest entrypoint or explicitly justified, so a file importing an HTTP client either
+breaks the guard or gets excluded from it — and **excluding a file from an honesty guard
+to accommodate an example is how a guard erodes.** Naming a vendor in-repo also dates the
+project: Voyage's `voyage-code-3` is already legacy.
 
 **The learned distillation stage.** Out for a reason beyond the network: a model-written
 summary cannot satisfy Law 2. "The model condensed this" is not a statement of what was
@@ -412,31 +485,144 @@ them is debuggable.
 
 ---
 
-## Open questions the founder owns
+## Decisions the founder has made
 
-1. **npm.** `@smeltjs` is free; bare `smelt` is squatted by a dead 2015 package and
-   `@smelt` is taken. Nothing is published — the manifest is correct and stopping there
-   was deliberate. Who creates the org, and does `@smeltjs/core` publish before or after
-   Slice 2 lands?
-2. **One package or two.** Does the CLI (Slice 1) ship as a `bin` on `@smeltjs/core`, or
-   as `@smeltjs/cli`? A `bin` is simpler; a second package keeps the library's dependency
-   tree at exactly two.
-3. **Tokens or bytes.** Budgets are UTF-8 bytes today, which is honest and dependency-free
-   but not what anyone is billed in. Taking a tokenizer dependency (tiktoken/tokenizers) is
-   a real cost imposed on every consumer, and per-provider tokenizers multiply it. Bytes
-   with a documented caveat, or tokens behind an optional peer dependency?
-4. **The default expansion-rate threshold.** smelt measures the rate but ships no
-   threshold, because it has not measured one. After Slice 3, is there a number worth
-   warning at — and is warning even smelt's job, or the consumer's?
-5. **An example reranker in-repo.** Would a `examples/rerank-voyage.ts` help adoption, or
-   would its presence in the repo undermine the zero-network claim in readers' minds
-   regardless of what the docs say?
-6. **Grammar licensing surface.** `tree-sitter-wasms` is Unlicense, but the individual
-   grammars inside it carry their own (mostly MIT) licences. Does the release need a
-   `THIRD-PARTY.md` enumerating them, and who signs off?
-7. **SemVer pre-1.0.** The contract section above lists six guarantees and four
-   deliberately unstable things. Is `0.x` with that split the right promise, or should
-   the marker format be frozen earlier because consumers will put it in prompts?
-8. **Where the benchmark's model calls come from.** Slice 3 needs a model to produce an
-   honest expansion rate. Whose key, run where, and how does a contributor reproduce the
-   table without one?
+These were the open questions. They are answered, and each answer has a home in the code
+or the docs — so what follows is a record of what was decided and why, not a list of
+things still to settle. Where a decision is enforced by a check, the check is named.
+
+### 1. Budgets are UTF-8 bytes, permanently, in the core
+
+Not a caveat. **Bytes are the only unit computable locally for every model**, which is
+exactly why they are the core's unit — the same property that makes Law 1 possible.
+
+Three facts settled it, verified against Anthropic's documentation on 2026-09-01:
+
+- **There is no local tokenizer for Claude.** Anthropic ships only the
+  `/v1/messages/count_tokens` **endpoint** — no downloadable tokenizer, no BPE
+  vocabulary. A token budget inside `smelt()` would require a network call, which is
+  Law 1 gone.
+- **A token budget silently redefines itself across model generations.** Verbatim from
+  Anthropic's docs: _"Claude 4.7 and later models and Claude Mythos Preview use a newer
+  tokenizer. The same input text produces approximately 30 percent more tokens than on
+  earlier models."_ A byte budget means the same thing in five years. A token budget
+  quietly got 30% tighter with nothing erroring anywhere — this project's own failure
+  class, arriving as someone else's model release.
+- Per-provider tokenizers multiply the dependency cost on every consumer, and a coding
+  agent talks to more than one provider.
+
+**Built:** a `measure` hook on the public API (`Measure` in `src/types.ts`,
+`SmelterConfig.measure`). A consumer supplies its own counter — anyone calling a model
+already has one — and the result carries `measured: { measure, unit, input, output }`
+alongside the byte counts. `id` and `unit` are **required**, because a token count
+without the tokenizer named is not a measurement; the 30% shift above is precisely why.
+
+The hook **does not relax Law 1.** smelt imports no transport, and the guard proves that
+about smelt's modules; it cannot prove it about a function you hand in. A `count()` that
+calls an API makes _your_ process call an API, from a line in _your_ source — the same
+arrangement `RerankStage` already describes. `count` is synchronous on purpose: local
+tokenizers are synchronous and network clients are not.
+
+### 2. The CLI is a `bin` on `@smeltjs/core`, with zero new dependencies
+
+`node:util.parseArgs`, stable in Node 20, which `engines` already requires. The case for
+a second package was dependency-tree size, and it dissolves when the CLI adds nothing.
+One package, one version, one install.
+
+### 3. Two promises, not one — and this constrains every slice
+
+- **The wire surface a model sees** — the marker format and the `smelt_retrieve` tool
+  contract — is **stable from 0.1 and treated as 1.0.**
+- **The TypeScript API** is `0.x` and may move.
+
+Why, spelled out in `CONTRIBUTING.md` § "Two promises, not one" so a contributor does
+not "clean up" the marker format: **the marker goes into prompts.** Changing it changes
+model behaviour downstream and manifests as _worse output with no error anywhere_. That
+is not a normal API break; it is this project's signature failure mode shipped as a
+version bump.
+
+**Built:** the marker carries its own version in band — `<<smelt/v1: … >>` — so a future
+format is additive and identifiable rather than a silent substitution.
+`MARKER_FORMAT_VERSION` lives in `src/apply.ts`, and
+`test/guards/marker-format.test.ts` pins the exact rendering per version: the format
+cannot move without the version moving, and an unknown version fails rather than
+passing, so a new format is a new row and never an edit. Two mutations
+(`marker-format-silent-change`, `marker-version-not-frozen`) prove both halves go red.
+
+### 4. Measure the expansion rate; never threshold it
+
+No default threshold. It would be a policy claim smelt has no basis for, the right rate
+depends on how aggressive a budget the consumer chose, and a library printing warnings
+into someone else's process is bad manners.
+
+**Built:** `RetrieveStats.allElisionsRetrieved` — the one non-arbitrary case, exposed as
+a computed fact rather than a preference. When every distinct blob smelt hid has been
+asked for again, the elision achieved nothing and cost a round trip. That is arithmetic,
+not an opinion, and what to do about it is the caller's call. Guarded in
+`test/guards/expansion-counter.test.ts`; mutation `degenerate-outcome-never-fires` wires
+the flag to a constant and the guard goes red.
+
+### 5. No example reranker in the repo
+
+A README snippet and the stage interface, and **nothing under `examples/`**. The
+zero-network guard requires every discovered `.ts` file to be reachable from a manifest
+entrypoint or explicitly justified. A file importing an HTTP client either breaks that
+guard or gets excluded from it — and **excluding a file from an honesty guard to
+accommodate an example is how a guard erodes.** Separately, naming a vendor in-repo
+dates the project: Voyage's `voyage-code-3` is already legacy.
+
+### 6. The grammars are bundled, and `THIRD-PARTY.md` is generated
+
+The WASM grammars **ship inside the npm tarball** — that is what makes "zero native
+compilation, works offline" true. Before this, `tree-sitter-wasms` was an _optional peer
+dependency_, so a consumer installing `@smeltjs/core` got no parsers at all and found
+out from a `GrammarUnavailableError` on someone else's machine. `pnpm build` copies them
+into `packages/core/grammars/` and `files` packs them.
+
+Bundling is redistribution, so attribution is required rather than polite.
+`scripts/generate-third-party.mjs` produces `THIRD-PARTY.md` from installed package
+metadata, the bundled files themselves, and `grammar-provenance.json` — which holds only
+the facts with no machine-readable source here. It is **never hand-written**, because a
+hand-written notices file is a promise that decays: a grammar gets added, the file does
+not, and nothing fails. `tree-sitter-wasms` is Unlicense (the packaging); each grammar
+inside carries its own licence, and all six are MIT, verified 2026-09-01 against the npm
+registry and each repository's `LICENSE`. Even the MIT body is quoted from an installed
+`LICENSE` rather than typed into the generator.
+
+`test/guards/third-party.test.ts` reruns the real generator and fails if the committed
+copy differs, so staleness is loud rather than silent. Downstream reason to get this
+right: **KLØDD ships in two app stores** and takes its licence screen text from here.
+
+### 7. npm: nothing is published, and publishing is a founder action
+
+The `@smeltjs` org exists. Nothing has been published. **Do not publish, and do not run
+`npm login`** — that is the founder's action, not an agent's.
+
+What is done here instead: the manifest is correct for the `bin` and for the bundled
+grammars, and `CONTRIBUTING.md` carries a publish checklist. The ordering rule in it
+matters — **npm unpublish is restricted after 72 hours**, after which only deprecate
+remains, so a premature `0.0.1` is permanent. Publish after Slice 1 lands and
+`smelt --budget` actually runs on a real file, never before.
+
+### 8. Benchmark tiers — recorded here, built in Slice 3
+
+Not built. Recorded so Slice 3 starts from a decision rather than a debate.
+`count_tokens` is **free** — _"Token counting is free to use but subject to requests per
+minute rate limits"_, 5,000 RPM at the Start tier, with limits independent of message
+creation — which is what makes a three-tier split affordable:
+
+| Tier | What it reports                   | Cost | Key needed | Who can reproduce it     |
+| ---- | --------------------------------- | ---- | ---------- | ------------------------ |
+| 1    | Bytes and elision counts          | none | none       | any contributor, offline |
+| 2    | Token counts, via `count_tokens`  | free | any key    | anyone with a key        |
+| 3    | Expansion rate — real model calls | paid | any key    | anyone, from the log     |
+
+Tier 1 is deterministic and needs no key, so a stranger can reproduce the table's
+structural half exactly. Tier 3 is the only paid part: run it once and **commit the
+retrieval log as an artifact**, so the rate is verifiable from a committed file rather
+than from trust.
+
+**The trap to write down now:** tokenizers differ by model, so every table row names its
+model, and re-running on a newer model is a **new row, not an edit**. See Decision 1 —
+the 30% shift between Claude tokenizer generations would otherwise silently rewrite
+history.

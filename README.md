@@ -10,9 +10,9 @@ A library, not a proxy.
 [![node](https://img.shields.io/badge/node-%5E20.19_%7C%7C_%3E%3D22.12-6E7783?style=for-the-badge&logo=nodedotjs&logoColor=EFEBE5&labelColor=131417)](#requirements)
 [![License](https://img.shields.io/badge/license-Apache_2.0-6E7783?style=for-the-badge&labelColor=131417)](./LICENSE)
 
-**Status: pre-alpha.** The pipeline is real and tested. The structural planner is a stub
-that throws. **Not published to npm.** Read [`docs/HANDOFF.md`](docs/HANDOFF.md) before
-building on it.
+**Status: pre-alpha.** The pipeline, the lexical planner and the `smelt` CLI are real and
+tested. The structural planner is a stub that throws. **Not published to npm.** Read
+[`docs/HANDOFF.md`](docs/HANDOFF.md) before building on it.
 
 </div>
 
@@ -27,7 +27,7 @@ everything else has been replaced by a single line saying what went, how big it 
 hash to get it back:
 
 ```
-<<smelt: collapsed 412 lines with no match for the focus terms (18904B) — retrieve("a1b2c3d4e5f60718")>>
+<<smelt/v1: collapsed 412 lines with no match for the focus terms (18904B) — retrieve("a1b2c3d4e5f60718")>>
 ```
 
 The removed bytes are kept locally, content-addressed. The model gets a `smelt_retrieve`
@@ -42,16 +42,17 @@ their users' source to a third-party summariser.
 - 🗣️ **Every elision explains itself.** A named rule and a sentence a human can read in a diff. If a rule cannot say what it removed, the rule does not ship.
 - ↩️ **Every elision is reversible.** `reconstruct(smelt(x)) === x`, byte for byte, asserted on multi-byte text, CRLF, and files with no trailing newline.
 - 📈 **Over-pruning is measurable.** `smelter.stats().expansionRate` — the fraction of what smelt hid that the model had to ask back for. The honest signal, and the one nobody publishes.
-- 🧪 **Guards that have been watched failing.** `pnpm mutate` breaks the source on purpose and fails if a guard does not notice. 7 mutations, 3 guards, 7 caught.
-- 🪶 **Two runtime dependencies.** `web-tree-sitter` and prebuilt grammars. No native build step, no Docker, no service.
+- 🧪 **Guards that have been watched failing.** `pnpm mutate` breaks the source on purpose and fails if a guard does not notice. 12 mutations, 5 guards, 12 caught.
+- 🪶 **One runtime dependency.** `web-tree-sitter`. The parsers themselves ship inside the tarball, so there is no native build step, no post-install download, no Docker and no service.
+- ⌨️ **A CLI, so you can see it work.** `smelt <file> --budget 4000 --focus handleRequest`. Text on stdout, report on stderr, no new dependencies.
 
-| What your agent does today                         | What smelt does instead                                                              |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Sends the whole 40 kB file, or its first 200 lines | Keeps the declarations your focus matched, with their signatures and doc comments    |
-| `[...output truncated...]`                         | `collapsed 412 lines with no match for the focus terms (18904B) — retrieve("a1b2…")` |
-| Truncated content is gone                          | Stored locally, keyed by hash, one tool call away                                    |
-| No idea whether the cut hurt                       | An expansion rate you can watch move                                                 |
-| Asks a hosted model which lines matter             | Never leaves the machine                                                             |
+| What your agent does today                         | What smelt does instead                                                           |
+| -------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Sends the whole 40 kB file, or its first 200 lines | Keeps the declarations your focus matched, with their signatures and doc comments |
+| `[...output truncated...]`                         | `<<smelt/v1: collapsed 412 lines with no match … (18904B) — retrieve("a1b2…")>>`  |
+| Truncated content is gone                          | Stored locally, keyed by hash, one tool call away                                 |
+| No idea whether the cut hurt                       | An expansion rate you can watch move                                              |
+| Asks a hosted model which lines matter             | Never leaves the machine                                                          |
 
 ## On numbers
 
@@ -71,6 +72,112 @@ smelt has a harness ([Slice 3](docs/HANDOFF.md#slice-3--the-measurement-harness)
 own table — with a date, a corpus commit, and a model named — it will state that number
 and nothing beyond it.
 
+## On units: bytes, and why that is the strength
+
+**Budgets are UTF-8 bytes, permanently, and that is a design decision rather than a
+limitation.** Bytes are the only unit that can be computed **locally, for every model** —
+which is the same property that makes the zero-network guarantee possible at all. A
+context optimizer whose budget requires a round trip is not offline.
+
+The specifics, verified against Anthropic's documentation on 2026-09-01:
+
+- **There is no local tokenizer for Claude.** Anthropic ships the
+  `/v1/messages/count_tokens` **endpoint** — not a downloadable tokenizer and not a BPE
+  vocabulary. A token budget inside `smelt()` would mean a network call on every call.
+- **A token budget silently redefines itself between model generations.** Anthropic's own
+  words: _"Claude 4.7 and later models and Claude Mythos Preview use a newer tokenizer.
+  The same input text produces approximately 30 percent more tokens than on earlier
+  models."_ A byte budget means the same thing in five years. A token budget quietly got
+  30% tighter with nothing erroring anywhere — which is exactly the class of failure this
+  library exists to refuse.
+- Per-provider tokenizers multiply the dependency cost on every consumer, and a coding
+  agent rarely talks to only one provider.
+
+**If you want the number in your own unit, bring your own counter.** You already have one
+if you are calling a model:
+
+```ts
+import { encode } from 'gpt-tokenizer'; // or any local tokenizer you already ship
+
+const smelter = createSmelter({
+  defaultBudgetBytes: 8_000,
+  measure: {
+    id: 'gpt-tokenizer/o200k_base', // names the counter — a token count without one is not a measurement
+    unit: 'tokens',
+    count: (text) => encode(text).length,
+  },
+});
+
+const result = await smelter.smelt(toolOutput, { budgetBytes: 4_000 });
+result.measured; // { measure: 'gpt-tokenizer/o200k_base', unit: 'tokens', input, output }
+```
+
+`id` and `unit` are required on purpose: given the 30% shift above, `1,204 tokens` is not
+a fact and `1,204 tokens (claude-4.7/count_tokens)` is.
+
+**This hook does not relax the zero-network guarantee, and it does not pretend to.** smelt
+imports no transport, and its guard proves that about smelt's own modules; it cannot prove
+it about a function you hand in. A `count()` that calls an API makes _your_ process call an
+API, from a line in _your_ source — the same arrangement as `RerankStage` below. `count` is
+synchronous, which is why local tokenizers fit it and HTTP clients do not.
+
+## The CLI
+
+```sh
+smelt src/server.ts --budget 4000 --focus handleRequest
+smelt --budget 4000 --focus TypeError < build.log
+```
+
+Smelted text goes to **stdout**, the report to **stderr**, so the two pipe apart:
+`smelt big.log --budget 4000 > small.log`.
+
+```
+smelt  packages/core/src/plan/lexical.ts  typescript  lexical/v1
+in 7,297 B → out 985 B   (-86.5%, 3 elisions)
+
+  rule          lines  bytes  hash              explanation
+  focus-window     53  2,224  84998967370f38bc  collapsed 53 lines with no match for the focu…
+  focus-window      4    253  cb63542ad561a25d  collapsed 4 lines with no match for the focus…
+  focus-window    128  4,155  786640c78c602123  collapsed 128 lines with no match for the foc…
+```
+
+- `--budget` is **required**. Its absence is an error, not a default — see below.
+- `--json` prints a versioned envelope: the `SmeltResult` verbatim, plus the elided bytes.
+- `--reconstruct` reads that envelope back and prints the original, byte for byte. Law 3,
+  from a shell.
+- The **exit code is non-zero when the plan came back over budget**, and the report says
+  so. smelt does not cut the regions you asked to keep in order to make a number look
+  right, and it does not hide that it did not. `1` over budget, `2` usage, `3` refused,
+  `4` unexpected.
+
+It ships as a `bin` on the library rather than a second package, because
+`node:util.parseArgs` is in Node's standard library: the CLI adds no dependency, so the
+only argument for splitting it out disappeared.
+
+## Reranking: a seam, not a feature
+
+There is no bundled reranker and there is no `examples/` directory — deliberately, on both
+counts. A default reranker would ship every consumer's source to a third party, including
+the consumers who never read the changelog. And an example that imports an HTTP client
+would either break the zero-network guard or have to be excluded from it, and excluding a
+file from an honesty guard to accommodate an example is how a guard erodes.
+
+The interface is the whole offering. Implement it in your code, with your key, so the
+outbound call is visible in your own diff and your own review:
+
+```ts
+import type { RerankStage } from '@smeltjs/core';
+
+const myReranker: RerankStage = {
+  id: 'my-hosted-reranker',
+  async rerank(candidates, query) {
+    // Your call, your key, your process. Visible here, in your source.
+    const scored = await myClient.rerank({ query, documents: candidates.map((c) => c.text) });
+    return scored.map(({ index, score }) => ({ ...candidates[index]!, score }));
+  },
+};
+```
+
 ## Requirements
 
 - **Node** `^20.19 || >=22.12`
@@ -86,7 +193,12 @@ git clone https://github.com/mong-x/smelt.git && cd smelt
 pnpm install && pnpm verify
 ```
 
-Then depend on `packages/core` directly, or `pnpm build` and link `dist/`.
+Then depend on `packages/core` directly, or `pnpm build` and link `dist/`. The CLI runs
+straight out of the build:
+
+```sh
+node packages/core/dist/cli/bin.js src/server.ts --budget 4000 --focus handleRequest
+```
 
 ## Usage
 
@@ -121,6 +233,27 @@ Two things that look like bugs and are not:
 - **`strategy: 'structural'` throws.** It is not built yet, and it refuses rather than
   quietly returning line-window output labelled `structural/v1`. See
   [`CONTRIBUTING.md` § "A stub throws"](CONTRIBUTING.md#1-a-stub-throws).
+- **There is no expansion-rate warning.** smelt measures the rate and ships no threshold,
+  because a threshold is a policy claim it has not measured and printing warnings into
+  your process is not its business. The one non-arbitrary case is a computed fact:
+  `stats().allElisionsRetrieved` is true when every blob smelt hid was asked for again, so
+  the elision saved nothing and cost a round trip. What to do about that is yours.
+
+## Two stability promises, not one
+
+- **The wire surface a model sees is stable from 0.1 and treated as 1.0.** That is the
+  marker format — `<<smelt/v1: … >>` — and the `smelt_retrieve` tool contract. The marker
+  carries its own version in band, so a future format is additive and identifiable rather
+  than a silent replacement.
+- **The TypeScript API is `0.x` and may move.** Expect renames and signature changes
+  between minors.
+
+The split is not bureaucracy. **The marker goes into prompts.** Changing its shape changes
+model behaviour in every consumer, and that shows up as _worse output with no error
+anywhere_ — no exception, no failing test, no log line. That is not a normal API break;
+it is this project's signature failure mode arriving as a version bump, which is the one
+thing smelt must never do to the people using it. `pnpm mutate` includes a mutation that
+changes the marker without changing its version, and the guard goes red.
 
 ## The four laws
 
@@ -139,11 +272,11 @@ short:
 
 ## What is built, and what is not
 
-|                         |                                                                                                                                                                                                                                    |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ✅ **Built and tested** | The plan/apply/store/retrieve pipeline · the lexical planner (focus windows, head-tail, budget ladder) · the retrieve tool and expansion counters · grammar loading · three mutation-tested guards · CI · fresh-clone verification |
-| 🚧 **Stubs that throw** | The structural planner · the rerank stage · the distill stage                                                                                                                                                                      |
-| 📋 **Not started**      | CLI, benchmark harness, persistent store, cache-prefix hygiene, cross-file repo map — each sliced with acceptance criteria in [`docs/HANDOFF.md`](docs/HANDOFF.md#v1-sliced)                                                       |
+|                         |                                                                                                                                                                                                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ✅ **Built and tested** | The plan/apply/store/retrieve pipeline · the lexical planner (focus windows, head-tail, budget ladder) · the retrieve tool and expansion counters · bundled grammars and generated attribution · the `smelt` CLI · five mutation-tested guards · CI · fresh-clone verification |
+| 🚧 **Stubs that throw** | The structural planner · the rerank stage · the distill stage                                                                                                                                                                                                                  |
+| 📋 **Not started**      | Benchmark harness, persistent store, cache-prefix hygiene, cross-file repo map — each sliced with acceptance criteria in [`docs/HANDOFF.md`](docs/HANDOFF.md#v1-sliced)                                                                                                        |
 
 ## Prior art, credited honestly
 
@@ -190,11 +323,12 @@ build against the same surface. smelt is developed and released on its own terms
 
 ## Documentation
 
-| Doc                                      | What is in it                                                                                                                                                                                      |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`docs/HANDOFF.md`](docs/HANDOFF.md)     | The full picture: the four laws and their reasoning, what is scaffolded file by file, v1 sliced with acceptance criteria, the consumer contract, what is out of v1 and why, and the open questions |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md)     | Dev setup, the three silence rules, the mutation convention, and the recorded transcript of the zero-network guard going red                                                                       |
-| [`assets/PALETTE.md`](assets/PALETTE.md) | The palette, the marks, and how to regenerate the rasters                                                                                                                                          |
+| Doc                                                            | What is in it                                                                                                                                                                                      |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`docs/HANDOFF.md`](docs/HANDOFF.md)                           | The full picture: the four laws and their reasoning, what is scaffolded file by file, v1 sliced with acceptance criteria, the consumer contract, what is out of v1 and why, and the open questions |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md)                           | Dev setup, the three silence rules, the mutation convention, and the recorded transcript of the zero-network guard going red                                                                       |
+| [`assets/PALETTE.md`](assets/PALETTE.md)                       | The palette, the marks, and how to regenerate the rasters                                                                                                                                          |
+| [`packages/core/THIRD-PARTY.md`](packages/core/THIRD-PARTY.md) | Generated attribution for everything smelt redistributes — the bundled tree-sitter grammars and their licences. Never hand-edited; a stale copy fails `pnpm test`.                                 |
 
 ## Contributing
 

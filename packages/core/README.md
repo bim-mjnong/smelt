@@ -22,8 +22,29 @@ smelter.tool; // the `smelt_retrieve` tool that gives it the rest back
 smelter.stats().expansionRate; // whether you cut too much
 ```
 
-**Pre-alpha.** The pipeline and the lexical planner are real and tested. The structural
-planner throws `NotImplementedError` — deliberately, rather than falling back to something
-plausible. See [`docs/HANDOFF.md`](https://github.com/mong-x/smelt/blob/main/docs/HANDOFF.md).
+There is also a CLI, installed as `smelt`:
+
+```sh
+smelt src/server.ts --budget 4000 --focus handleRequest   # text on stdout, report on stderr
+smelt --budget 4000 --focus TypeError < build.log
+smelt --reconstruct result.json                            # the round trip, from a shell
+```
+
+**Budgets are UTF-8 bytes, permanently** — the only unit computable locally for every
+model, which is what makes the zero-network guarantee possible. Pass a `measure` if you
+want a token count in the result as well; the budget stays bytes.
+
+**Two stability promises.** The marker format (`<<smelt/v1: … >>`) and the
+`smelt_retrieve` tool name are stable from 0.1 and treated as 1.0, because markers go into
+prompts and a silent change to one shows up as worse model output with no error anywhere.
+The TypeScript API is `0.x` and may move.
+
+The parsers ship inside this tarball — no native build step, no post-install download.
+That makes smelt a redistributor, so [`THIRD-PARTY.md`](./THIRD-PARTY.md) carries the
+licences, generated from package metadata rather than written by hand.
+
+**Pre-alpha.** The pipeline, the lexical planner and the CLI are real and tested. The
+structural planner throws `NotImplementedError` — deliberately, rather than falling back to
+something plausible. See [`docs/HANDOFF.md`](https://github.com/mong-x/smelt/blob/main/docs/HANDOFF.md).
 
 Apache-2.0.

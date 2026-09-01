@@ -21,13 +21,36 @@ nothing to build and nothing to download at runtime.
 | Command                             | What it does                                                           |
 | ----------------------------------- | ---------------------------------------------------------------------- |
 | `pnpm verify`                       | Everything below, in order, one verdict. **This is the green signal.** |
-| `pnpm build`                        | `tsc` per package into `dist/`                                         |
+| `pnpm build`                        | `tsc` per package into `dist/`, then bundles the grammars              |
 | `pnpm test`                         | vitest, all packages                                                   |
 | `pnpm typecheck`                    | `tsc --noEmit`, including tests                                        |
 | `pnpm lint`                         | oxlint, warnings are errors                                            |
 | `pnpm format` / `pnpm format:check` | prettier                                                               |
 | `pnpm mutate`                       | the mutation suite — see below                                         |
+| `pnpm generate:third-party`         | rewrites `packages/core/THIRD-PARTY.md` (never edit it by hand)        |
 | `bash scripts/check-fresh-clone.sh` | installs and verifies from `git archive` output (tracked files only)   |
+
+### Generated files
+
+Two things in this repository are generated, and neither is ever hand-edited:
+
+- **`packages/core/grammars/*.wasm`** — filled by `pnpm build` from `tree-sitter-wasms`,
+  gitignored, and packed into the tarball via `files`. This is what makes "no native
+  compilation, works offline" true for someone who just `npm install`s the package.
+- **`packages/core/THIRD-PARTY.md`** — produced by `scripts/generate-third-party.mjs`
+  from installed package metadata, the bundled files, and `grammar-provenance.json`.
+  Bundling the grammars is redistribution, so attribution is required; generating it is
+  how the attribution stays true when a grammar is added. A stale copy fails `pnpm test`.
+
+### Trying the CLI
+
+```sh
+pnpm build
+node packages/core/dist/cli/bin.js packages/core/src/plan/lexical.ts --budget 2000 --focus planLexical
+```
+
+Text on stdout, report on stderr. `--json` prints an envelope you can feed back with
+`--reconstruct` to prove the round trip from a shell.
 
 ## Silence is the enemy
 
@@ -78,6 +101,8 @@ $ pnpm mutate
   PASS  test/guards/no-network.test.ts
   PASS  test/guards/reversibility.test.ts
   PASS  test/guards/expansion-counter.test.ts
+  PASS  test/guards/marker-format.test.ts
+  PASS  test/guards/third-party.test.ts
 
 === mutations: every guard must go red ===
 
@@ -86,21 +111,102 @@ $ pnpm mutate
            guard:    test/guards/no-network.test.ts
            red on:   AssertionError: Law 1 violation: smelt v1 makes zero network calls: expected [ Array(1) ] to deeply equal []
   …
-=== 7/7 mutations caught across 3 guards ===
+=== 12/12 mutations caught across 5 guards ===
 ```
 
 **Adding a guard? The convention is three steps:**
 
 1. Import the library through `@guard/…` rather than a relative path, so the alias in
-   `packages/core/vitest.config.ts` can be redirected at a broken copy.
+   `packages/core/vitest.config.ts` can be redirected at a broken copy. If your guard
+   reads a _committed artefact_ rather than source, read it through `guardRoot()` from
+   `test/guards/_source.ts` so it can be redirected too.
 2. Add an entry to `MUTATIONS` in `scripts/mutate.mjs`: the guard it must break, the
-   exact source string to change, and _why that break matters_.
+   exact source string to change, and _why that break matters_. A guard over an artefact
+   takes `kind: 'artifact'` and its `file` is relative to `packages/core`.
 3. Run `pnpm mutate`. If the guard survives, the guard is wrong — fix the guard, not the
    mutation.
 
 The `find` anchor must match **exactly once**. A mutation that silently no-ops because
 the source moved is the same class of bug the guards exist to catch, so it is a hard
 error rather than a warning.
+
+Nothing a mutation does touches the working tree. Source mutations go to a copy of `src`;
+artefact mutations copy the one file into a scratch root. A runner that edited tracked
+files and then crashed would leave the repository broken, which is the opposite of what a
+safe-to-fail check is for.
+
+The five guards today, and what each one would let through if it stopped working:
+
+| Guard                              | If it silently stopped working                                           |
+| ---------------------------------- | ------------------------------------------------------------------------ |
+| `guards/no-network.test.ts`        | source leaving the machine — including from the CLI, a second front door |
+| `guards/reversibility.test.ts`     | `reconstruct()` returning almost-right text                              |
+| `guards/expansion-counter.test.ts` | the expansion rate pinned at a flattering zero                           |
+| `guards/marker-format.test.ts`     | the marker changing shape in everyone's prompts, with no error anywhere  |
+| `guards/third-party.test.ts`       | a bundled grammar being redistributed with no licence notice             |
+
+## Two promises, not one
+
+**Read this before you "clean up" the marker format.**
+
+smelt makes two stability promises with different strengths, and the split is not
+bureaucracy:
+
+- **The wire surface a model sees is stable from 0.1 and treated as 1.0.** That is the
+  marker format — `<<smelt/v1: … (412B) — retrieve("…")>>` — and the `smelt_retrieve`
+  tool contract.
+- **The TypeScript API is `0.x` and may move.** Renames and signature changes between
+  minors are expected.
+
+Why the wire surface is the strict one: **the marker goes into prompts.** Changing it
+changes model behaviour downstream, in every consumer, and that manifests as _worse
+output with no error anywhere_ — no exception, no failing test on their side, no line in
+a log. It is not a normal API break. It is this project's signature failure mode shipped
+as a version bump, which is precisely the thing smelt exists to refuse to do to people.
+
+So the marker carries its own version **in band**, and `MARKER_FORMAT_VERSION` in
+`src/apply.ts` is the single source of it. A future format is _additive and
+identifiable_: `smelt/v2` markers can sit next to `smelt/v1` ones in a transcript and a
+consumer parsing them can tell which is which. It is never a substitution.
+
+`test/guards/marker-format.test.ts` enforces exactly that. It pins the rendered marker
+per version, so the format cannot move unless the version moves; and it fails on a
+version it does not know, so a new format has to arrive as a **new row, never an edit** —
+old markers stay valid in caches, transcripts and other people's prompts forever.
+
+If you need a different marker for your own use, pass `marker` to `createSmelter()`. That
+is your format in your process, and nothing here is in your way.
+
+## Publishing (a founder action)
+
+**Do not publish. Do not run `npm login`.** Publishing `@smeltjs/core` is the founder's
+action, not a contributor's and not an agent's. This checklist exists so the ordering is
+decided before anyone is standing at the keyboard.
+
+**The ordering rule, and why it is a rule:** npm restricts unpublishing after **72
+hours** — after that only `npm deprecate` remains. The first publish is therefore
+effectively permanent. So publish **after** the CLI actually runs on a real file, never
+to "reserve the name".
+
+Before the first publish:
+
+- [ ] `pnpm verify` green, and `bash scripts/check-fresh-clone.sh` green — the second one
+      is what catches a file that works only because it was never committed.
+- [ ] `pnpm build` has run, so `packages/core/grammars/` is populated, and
+      `pnpm generate:third-party` leaves `THIRD-PARTY.md` unchanged.
+- [ ] `npm pack --dry-run` in `packages/core`, and **read the file list**. It must contain
+      `dist/`, all six `grammars/*.wasm`, `README.md` and `THIRD-PARTY.md`. A tarball
+      without the grammars still installs and still fails later, on someone else's
+      machine, which is the failure shape this project is arranged against.
+- [ ] `node dist/cli/bin.js --version` prints the version in the manifest, and
+      `node dist/cli/bin.js <a real file> --budget 4000` prints text and a report.
+- [ ] The version is deliberate. `0.0.0` is the placeholder; the first real publish picks
+      a number and lives with it.
+
+Files that carry the package name, should it ever need to change: `packages/core/package.json`,
+`packages/core/README.md`, the root `README.md`, `CONTRIBUTING.md`, `docs/HANDOFF.md`. The
+CLI's binary name is `smelt` and is independent of the package name — it is defined once,
+as `CLI_NAME` in `src/cli/args.ts`.
 
 ## The recorded failure: watching the zero-network guard go red
 
@@ -190,7 +296,11 @@ laptop is the worst possible outcome.
   and what happens if someone changes it, is not.
 - Conventional Commits.
 - Bytes, not characters. Budgets, ranges and counters are UTF-8 bytes. `'🔥'.length` is
-  2; it costs 4.
+  2; it costs 4. Budgets are bytes **permanently** — the reasoning, including why there is
+  no local Claude tokenizer and why a token budget silently retunes itself between model
+  generations, is in [`docs/HANDOFF.md` § "Decisions the founder has made"](docs/HANDOFF.md#decisions-the-founder-has-made).
+  If you want a token count in the result, supply a `measure`; do not change the unit.
+- **Never touch the marker format** without reading "Two promises, not one" above.
 
 ## Adding a language
 
