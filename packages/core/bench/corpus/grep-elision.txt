@@ -1,0 +1,78 @@
+src/errors.ts:26: * Thrown when something in the elision path tried to reach a non-local resource.
+src/apply.ts:44: * fill in all of those is not allowed to be an elision.
+src/apply.ts:79:  const ordered = plan.elisions.toSorted((a, b) => a.range.start - b.range.start);
+src/apply.ts:140:    elisions: applied,
+src/apply.ts:159: * @throws {UnknownHashError} if the store no longer holds an elision's bytes.
+src/apply.ts:163:  const ordered = result.elisions.toSorted((a, b) => a.outputRange.start - b.outputRange.start);
+src/apply.ts:167:  for (const elision of ordered) {
+src/apply.ts:168:    assertInBounds(elision.outputRange, output.length);
+src/apply.ts:169:    pieces.push(output.subarray(cursor, elision.outputRange.start));
+src/apply.ts:170:    pieces.push(Buffer.from(store.retrieve(elision.hash), 'utf8'));
+src/apply.ts:171:    cursor = elision.outputRange.end;
+src/store-dir.ts:32:export const DIRECTORY_STORE_FORMAT = 'smelt-elision-store';
+src/store-dir.ts:63: *   format.json      { "format": "smelt-elision-store", "version": 1 } — refused if unknown
+src/store-dir.ts:64: *   blobs/<hash>     one file per elision: the exact UTF-8 bytes, named by their content hash
+src/store-dir.ts:71: * a restart) always agree. `stats()` is a scan; elision counts per session are small and
+src/store-dir.ts:189:    let elisionsStored = 0;
+src/store-dir.ts:193:      elisionsStored += 1;
+src/store-dir.ts:210:      elisionsStored,
+src/store-dir.ts:215:      expansionRate: elisionsStored === 0 ? 0 : uniqueRetrieved / elisionsStored,
+src/store-dir.ts:216:      allElisionsRetrieved: elisionsStored > 0 && uniqueRetrieved === elisionsStored,
+src/store-dir.ts:327:          `trusted as an elision store. Refusing to read or write it.`,
+src/types.ts:15: * a human can read in a diff. Law 2 — every elision is explainable — lives here:
+src/types.ts:38:  readonly elisions: readonly PlannedElision[];
+src/types.ts:64:/** One elision that actually happened, with the receipt needed to undo it. */
+src/types.ts:71:   * Where the marker sits in the *output*. Law 3 — every elision is reversible — needs
+src/types.ts:130:  readonly elisions: readonly AppliedElision[];
+src/types.ts:160: * Law 3 says elisions are reversible. That is cheap to satisfy and easy to abuse: a
+src/types.ts:163: * needed, and the round trip cost more tokens than the elision saved.
+src/types.ts:171:  readonly elisionsStored: number;
+src/types.ts:181:   * `uniqueRetrieved / elisionsStored`, or `0` when nothing has been stored.
+src/types.ts:195:   * This is not a threshold. At `uniqueRetrieved === elisionsStored` the elision
+src/hash.ts:7: * elision. 16 hex characters is 64 bits — plenty for the number of elisions one
+src/stages.ts:33: * original, explain itself in the same rule-named terms every other elision uses, and
+src/store.ts:9: * explain. A consumer that needs elisions to survive a process restart (a long-lived
+src/store.ts:72:    const elisionsStored = this.#blobs.size;
+src/store.ts:75:      elisionsStored,
+src/store.ts:80:      expansionRate: elisionsStored === 0 ? 0 : uniqueRetrieved / elisionsStored,
+src/store.ts:81:      allElisionsRetrieved: elisionsStored > 0 && uniqueRetrieved === elisionsStored,
+src/net/policy.ts:63:  'node:crypto', // content hashing for the elision store
+src/net/policy.ts:85: * wire — a real network call inside the elision path, from a dependency's happy path.
+src/index.ts:107: * object rather than a free function: elisions are only reversible for as long as
+src/cache/prefix.ts:7: * unexplainable elision wearing a different hat. Headroom's CacheAligner made the
+src/plan/lexical.ts:6: * Rough cost of a marker, in bytes. Used only to decide whether an elision is
+src/plan/lexical.ts:47: * elision can say which rule produced it.
+src/plan/lexical.ts:98:    attempts.find((elisions) => predictOutputBytes(inputBytes, elisions) <= input.budgetBytes) ??
+src/plan/lexical.ts:104:    elisions: chosen,
+src/plan/lexical.ts:116:function predictOutputBytes(inputBytes: number, elisions: readonly PlannedElision[]): number {
+src/plan/lexical.ts:117:  const removed = elisions.reduce((sum, e) => sum + (e.range.end - e.range.start), 0);
+src/plan/lexical.ts:118:  return inputBytes - removed + elisions.length * MARKER_BYTE_ESTIMATE;
+src/plan/lexical.ts:168:  const elisions: PlannedElision[] = [];
+src/plan/lexical.ts:178:    elisions.push({
+src/plan/lexical.ts:197:  return elisions;
+src/plan/grammar.ts:78: * `https:` scheme would make it fetch — inside the elision path, from a dependency's
+src/cli/run.ts:56:  /** hash → the exact elided bytes. Keys match `result.elisions[].hash`. */
+src/cli/run.ts:161:  for (const elision of result.elisions) {
+src/cli/run.ts:162:    if (!store.has(elision.hash)) {
+src/cli/run.ts:164:        `${CLI_NAME}: envelope is missing the bytes for "${elision.hash}". A result ` +
+src/cli/run.ts:182:      `${String(result.elisions.length)} elisions — byte for byte\n`,
+src/cli/run.ts:190:  for (const elision of result.elisions) {
+src/cli/run.ts:191:    const content = store.peek(elision.hash);
+src/cli/run.ts:194:        `${CLI_NAME}: the store does not hold "${elision.hash}", which its own result ` +
+src/cli/run.ts:198:    elided[elision.hash] = content;
+src/cli/run.ts:235:    !Array.isArray(resultFields['elisions'])
+src/cli/run.ts:238:      `${CLI_NAME}: envelope's \`result\` is missing text, inputBytes or elisions.`,
+src/plan/structural.ts:22: * Every elision this planner produces carries this rule id, and the profitability
+src/plan/structural.ts:128:      elisions: planFromTree(tree, input, options),
+src/plan/structural.ts:161:  const elisions: PlannedElision[] = [];
+src/plan/structural.ts:187:    elisions.push({
+src/plan/structural.ts:201:  return elisions;
+src/cli/report.ts:22: * `outputBytes`, `elisions.length`. The CLI keeps no counters of its own, because two
+src/cli/report.ts:33:      `(${delta(result.inputBytes, result.outputBytes)}, ${count(result.elisions.length, 'elision')})`,
+src/cli/report.ts:51:  if (result.elisions.length === 0) {
+src/cli/report.ts:59:  const rows = result.elisions.map((elision) => ({
+src/cli/report.ts:60:    rule: elision.reason.rule,
+src/cli/report.ts:61:    lines: String(lineSpan(inputText, elision.range.start, elision.range.end)),
+src/cli/report.ts:62:    bytes: group(elision.bytes),
+src/cli/report.ts:63:    hash: elision.hash,
+src/cli/report.ts:64:    explanation: clip(elision.reason.explanation, EXPLANATION_WIDTH),

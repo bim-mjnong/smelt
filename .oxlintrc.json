@@ -9,7 +9,7 @@
     "es2024": true,
     "node": true
   },
-  "ignorePatterns": ["**/dist/**", "**/node_modules/**", ".mutants/**"],
+  "ignorePatterns": ["**/dist/**", "**/node_modules/**", ".mutants/**", "**/bench/corpus/**"],
   "rules": {
     "no-console": "error"
   },
