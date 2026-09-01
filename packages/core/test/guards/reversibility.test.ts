@@ -10,6 +10,8 @@ import { MemoryElisionStore } from '@guard/store';
 import { DirectoryElisionStore } from '@guard/store-dir';
 import type { ElisionPlan } from '@guard/types';
 
+import { BOUNDARY_TS, FUNCTIONS_TS, LONG_DOC_TS, MIXED_TSX } from '../structural-fixtures.ts';
+
 /**
  * REVERSIBILITY GUARD — Law 3.
  *
@@ -195,4 +197,46 @@ describe('Law 3 — reversible against the persistent store, across a restart', 
       expect(reopened.has(elision.hash)).toBe(true);
     }
   });
+ * Law 3 does not care which planner made the plan, so the equation is asserted over
+ * structural output too — real TypeScript and TSX with multi-byte characters, and,
+ * deliberately, the lexical CASES above parsed *as* TypeScript: a parse full of ERROR
+ * nodes still yields node-boundary elisions, and those must round-trip like any other.
+ */
+describe('Law 3 — every structural elision is reversible', () => {
+  const STRUCTURAL_CASES: readonly {
+    readonly name: string;
+    readonly text: string;
+    readonly language: 'typescript' | 'tsx';
+    readonly focus?: readonly string[];
+  }[] = [
+    { name: 'functions.ts', text: FUNCTIONS_TS, language: 'typescript', focus: ['handleRequest'] },
+    { name: 'long-doc.ts', text: LONG_DOC_TS, language: 'typescript', focus: ['retryWithBackoff'] },
+    { name: 'mixed.tsx', text: MIXED_TSX, language: 'tsx', focus: ['Toolbar'] },
+    {
+      name: 'multi-byte boundary.ts',
+      text: BOUNDARY_TS,
+      language: 'typescript',
+      focus: ['greetTarget'],
+    },
+    { name: 'functions.ts with no focus', text: FUNCTIONS_TS, language: 'typescript' },
+    ...CASES.map(({ name, text }) => ({
+      name: `lexical case parsed as typescript: ${name}`,
+      text,
+      language: 'typescript' as const,
+      focus: ['TARGET'] as const,
+    })),
+  ];
+
+  for (const { name, text, language, focus } of STRUCTURAL_CASES) {
+    it(`round-trips: ${name}`, async () => {
+      const smelter = createSmelter({ strategy: 'structural' });
+      const result = await smelter.smelt(text, {
+        budgetBytes: 600,
+        language,
+        ...(focus === undefined ? {} : { focus }),
+      });
+      expect(result.planner).toBe('structural/v1');
+      expect(smelter.reconstruct(result)).toBe(text);
+    });
+  }
 });

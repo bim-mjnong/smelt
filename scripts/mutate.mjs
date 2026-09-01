@@ -8,6 +8,9 @@
  * applies one mutation, points the guard at the copy via `SMELT_GUARD_SRC`, and
  * asserts the guard goes **red**. Sixteen mutations across seven guards; a mutation the
  * guard survives is reported as a failure of the *guard*, not of the mutation.
+ * asserts the guard goes **red**. Sixteen mutations across six guards; a mutation the
+ * guard survives is reported as a
+ * failure of the *guard*, not of the mutation.
  *
  * It also runs every guard against the pristine tree first, because a guard that fails
  * on clean source proves nothing when it fails on broken source.
@@ -34,7 +37,7 @@
  * moved is the same class of bug the guards exist to catch, so it is a hard error.
  */
 
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -52,6 +55,7 @@ const GUARDS = [
   'test/guards/third-party.test.ts',
   'test/guards/persistent-store.test.ts',
   'test/guards/cache-hygiene.test.ts',
+  'test/guards/structural.test.ts',
 ];
 
 /**
@@ -193,6 +197,37 @@ const MUTATIONS = [
     replace:
       '// smelt achieves a 90% cache hit rate\nexport const ANTHROPIC_PROMPT_CACHE_FACTS = {',
     why: "the original pitch's unsupported figure reappearing as a comment — the exact claim Law 4 was written against",
+    id: 'structural-explanation-loses-kind',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: '    return `collapsed ${String(total)} sibling ${countNoun(kind, total)}`;',
+    replace: '    return `collapsed ${String(total)} lines`;',
+    why: "the sibling-collapse explanation reduced to a line count — Law 2's whole point for this planner is naming kind and count from the parse tree",
+  },
+  {
+    id: 'structural-silent-lexical-fallback',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: "  throw new GrammarUnavailableError(\n    `smelt: structural planning covers ${STRUCTURAL_LANGUAGES.join(' and ')} in this ` +",
+    replace:
+      "  return 'typescript';\n  throw new GrammarUnavailableError(\n    `smelt: structural planning covers ${STRUCTURAL_LANGUAGES.join(' and ')} in this ` +",
+    why: 'the no-fallback rule broken: an unmapped language quietly parsed as typescript instead of refused — structural/v1 output nobody asked the grammar to justify',
+  },
+  {
+    id: 'structural-doc-comment-cut',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: '  return (between.match(/\\n/g) ?? []).length <= 1;',
+    replace: '  return false;',
+    why: 'doc comments detached from their declarations, so a kept declaration silently loses its forty-line doc comment to the sibling collapse',
+  },
+  {
+    id: 'structural-range-crosses-node-boundary',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: '      range: { start, end },',
+    replace: '      range: { start, end: end - 1 },',
+    why: 'an elision range that stops one byte inside the last collapsed declaration — output that lies about where the parse tree was cut',
   },
 ];
 
@@ -237,6 +272,14 @@ for (const mutation of MUTATIONS) {
     const mutantSrc = join(scratch, 'src');
     mkdirSync(dirname(mutantSrc), { recursive: true });
     cpSync(sourceDir, mutantSrc, { recursive: true });
+    // The bundled grammars sit beside `src` in the real package, and the grammar
+    // loader resolves them relative to its own module — so a mutant tree needs its own
+    // copy, or a structural guard would go red for the wrong reason (a missing
+    // grammar, not the mutation).
+    const grammarsDir = join(corePackage, 'grammars');
+    if (existsSync(grammarsDir)) {
+      cpSync(grammarsDir, join(scratch, 'grammars'), { recursive: true });
+    }
     guardSrc = mutantSrc;
     target = join(mutantSrc, mutation.file);
   } else {

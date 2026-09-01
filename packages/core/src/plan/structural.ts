@@ -296,7 +296,7 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   enum_declaration: 'enum',
   lexical_declaration: 'variable',
   variable_declaration: 'variable',
-  import_statement: 'import',
+  import_statement: 'import statement',
   internal_module: 'namespace',
   module: 'namespace',
   ambient_declaration: 'ambient declaration',
@@ -325,10 +325,7 @@ function kindOf(node: Node): string {
  * node boundary, a range can never split a multi-byte character — a node boundary is
  * always a character boundary. One forward pass, so the conversion is linear.
  */
-function utf8OffsetIndex(
-  text: string,
-  indices: readonly number[],
-): ReadonlyMap<number, number> {
+function utf8OffsetIndex(text: string, indices: readonly number[]): ReadonlyMap<number, number> {
   const sorted = [...new Set(indices)].toSorted((a, b) => a - b);
   const map = new Map<number, number>();
   let previousIndex = 0;

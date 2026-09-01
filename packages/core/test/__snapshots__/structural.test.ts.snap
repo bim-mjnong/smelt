@@ -1,0 +1,126 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`the structural planner > plans boundary.ts (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 359,
+        "start": 0,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 868,
+        "start": 493,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "typescript",
+  "planner": "structural/v1",
+}
+`;
+
+exports[`the structural planner > plans functions.ts (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 387,
+        "start": 0,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 986,
+        "start": 625,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "typescript",
+  "planner": "structural/v1",
+}
+`;
+
+exports[`the structural planner > plans functions.ts, no focus (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 986,
+        "start": 0,
+      },
+      "reason": {
+        "explanation": "collapsed 5 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "typescript",
+  "planner": "structural/v1",
+}
+`;
+
+exports[`the structural planner > plans long-doc.ts (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 419,
+        "start": 0,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 3596,
+        "start": 3218,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "typescript",
+  "planner": "structural/v1",
+}
+`;
+
+exports[`the structural planner > plans mixed.tsx (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 364,
+        "start": 0,
+      },
+      "reason": {
+        "explanation": "collapsed 3 sibling declarations (1 import statement, 1 interface, 1 function)",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "tsx",
+  "planner": "structural/v1",
+}
+`;
