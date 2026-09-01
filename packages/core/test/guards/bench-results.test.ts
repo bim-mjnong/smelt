@@ -50,8 +50,9 @@ function resultsRows(markdown: string): readonly ResultsRow[] {
   const rows: ResultsRow[] = [];
   for (const line of markdown.split('\n')) {
     const match = DATA_ROW.exec(line.trim());
-    if (match?.groups === undefined) continue;
-    const cells = match.groups['cells'].split('|').map((cell) => cell.trim());
+    const raw = match?.groups?.['cells'];
+    if (raw === undefined) continue;
+    const cells = raw.split('|').map((cell) => cell.trim());
     if (cells[0] === 'case') continue; // header
     if (cells.every((cell) => /^-+$/.test(cell))) continue; // separator
     rows.push({ cells, line });

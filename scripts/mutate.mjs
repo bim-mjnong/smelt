@@ -53,6 +53,7 @@ const GUARDS = [
   'test/guards/persistent-store.test.ts',
   'test/guards/cache-hygiene.test.ts',
   'test/guards/structural.test.ts',
+  'test/guards/bench-results.test.ts',
 ];
 
 /**
@@ -256,6 +257,34 @@ const MUTATIONS = [
     find: '    if (cutBytes <= markerBytes) return;',
     replace: '    if (cutBytes < 128) return;',
     why: 'the profitability check reverted to a guessed constant — a mixed-kind marker can cost more than the cut it replaces, and the output grows',
+  },
+  {
+    kind: 'artifact',
+    id: 'bench-results-extrapolated-claim',
+    guard: 'test/guards/bench-results.test.ts',
+    file: 'bench/RESULTS.md',
+    find: 'here is extrapolated, rounded up, or converted between units.',
+    replace: 'here is extrapolated — savings of up to 94% are typical.',
+    why: "the original pitch's extrapolation vocabulary landing in the one file that exists to hold measurements — Law 4's exact failure, in its most likely home",
+  },
+  {
+    kind: 'artifact',
+    id: 'bench-shipped-in-tarball',
+    guard: 'test/guards/bench-results.test.ts',
+    file: 'package.json',
+    find: '  "files": [\n    "dist",',
+    replace: '  "files": [\n    "dist",\n    "bench",',
+    why: 'the network-capable measurement harness packed into the published tarball — bench/ is equipment, not product, and shipping it smuggles fetch() past the src-only zero-network walk',
+  },
+  {
+    kind: 'artifact',
+    id: 'bench-network-outside-tiers',
+    guard: 'test/guards/bench-results.test.ts',
+    file: 'bench/run.mjs',
+    find: 'const { createSmelter } = await import(distEntry);',
+    replace:
+      "await fetch(new URL('https://example.invalid/telemetry'));\nconst { createSmelter } = await import(distEntry);",
+    why: 'a network call in the default tier-1 path — the harness must be offline by construction outside tier2.mjs/tier3.mjs, or "reproducible offline by a stranger" is a flag away from false',
   },
 ];
 

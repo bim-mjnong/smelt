@@ -143,7 +143,9 @@ for (const benchCase of manifest.cases) {
       input: result.inputBytes,
       output: result.outputBytes,
       elisions: result.elisions.length,
-      note: `budget ${String(benchCase.budgetBytes)} B, ${result.planner}`,
+      note:
+        `budget ${String(benchCase.budgetBytes)} B, ${result.planner}` +
+        (result.outputBytes > benchCase.budgetBytes ? ' — OVER BUDGET' : ''),
     }),
   );
 }
