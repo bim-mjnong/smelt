@@ -79,10 +79,15 @@ export function rankDefinitions(files: readonly FileTagsEntry[]): readonly Ranke
   }
 
   // Cross-file edges: referencing file → defining file, weighted by reference count.
-  // outWeight is each file's total outgoing weight; edgeWeights aggregates per file
-  // pair for the PageRank pass, while rank distribution below re-walks the refs so
-  // each *definition* receives its own share.
+  // outWeight is each file's total outgoing weight — the PageRank edge denominator,
+  // which legitimately grows once per definer file so each edge keeps its full weight.
+  // refsOutByFile is the *measured* count a Law 2 explanation may quote: it adds
+  // `ref.count` exactly once per reference to a name some other file defines, no
+  // matter how many files define it. edgeWeights aggregates per file pair for the
+  // PageRank pass, while rank distribution below re-walks the refs so each
+  // *definition* receives its own share.
   const outWeight = new Map<string, number>(paths.map((path) => [path, 0]));
+  const refsOutByFile = new Map<string, number>(paths.map((path) => [path, 0]));
   const edgeWeights = new Map<string, Map<string, number>>(paths.map((path) => [path, new Map()]));
   const refsInTotal = new Map<string, number>();
   const refsInFiles = new Map<string, number>();
@@ -93,12 +98,15 @@ export function rankDefinitions(files: readonly FileTagsEntry[]): readonly Ranke
       refsInTotal.set(ref.name, (refsInTotal.get(ref.name) ?? 0) + ref.count);
       refsInFiles.set(ref.name, (refsInFiles.get(ref.name) ?? 0) + 1);
       const targets = new Set(definers.map((def) => def.path));
+      let crossFile = false;
       for (const target of [...targets].toSorted()) {
         if (target === path) continue;
+        crossFile = true;
         outWeight.set(path, (outWeight.get(path) ?? 0) + ref.count);
         const row = edgeWeights.get(path)!;
         row.set(target, (row.get(target) ?? 0) + ref.count);
       }
+      if (crossFile) refsOutByFile.set(path, (refsOutByFile.get(path) ?? 0) + ref.count);
     }
   }
 
@@ -157,7 +165,7 @@ export function rankDefinitions(files: readonly FileTagsEntry[]): readonly Ranke
     rank: def.rank,
     refsIn: refsInTotal.get(def.name) ?? 0,
     refsInFiles: refsInFiles.get(def.name) ?? 0,
-    refsOut: outWeight.get(def.path) ?? 0,
+    refsOut: refsOutByFile.get(def.path) ?? 0,
   }));
   return ranked.toSorted(compareRanked);
 }

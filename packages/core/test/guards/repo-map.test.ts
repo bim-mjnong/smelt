@@ -248,4 +248,26 @@ describe('Slice 7 — the repo map keeps its claims', () => {
     await expect(buildRepoMap({ root: fixtureRoot, budgetBytes: 0 })).rejects.toThrow(SmeltError);
     await expect(buildRepoMap({ root: fixtureRoot, budgetBytes: 1.5 })).rejects.toThrow(SmeltError);
   });
+
+  it('counts refsOut once per reference, not once per definer file (Law 4)', async () => {
+    // `dup` is defined in TWO other files. a.ts makes exactly 2 references to it, so
+    // its "references out" is 2 — an implementation that walks the per-definer edge
+    // loop for this number reports 4, and every explanation a.ts's symbols carry
+    // states a number nothing measured.
+    const root = scratch('smelt-repomap-refsout-');
+    writeFileSync(
+      join(root, 'a.ts'),
+      'export function useDup(): number {\n  return dup() + dup();\n}\n' +
+        'export function callUseDup(): number {\n  return useDup();\n}\n',
+    );
+    writeFileSync(join(root, 'b.ts'), 'export function dup(): number {\n  return 1;\n}\n');
+    writeFileSync(join(root, 'c.ts'), 'export function dup(): number {\n  return 2;\n}\n');
+
+    const map = await buildRepoMap({ root, budgetBytes: BUDGET });
+    const useDup = map.entries.find((entry) => entry.name === 'useDup');
+    expect(useDup).toBeDefined();
+    expect(useDup!.refsOut).toBe(2);
+    expect(useDup!.reason.explanation).toContain('makes 2 references out');
+    expect(map.text).toContain('useDup [1 in from 1 file, 2 out]');
+  });
 });

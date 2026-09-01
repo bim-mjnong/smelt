@@ -38,7 +38,11 @@ import type { FileTags } from './tags.ts';
 /** The id stamped on every map this module emits. */
 export const REPO_MAP_ID = 'repomap/v1';
 
-/** Rule id for a symbol that ranked because other code references it. */
+/**
+ * Rule id for a symbol something in the scanned tree references — its own file
+ * included, so its rank may still be zero when every reference is same-file (only
+ * cross-file references move rank).
+ */
 export const REPO_MAP_RANKED_RULE = 'ranked-definition';
 
 /** Rule id for a definition nothing in the scanned tree references. */

@@ -396,6 +396,14 @@ const MUTATIONS = [
     replace: '    if (tags === undefined) {\n      return { defs: [], refs: [] };\n    }',
     why: 'a corrupt cache entry quietly trusted as empty tags instead of discarded loudly — symbols vanish from the map with no warning anywhere',
   },
+  {
+    id: 'repomap-refsout-per-definer',
+    guard: 'test/guards/repo-map.test.ts',
+    file: 'repomap/rank.ts',
+    find: '    refsOut: refsOutByFile.get(def.path) ?? 0,',
+    replace: '    refsOut: outWeight.get(def.path) ?? 0,',
+    why: 'refsOut reported from the PageRank edge denominator, which grows once per definer file — a reference to a name two files define counts double, and every Law 2 explanation states a number nothing measured',
+  },
 ];
 
 function runGuard(guard, guardSrc, guardRoot = corePackage) {
