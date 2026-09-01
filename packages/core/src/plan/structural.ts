@@ -37,9 +37,6 @@ export class StructuralPlanner implements Planner {
   }
 
   plan(_input: PlanInput): Promise<ElisionPlan> {
-    throw new NotImplementedError(
-      'the structural planner',
-      'docs/HANDOFF.md § "Slice 2 — the structural planner"',
-    );
+    throw new NotImplementedError('the structural planner', 'docs/HANDOFF.md § "Slice 2"');
   }
 }
