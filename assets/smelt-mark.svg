@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="smelt">
+  <title>smelt</title>
+  <!--
+    The smelt mark: a bloomery furnace, front elevation, hand-cut.
+
+    Norse materially rather than typographically — forge, iron, charcoal, an ember
+    mouth with a white-hot centre. No runes: sowilo is doubled in the SS insignia and
+    the valknut has been taken over by white-supremacist groups, so the Norse reading
+    here comes from material and geometry, which also ages better than a glyph.
+
+    Every coordinate sits on a whole- or half-unit grid, and the two shoulders are
+    deliberately not mirror images: chisel work, not a CAD extrusion.
+
+    Palette and usage rules: assets/PALETTE.md
+  -->
+  <defs>
+    <linearGradient id="smelt-iron" x1="32" y1="8" x2="32" y2="52" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4A505A" />
+      <stop offset="1" stop-color="#2A2E34" />
+    </linearGradient>
+    <linearGradient id="smelt-mouth" x1="32" y1="31" x2="32" y2="52" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F5893A" />
+      <stop offset="1" stop-color="#E4602F" />
+    </linearGradient>
+    <linearGradient id="smelt-hearth" x1="5" y1="52" x2="59" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3F444C" />
+      <stop offset="1" stop-color="#2A2E34" />
+    </linearGradient>
+  </defs>
+
+  <!-- the flue: the stack's open top, glowing. No horns, no runes. -->
+  <polygon points="25.5,7.5 38.5,7.5 37,3.5 27,3.5" fill="#E4602F" />
+  <polygon points="28.5,7.5 35.5,7.5 34.5,5 29.5,5" fill="#FFF1D9" opacity="0.85" />
+
+  <!-- the furnace: short stack, shoulders, a belly that batters outward to the hearth -->
+  <polygon
+    points="26,7 38,7 43,17 51.5,29 53,52 11,52 13,29 21,17"
+    fill="url(#smelt-iron)"
+    stroke="#666E7A"
+    stroke-width="1.25"
+    stroke-linejoin="miter"
+  />
+
+  <!-- chisel facets: light catching the two cut shoulder planes -->
+  <g fill="none" stroke="#818A97" stroke-width="1" opacity="0.5">
+    <polyline points="21.5,18 24.5,29.5" />
+    <polyline points="42.5,18 39.5,29.5" />
+  </g>
+
+  <!-- the mouth: a pointed arch, ember at the edges -->
+  <polygon points="32,31 38.5,41 38.5,52 25.5,52 25.5,41" fill="url(#smelt-mouth)" />
+  <!-- white-hot core: small, because that is how heat actually looks -->
+  <polygon points="32,36 34.75,42.5 34.75,52 29.25,52 29.25,42.5" fill="#FFF1D9" />
+
+  <!-- hearth: the bar the whole thing stands on -->
+  <polygon
+    points="4,52 60,52 58,60 6,60"
+    fill="url(#smelt-hearth)"
+    stroke="#666E7A"
+    stroke-width="1.25"
+    stroke-linejoin="miter"
+  />
+
+  <!-- the bloom: molten metal pooling at the tap -->
+  <polygon points="27.5,60 36.5,60 34.5,63.5 29.5,63.5" fill="#E4602F" />
+</svg>
