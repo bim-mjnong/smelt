@@ -364,6 +364,8 @@ const MUTATIONS = [
     find: '  const buildMarker = options.marker ?? markerForLanguage(plan.language);',
     replace: '  const buildMarker = options.marker ?? defaultMarker;',
     why: 'bare applyPlan reverted to the bare marker — the documented planStructural → applyPlan composition would land `<<smelt/v1…>>` in a python survivor and break its parse',
+  },
+  {
     id: 'repomap-budget-unenforced',
     guard: 'test/guards/repo-map.test.ts',
     file: 'repomap/map.ts',
