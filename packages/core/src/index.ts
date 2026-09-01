@@ -1,4 +1,4 @@
-import { applyPlan, reconstruct } from './apply.ts';
+import { applyPlan, markerForLanguage, reconstruct } from './apply.ts';
 import type { ApplyOptions, MarkerBuilder, MarkerInfo } from './apply.ts';
 import { detectLanguage } from './detect.ts';
 import { SmeltError } from './errors.ts';
@@ -70,11 +70,12 @@ export type {
   PromptStructure,
   PromptTool,
 } from './cache/prefix.ts';
+export { MARKER_LINE_COMMENT_LEADERS, markerForLanguage } from './apply.ts';
 
 /**
- * Which planner a smelter uses. `'structural'` parses TypeScript and TSX with a
- * bundled grammar and throws {@link GrammarUnavailableError} for anything else —
- * never a silent lexical fallback. See {@link StructuralPlanner}.
+ * Which planner a smelter uses. `'structural'` parses TypeScript, TSX, Rust, Python
+ * and Go with a bundled grammar and throws {@link GrammarUnavailableError} for
+ * anything else — never a silent lexical fallback. See {@link StructuralPlanner}.
  */
 export type Strategy = 'lexical' | 'structural';
 
@@ -172,7 +173,12 @@ export function createSmelter(config: SmelterConfig = {}): Smelter {
         ...(options.focus === undefined ? {} : { focus: options.focus }),
       };
       const plan = await planner.plan(input);
-      return applyPlan(text, plan, store, applyOptions);
+      // The marker follows the *result's* language: where a bare marker line would
+      // break the survivor's syntax (python — see MARKER_LINE_COMMENT_LEADERS), it is
+      // wrapped in the language's line-comment leader. A caller-supplied marker
+      // builder always wins.
+      const marker = config.marker ?? markerForLanguage(plan.language);
+      return applyPlan(text, plan, store, { ...applyOptions, marker });
     },
   };
 }

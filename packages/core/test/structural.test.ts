@@ -11,7 +11,15 @@ import {
 import { MemoryElisionStore } from '../src/store.ts';
 import type { PlanInput } from '../src/types.ts';
 
-import { BOUNDARY_TS, FUNCTIONS_TS, LONG_DOC_TS, MIXED_TSX } from './structural-fixtures.ts';
+import {
+  BOUNDARY_TS,
+  FUNCTIONS_GO,
+  FUNCTIONS_PY,
+  FUNCTIONS_RS,
+  FUNCTIONS_TS,
+  LONG_DOC_TS,
+  MIXED_TSX,
+} from './structural-fixtures.ts';
 
 const FIXTURES: readonly {
   readonly name: string;
@@ -24,6 +32,9 @@ const FIXTURES: readonly {
   { name: 'mixed.tsx', text: MIXED_TSX, language: 'tsx', focus: ['Toolbar'] },
   { name: 'boundary.ts', text: BOUNDARY_TS, language: 'typescript', focus: ['greetTarget'] },
   { name: 'functions.ts, no focus', text: FUNCTIONS_TS, language: 'typescript', focus: [] },
+  { name: 'functions.rs', text: FUNCTIONS_RS, language: 'rust', focus: ['resolve_target'] },
+  { name: 'functions.py', text: FUNCTIONS_PY, language: 'python', focus: ['fetch_user'] },
+  { name: 'functions.go', text: FUNCTIONS_GO, language: 'go', focus: ['HandleRequest'] },
 ];
 
 function inputFor(fixture: (typeof FIXTURES)[number]): PlanInput {
@@ -84,10 +95,10 @@ describe('the structural planner', () => {
   });
 
   it('refuses every language it has not mapped, naming the ones it has', async () => {
-    for (const language of ['unknown', 'python', 'javascript'] as const) {
+    for (const language of ['unknown', 'javascript'] as const) {
       const attempt = planStructural({ ...inputFor(FIXTURES[0]!), language });
       await expect(attempt).rejects.toThrow(GrammarUnavailableError);
-      await expect(attempt).rejects.toThrow(/typescript and tsx/);
+      await expect(attempt).rejects.toThrow(/typescript, tsx, rust, python and go/);
     }
   });
 

@@ -1,5 +1,6 @@
 /**
- * TypeScript and TSX sources the structural-planner tests and guards share.
+ * TypeScript, TSX, Rust, Python and Go sources the structural-planner tests and guards
+ * share.
  *
  * They are template literals rather than files on disk so the guards can import them
  * relatively — the `@guard` alias redirects only the library, and test data must not
@@ -187,5 +188,160 @@ function greetInJapanese(name: string): string {
 /** One more multi-byte sibling so the tail run ends on a function boundary. 🔚 */
 function farewell(name: string): string {
   return \`auf Wiedersehen, \${name} — до свидания\`;
+}
+`;
+
+/** The two-line `///` doc comment {@link FUNCTIONS_RS}'s target must keep. */
+export const RUST_DOC_COMMENT = `/// The function this file is really about.
+/// Its doc comment must survive, both lines of it.`;
+
+/** The outer attribute {@link FUNCTIONS_RS}'s target must keep, alongside its doc. */
+export const RUST_ATTRIBUTE = `#[inline]`;
+
+/**
+ * Rust: two collapsible functions above the target, a struct and an impl below. The
+ * target and the struct both carry outer attributes, because tree-sitter-rust parses
+ * `#[…]` as a top-level *sibling* of the item it decorates — the exact shape that once
+ * detached an attribute (and the doc comment above it) from a kept declaration.
+ */
+export const FUNCTIONS_RS = `/// Parses a raw config string into pairs. Boring on purpose.
+fn parse_config(raw: &str) -> Vec<(String, String)> {
+    raw.lines().filter_map(|l| l.split_once('=')).map(|(k, v)| (k.into(), v.into())).collect()
+}
+
+/// Collapses duplicate slashes in a path. Also boring.
+fn normalise(path: &str) -> String {
+    path.split('/').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("/")
+}
+
+${RUST_DOC_COMMENT}
+${RUST_ATTRIBUTE}
+pub fn resolve_target(name: &str) -> String {
+    format!("target::{}", normalise(name))
+}
+
+/// A struct sibling below the target.
+#[derive(Debug, Clone)]
+pub struct Registry {
+    entries: Vec<String>,
+}
+
+impl Registry {
+    fn insert(&mut self, entry: String) {
+        self.entries.push(entry);
+    }
+}
+`;
+
+/** The docstring {@link FUNCTIONS_PY}'s target must keep, indentation and all. */
+export const PYTHON_DOCSTRING = `    """The function this file is really about.
+
+    Its docstring lives inside the body, so keeping the definition whole
+    keeps the docstring — asserted, not assumed.
+    """`;
+
+/**
+ * Python: statements, a decorated definition and a class above the target, two plain
+ * functions below — so one collapse is the pure `collapsed 2 sibling functions` form
+ * and another has mixed kinds to name. The survivor of this fixture must *reparse* as
+ * Python; the fixture itself parses with zero ERROR nodes, and the guard asserts the
+ * survivor introduces none.
+ */
+export const FUNCTIONS_PY = `"""Fixture module for the python structural tests."""
+
+import json
+
+# A loader nobody asked about.
+def load_config(raw):
+    """Parses a raw JSON config blob."""
+    return json.loads(raw)
+
+@functools.lru_cache
+def cached_count():
+    """A decorated sibling, so the collapse has a wrapper to unwrap."""
+    return 3
+
+class Registry:
+    """Holds every user this imaginary module has seen."""
+
+    def add(self, user):
+        self.users.append(user)
+
+def fetch_user(user_id):
+${PYTHON_DOCSTRING}
+    return {"id": user_id, "count": cached_count()}
+
+def format_user(user):
+    """Renders one user as a line of text."""
+    return "user {}".format(user["id"])
+
+def forget_user(user):
+    """Drops a user on the floor. Nobody calls this."""
+    del user
+`;
+
+/** The two-line `//` doc comment {@link FUNCTIONS_GO}'s target must keep. */
+export const GO_DOC_COMMENT = `// HandleRequest is the function this file is really about.
+// Its doc comment must survive, both lines of it.`;
+
+/**
+ * Go: package clause, import, a function, a type and a method above the target — a
+ * mixed run with kinds to name — and two plain functions below for the pure
+ * `collapsed 2 sibling functions` form.
+ */
+export const FUNCTIONS_GO = `// Package fixture exists for the go structural tests.
+package fixture
+
+import "strings"
+
+// ParseConfig splits raw config into pairs. Boring on purpose.
+func ParseConfig(raw string) []string {
+	return strings.Split(raw, "\\n")
+}
+
+// Registry holds handler names.
+type Registry struct {
+	names []string
+}
+
+// Add registers one handler name.
+func (r *Registry) Add(name string) {
+	r.names = append(r.names, name)
+}
+
+${GO_DOC_COMMENT}
+func HandleRequest(path string) string {
+	return "handled:" + Normalise(path)
+}
+
+// Normalise collapses duplicate slashes. A sibling below the target.
+func Normalise(path string) string {
+	return strings.Join(strings.FieldsFunc(path, func(r rune) bool { return r == '/' }), "/")
+}
+
+// LogLine writes one line nobody reads.
+func LogLine(line string) {
+	println(line)
+}
+`;
+
+/**
+ * Go with a build constraint: `//go:build` must be followed by a blank line (the Go
+ * spec requires it), so it can never *attach* to a declaration — it must be pinned to
+ * the file instead, or the survivor silently loses its build constraint.
+ */
+export const BUILD_TAG_GO = `//go:build linux
+
+// Package tagged exists so the build-tag pinning has something to collapse around.
+package tagged
+
+// Helper is a collapsible sibling with enough doc text to make the cut profitable.
+func Helper(value int) int {
+	return value + 1
+}
+
+// Target is the declaration the focus keeps.
+func Target(value int) int {
+	return value + 2
 }
 `;

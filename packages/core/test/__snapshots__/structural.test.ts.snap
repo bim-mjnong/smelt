@@ -29,6 +29,93 @@ exports[`the structural planner > plans boundary.ts (snapshot) 1`] = `
 }
 `;
 
+exports[`the structural planner > plans functions.go (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 412,
+        "start": 0,
+      },
+      "reason": {
+        "explanation": "collapsed 5 sibling nodes (1 package clause, 1 import declaration, 1 function, 1 type declaration, 1 method)",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 892,
+        "start": 606,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "go",
+  "planner": "structural/v1",
+}
+`;
+
+exports[`the structural planner > plans functions.py (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 449,
+        "start": 0,
+      },
+      "reason": {
+        "explanation": "collapsed 5 sibling nodes (1 statement, 1 import statement, 2 functions, 1 class)",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 910,
+        "start": 709,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "python",
+  "planner": "structural/v1",
+}
+`;
+
+exports[`the structural planner > plans functions.rs (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 384,
+        "start": 0,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 797,
+        "start": 584,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling declarations (1 struct, 1 impl block)",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "rust",
+  "planner": "structural/v1",
+}
+`;
+
 exports[`the structural planner > plans functions.ts (snapshot) 1`] = `
 {
   "elisions": [

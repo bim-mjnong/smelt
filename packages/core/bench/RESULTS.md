@@ -23,3 +23,13 @@ here is extrapolated, rounded up, or converted between units.
 | multi-file-grep | tier 1 | 2026-09-01 | c03abf27bd4a  | —     | bytes | 6451  | 986    | 2        | budget 1500 B, lexical/v1                 |
 | stack-trace     | tier 1 | 2026-09-01 | c03abf27bd4a  | —     | bytes | 542   | 389    | 1        | budget 400 B, lexical/v1                  |
 | build-log       | tier 1 | 2026-09-01 | c03abf27bd4a  | —     | bytes | 6984  | 108    | 1        | budget 800 B, lexical/v1                  |
+
+## run 2026-09-01 — tier 1 — corpus 3613beb4b650
+
+| case            | tier   | date       | corpus commit | model | unit  | input | output | elisions | note                                      |
+| --------------- | ------ | ---------- | ------------- | ----- | ----- | ----- | ------ | -------- | ----------------------------------------- |
+| large-ts-file   | tier 1 | 2026-09-01 | 3613beb4b650  | —     | bytes | 22530 | 3289   | 2        | budget 4000 B, structural/v1              |
+| tsx-component   | tier 1 | 2026-09-01 | 3613beb4b650  | —     | bytes | 1090  | 858    | 1        | budget 700 B, structural/v1 — OVER BUDGET |
+| multi-file-grep | tier 1 | 2026-09-01 | 3613beb4b650  | —     | bytes | 6451  | 986    | 2        | budget 1500 B, lexical/v1                 |
+| stack-trace     | tier 1 | 2026-09-01 | 3613beb4b650  | —     | bytes | 542   | 389    | 1        | budget 400 B, lexical/v1                  |
+| build-log       | tier 1 | 2026-09-01 | 3613beb4b650  | —     | bytes | 6984  | 108    | 1        | budget 800 B, lexical/v1                  |
