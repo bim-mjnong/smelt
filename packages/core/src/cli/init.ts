@@ -40,7 +40,11 @@ export interface InitIo {
   /** Interactive input — the real stdin in `bin.ts`, a scripted stream in tests. */
   readonly input: NodeJS.ReadableStream;
   readonly output: (text: string) => void;
-  /** Where config discovery starts and where new files land. */
+  /**
+   * Where config discovery starts, and where a fresh run's files land. An edit run
+   * writes next to the discovered config instead — which may be an ancestor of `cwd`,
+   * and the "About to write" listing names that directory before anything is written.
+   */
   readonly cwd: string;
 }
 
@@ -357,10 +361,12 @@ async function confirmAndWrite(
 ): Promise<'done' | 'back'> {
   if (choices.budgetBytes === undefined) {
     // Unreachable in the fresh flow (the budget step requires a number) but reachable
-    // from an edit of a config that never had one. Refuse to write a config the CLI
-    // would immediately reject.
+    // from an edit of a config that never had one — `defaultBudgetBytes` is optional,
+    // so such a config parses fine. The wizard still insists: a confirm without a
+    // budget would write a file this wizard just called incomplete. `back` here is a
+    // real `back` — it returns to the caller, never falls forward into the confirm.
     io.output(`No budget is set yet — set one before confirming.\n`);
-    await stepBudget(io, ask, choices);
+    if ((await stepBudget(io, ask, choices)) === 'back') return 'back';
   }
 
   const writes = plannedWrites(choices, dir);

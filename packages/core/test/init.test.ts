@@ -6,7 +6,7 @@ import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CliUsageError } from '../src/errors.ts';
-import { CONFIG_FILE_NAME } from '../src/cli/config.ts';
+import { CONFIG_FILE_NAME, findConfigFile } from '../src/cli/config.ts';
 import type { SmeltConfig } from '../src/cli/config.ts';
 import { MEASURE_STUB_FILE, RERANK_STUB_FILE, runInit } from '../src/cli/init.ts';
 import { EXIT, runCli } from '../src/cli/run.ts';
@@ -22,6 +22,10 @@ let dir: string;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'smelt-init-'));
+  // Discovery walks UP from `dir` to the filesystem root, so a stray
+  // smelt.config.json in the temp tree (or above it) would flip every fresh-run
+  // test into an edit run. Fail loudly here instead of mysteriously below.
+  expect(findConfigFile(dir), 'ancestor smelt.config.json would break these tests').toBeUndefined();
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
@@ -233,6 +237,40 @@ describe('a re-run over an existing config', () => {
   it('refuses a malformed existing config loudly instead of overwriting it', async () => {
     writeFileSync(join(dir, CONFIG_FILE_NAME), '{ not json');
     await expect(wizard(['4000'])).rejects.toThrow(/malformed/);
+  });
+
+  describe('over a valid config that never had a budget', () => {
+    // `defaultBudgetBytes` is optional in the schema, so this config parses fine —
+    // the forced budget prompt at the confirm is the only thing standing between
+    // `done` and writing a budget-less config the wizard itself called incomplete.
+    const budgetless = `${JSON.stringify({ smeltConfig: 1, strategy: 'lexical' }, null, 2)}\n`;
+
+    beforeEach(() => {
+      writeFileSync(join(dir, CONFIG_FILE_NAME), budgetless);
+    });
+
+    it('back at the forced budget prompt returns to the menu instead of falling into the confirm', async () => {
+      const { code, output } = await wizard([
+        'done', // review → forced budget prompt (no budget set)
+        'back', // back out of it → the menu, NOT the confirm
+        'back', // leave the menu without writing
+      ]);
+      expect(code).toBe(EXIT.ok);
+      expect(output).toContain('No budget is set yet');
+      expect(output).not.toContain('About to write'); // never reached the confirm
+      expect(readFileSync(join(dir, CONFIG_FILE_NAME), 'utf8')).toBe(budgetless);
+    });
+
+    it('a budget answered at the forced prompt lands in the written config', async () => {
+      const { code } = await wizard([
+        'done', // review → forced budget prompt
+        '5000', // set one
+        'yes', // confirm
+        'yes', // overwrite smelt.config.json
+      ]);
+      expect(code).toBe(EXIT.ok);
+      expect(readConfig().defaultBudgetBytes).toBe(5000);
+    });
   });
 });
 
