@@ -1,0 +1,202 @@
+import type { ElisionPlan, PlanInput, PlannedElision, Planner } from '../types.ts';
+
+export const LEXICAL_PLANNER_ID = 'lexical/v1';
+
+/**
+ * Rough cost of a marker, in bytes. Used only to decide whether an elision is
+ * *profitable* — cutting four bytes to insert sixty makes the output bigger, and a
+ * context optimizer that grows its input is worse than no optimizer at all.
+ */
+const MARKER_BYTE_ESTIMATE = 64;
+
+/** How hard the head/tail strategy squeezes, in order, when the budget is not met. */
+const HEAD_TAIL_LADDER: readonly number[] = [1, 0.5, 0.25, 0.1, 0.05];
+
+export interface LexicalPlannerOptions {
+  /** Lines of context kept either side of a focus match. Shrinks under budget pressure. */
+  readonly contextLines?: number;
+  /** Never collapse a run shorter than this, however tempting. */
+  readonly minRunLines?: number;
+  /** With no focus terms: lines kept at the top. */
+  readonly headLines?: number;
+  /** With no focus terms: lines kept at the bottom. */
+  readonly tailLines?: number;
+  /** Focus matching is substring, case-insensitive by default. */
+  readonly caseSensitive?: boolean;
+}
+
+interface Line {
+  /** Byte offset of the first byte of the line. */
+  readonly start: number;
+  /** Byte offset one past the last byte of the line, *excluding* its newline. */
+  readonly end: number;
+  readonly text: string;
+}
+
+/**
+ * The fallback planner, and the reference implementation of the whole pipeline.
+ *
+ * It knows nothing about syntax: it keeps the lines you were looking for plus a window
+ * of context, and collapses the runs in between. That is a weak strategy on code and a
+ * perfectly good one on log files, stack traces, JSON dumps and every other thing a
+ * coding agent shovels into a prompt — which is why it is the fallback rather than an
+ * embarrassment. It also runs on languages smelt has no grammar for, so
+ * `language: 'unknown'` is never a dead end.
+ *
+ * Everything here is deterministic and rule-named. Same input, same plan, and every
+ * elision can say which rule produced it.
+ */
+export class LexicalPlanner implements Planner {
+  readonly id = LEXICAL_PLANNER_ID;
+  readonly #options: LexicalPlannerOptions;
+
+  constructor(options: LexicalPlannerOptions = {}) {
+    this.#options = options;
+  }
+
+  plan(input: PlanInput): Promise<ElisionPlan> {
+    return Promise.resolve(planLexical(input, this.#options));
+  }
+}
+
+/**
+ * The synchronous core, exported because it is worth testing and reusing directly.
+ *
+ * `budgetBytes` is a target, not a guarantee. If the smallest context window still
+ * exceeds it, the plan comes back over budget rather than eliding the matches the
+ * caller asked to keep — an optimizer that silently drops the thing you searched for is
+ * the exact failure this design is built to prevent. Callers who need a hard ceiling
+ * check `outputBytes` and decide; smelt will not decide for them.
+ */
+export function planLexical(input: PlanInput, options: LexicalPlannerOptions = {}): ElisionPlan {
+  const lines = splitLines(input.text);
+  const focus = (input.focus ?? []).filter((term) => term.length > 0);
+  const minRunLines = options.minRunLines ?? 3;
+
+  const attempts: readonly (readonly PlannedElision[])[] =
+    focus.length > 0
+      ? ladder(options.contextLines ?? 4).map((context) =>
+          collapse(lines, keepByFocus(lines, focus, context, options.caseSensitive ?? false), {
+            minRunLines,
+            rule: 'focus-window',
+          }),
+        )
+      : HEAD_TAIL_LADDER.map((shrink) =>
+          collapse(
+            lines,
+            keepByHeadTail(
+              lines,
+              Math.max(3, Math.round((options.headLines ?? 40) * shrink)),
+              Math.max(3, Math.round((options.tailLines ?? 20) * shrink)),
+            ),
+            { minRunLines, rule: 'head-tail' },
+          ),
+        );
+
+  const inputBytes = Buffer.byteLength(input.text, 'utf8');
+  const chosen =
+    attempts.find((elisions) => predictOutputBytes(inputBytes, elisions) <= input.budgetBytes) ??
+    attempts[attempts.length - 1]!;
+
+  return {
+    planner: LEXICAL_PLANNER_ID,
+    language: input.language,
+    elisions: chosen,
+  };
+}
+
+/** Context-window sizes to try, largest first. */
+function ladder(start: number): readonly number[] {
+  const sizes: number[] = [];
+  for (let n = start; n >= 0; n -= 1) sizes.push(n);
+  if (sizes.length === 0) sizes.push(0);
+  return sizes;
+}
+
+function predictOutputBytes(inputBytes: number, elisions: readonly PlannedElision[]): number {
+  const removed = elisions.reduce((sum, e) => sum + (e.range.end - e.range.start), 0);
+  return inputBytes - removed + elisions.length * MARKER_BYTE_ESTIMATE;
+}
+
+function splitLines(text: string): readonly Line[] {
+  const lines: Line[] = [];
+  let start = 0;
+  let byte = 0;
+  const raw = text.split('\n');
+  for (let i = 0; i < raw.length; i += 1) {
+    const content = raw[i]!;
+    const contentBytes = Buffer.byteLength(content, 'utf8');
+    byte = start + contentBytes;
+    lines.push({ start, end: byte, text: content });
+    // +1 for the '\n' we split on; the final fragment has none.
+    start = byte + 1;
+  }
+  return lines;
+}
+
+function keepByFocus(
+  lines: readonly Line[],
+  focus: readonly string[],
+  contextLines: number,
+  caseSensitive: boolean,
+): boolean[] {
+  const needles = caseSensitive ? focus : focus.map((t) => t.toLowerCase());
+  const keep: boolean[] = Array.from({ length: lines.length }, () => false);
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const haystack = caseSensitive ? lines[i]!.text : lines[i]!.text.toLowerCase();
+    if (!needles.some((needle) => haystack.includes(needle))) continue;
+    const from = Math.max(0, i - contextLines);
+    const to = Math.min(lines.length - 1, i + contextLines);
+    for (let j = from; j <= to; j += 1) keep[j] = true;
+  }
+  return keep;
+}
+
+function keepByHeadTail(lines: readonly Line[], head: number, tail: number): boolean[] {
+  const keep: boolean[] = Array.from({ length: lines.length }, () => false);
+  for (let i = 0; i < Math.min(head, lines.length); i += 1) keep[i] = true;
+  for (let i = Math.max(0, lines.length - tail); i < lines.length; i += 1) keep[i] = true;
+  return keep;
+}
+
+function collapse(
+  lines: readonly Line[],
+  keep: readonly boolean[],
+  config: { readonly minRunLines: number; readonly rule: string },
+): readonly PlannedElision[] {
+  const elisions: PlannedElision[] = [];
+  let runStart = -1;
+
+  const flush = (endExclusive: number): void => {
+    if (runStart < 0) return;
+    const count = endExclusive - runStart;
+    const range = { start: lines[runStart]!.start, end: lines[endExclusive - 1]!.end };
+    runStart = -1;
+    if (count < config.minRunLines) return;
+    if (range.end - range.start < MARKER_BYTE_ESTIMATE * 2) return;
+    elisions.push({
+      range,
+      reason: {
+        rule: config.rule,
+        explanation: `collapsed ${String(count)} ${count === 1 ? 'line' : 'lines'}${describe(
+          config.rule,
+        )}`,
+      },
+    });
+  };
+
+  for (let i = 0; i < lines.length; i += 1) {
+    if (keep[i] === true) {
+      flush(i);
+    } else if (runStart < 0) {
+      runStart = i;
+    }
+  }
+  flush(lines.length);
+  return elisions;
+}
+
+function describe(rule: string): string {
+  return rule === 'focus-window' ? ' with no match for the focus terms' : ' from the middle';
+}

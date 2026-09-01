@@ -1,0 +1,64 @@
+{
+  "name": "@smeltjs/core",
+  "version": "0.0.0",
+  "description": "Structure-aware, reversible, offline context optimization for AI coding agents.",
+  "license": "Apache-2.0",
+  "author": "mong-x",
+  "homepage": "https://github.com/mong-x/smelt#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mong-x/smelt.git",
+    "directory": "packages/core"
+  },
+  "bugs": "https://github.com/mong-x/smelt/issues",
+  "keywords": [
+    "llm",
+    "context",
+    "tokens",
+    "tree-sitter",
+    "agents",
+    "compression",
+    "prompt-cache",
+    "offline"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "web-tree-sitter": "^0.27.0"
+  },
+  "peerDependencies": {
+    "tree-sitter-wasms": "^0.1.13"
+  },
+  "peerDependenciesMeta": {
+    "tree-sitter-wasms": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "tree-sitter-wasms": "^0.1.13",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}

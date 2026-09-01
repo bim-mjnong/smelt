@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# mutation runner scratch — see scripts/mutate.mjs
+.mutants/
+
+.DS_Store

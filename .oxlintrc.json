@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "pedantic": "off"
+  },
+  "env": {
+    "es2024": true,
+    "node": true
+  },
+  "ignorePatterns": ["**/dist/**", "**/node_modules/**", ".mutants/**"],
+  "rules": {
+    "no-console": "error"
+  },
+  "overrides": [
+    {
+      "files": ["**/*.test.ts", "**/test/**"],
+      "rules": {
+        "no-console": "off"
+      }
+    }
+  ]
+}
