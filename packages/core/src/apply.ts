@@ -86,6 +86,13 @@ export function markerForLanguage(
 }
 
 export interface ApplyOptions {
+  /**
+   * Overrides the marker builder. The default follows the *plan's* language —
+   * {@link markerForLanguage} — so the documented composition
+   * `planStructural → applyPlan` lands a `# `-led marker in python without the caller
+   * wiring it, the same as `createSmelter` does. A bare {@link defaultMarker} in a
+   * python survivor is exactly the parse-breaking failure the leader exists to prevent.
+   */
   readonly marker?: MarkerBuilder;
   /** A consumer-supplied counter. See {@link Measure}; the budget stays in bytes. */
   readonly measure?: Measure;
@@ -109,7 +116,7 @@ export function applyPlan(
   store: ElisionStore,
   options: ApplyOptions = {},
 ): SmeltResult {
-  const buildMarker = options.marker ?? defaultMarker;
+  const buildMarker = options.marker ?? markerForLanguage(plan.language);
   const input = Buffer.from(text, 'utf8');
 
   const ordered = plan.elisions.toSorted((a, b) => a.range.start - b.range.start);

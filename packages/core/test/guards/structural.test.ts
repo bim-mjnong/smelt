@@ -13,6 +13,7 @@ import type { ElisionPlan, PlanInput } from '@guard/types';
 
 import {
   BOUNDARY_TS,
+  BUILD_TAG_GO,
   FUNCTIONS_GO,
   FUNCTIONS_PY,
   FUNCTIONS_RS,
@@ -22,6 +23,7 @@ import {
   LONG_DOC_TS,
   MIXED_TSX,
   PYTHON_DOCSTRING,
+  RUST_ATTRIBUTE,
   RUST_DOC_COMMENT,
 } from '../structural-fixtures.ts';
 
@@ -301,7 +303,11 @@ describe('Slice 4 — rust, python and go keep the same claims', () => {
       text: FUNCTIONS_RS,
       focus: ['resolve_target'],
       signature: 'pub fn resolve_target(name: &str) -> String {',
-      doc: RUST_DOC_COMMENT,
+      // The doc comment, the outer attribute below it, and the signature must survive
+      // *as one block*: tree-sitter-rust parses `#[inline]` as a top-level sibling of
+      // the fn, and the cheap bug is a collapse that keeps the fn but hands its
+      // attribute — and the doc comment, which attaches to the attribute — to the run.
+      doc: `${RUST_DOC_COMMENT}\n${RUST_ATTRIBUTE}\npub fn resolve_target`,
     },
     {
       language: 'python',
@@ -404,5 +410,61 @@ describe('Slice 4 — rust, python and go keep the same claims', () => {
       );
     }
     expect(smelter.reconstruct(result)).toBe(FUNCTIONS_PY);
+  });
+
+  it('bare applyPlan defaults its marker to the plan language — python still parses', async () => {
+    // The documented public composition is `planStructural → applyPlan`, with no
+    // options. If that path defaulted to the bare `<<smelt/v1…>>` marker, a python
+    // survivor would stop parsing — exactly the failure the comment leader prevents —
+    // and only the createSmelter path would keep the claim.
+    const plan = await structuralPlan(FUNCTIONS_PY, ['fetch_user'], 'python');
+    const result = applyPlan(FUNCTIONS_PY, plan, new MemoryElisionStore());
+    expect(result.elisions.length, 'nothing elided — the reparse is vacuous').toBeGreaterThan(0);
+    expect(await parseIssues(result.text)).toEqual([]);
+  });
+
+  it('refuses a python collapse whose marker would comment out kept code on its line', async () => {
+    // tree-sitter-python emits semicolon-separated top-level statements as separate
+    // module children, the second starting mid-line. A `# `-led marker replacing the
+    // first would comment out the rest of the line — the exact statement the caller
+    // asked to keep, syntactically alive as a comment and semantically dead. The
+    // planner must refuse that collapse.
+    const text =
+      'configure_everything_up_front("a deliberately long argument string, padded until ' +
+      'the collapse would clearly pay for its marker", 12345); TARGET_FLAG = True\n';
+    const smelter = createSmelter({ strategy: 'structural' });
+    const result = await smelter.smelt(text, {
+      language: 'python',
+      budgetBytes: 10,
+      focus: ['TARGET_FLAG'],
+    });
+    // The kept statement is still real code: its line is not a comment…
+    const flagLine = result.text.split('\n').find((line) => line.includes('TARGET_FLAG = True'));
+    expect(flagLine, 'the kept statement vanished entirely').toBeDefined();
+    expect(
+      flagLine!.trimStart().startsWith('#'),
+      `the kept statement was swallowed into a comment: ${flagLine!}`,
+    ).toBe(false);
+    // …and the survivor still parses as python.
+    expect(await parseIssues(result.text)).toEqual([]);
+    expect(smelter.reconstruct(result)).toBe(text);
+  });
+
+  it('pins a go build-tag comment to the file — it never collapses into a run', async () => {
+    // `//go:build` must be followed by a blank line (the Go spec requires it), so it
+    // can never attach to a declaration — and a collapse that swallows it silently
+    // changes which builds see the file. The planner pins it instead.
+    const smelter = createSmelter({ strategy: 'structural' });
+    const result = await smelter.smelt(BUILD_TAG_GO, {
+      language: 'go',
+      budgetBytes: 10,
+      focus: ['Target'],
+    });
+    expect(
+      result.elisions.length,
+      'nothing elided — the build-tag assertion below is vacuous',
+    ).toBeGreaterThan(0);
+    expect(result.text, 'the build constraint did not survive').toContain('//go:build linux');
+    expect(smelter.reconstruct(result)).toBe(BUILD_TAG_GO);
   });
 });

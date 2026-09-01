@@ -310,6 +310,26 @@ frozen wire surface: the `<<smelt/v1: … >>` core is byte-identical and still v
 in band, and the leader is part of the substituted marker text, so `outputRange` covers
 it and reconstruction stays byte-exact. Brace-delimited languages keep the bare marker.
 
+Three follow-up decisions, found in review and each guarded by a mutation:
+
+- **Rust outer attributes ride forward.** tree-sitter-rust parses `#[…]` as a
+  top-level _sibling_ of the item it decorates, so a unit boundary between them let a
+  collapse strip `#[derive(…)]` — and the doc comment above it, which attaches to the
+  attribute — off a kept declaration. Attributes (and their attached comments) now
+  attach unconditionally to the following item, the way the language means them.
+- **A line-comment marker must own its whole line.** Python emits
+  semicolon-separated top-level statements as separate nodes, the second starting
+  mid-line; a `# `-led marker replacing the first would comment out the kept one. The
+  planner refuses a collapse whose range does not end at end-of-line in such languages.
+- **`//go:build` is pinned to the file.** The Go spec's mandatory blank line after a
+  build constraint means it can never attach to a declaration, and collapsing it
+  silently changes which builds see the file — so it never collapses at all.
+
+And one default corrected: bare `applyPlan` now follows the plan's language when
+picking its marker (`markerForLanguage`), so the documented
+`planStructural → applyPlan` composition keeps a python survivor parsing without the
+caller wiring the marker — the same behaviour `createSmelter` already had.
+
 **Acceptance criteria**
 
 - [x] One fixture per language, each with a sibling collapse and a preserved doc comment (`///`, docstring, `//`). Snapshot-tested, and determinism is asserted over every fixture.

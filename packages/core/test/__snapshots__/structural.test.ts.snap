@@ -102,8 +102,8 @@ exports[`the structural planner > plans functions.rs (snapshot) 1`] = `
     },
     {
       "range": {
-        "end": 763,
-        "start": 574,
+        "end": 797,
+        "start": 584,
       },
       "reason": {
         "explanation": "collapsed 2 sibling declarations (1 struct, 1 impl block)",

@@ -195,7 +195,15 @@ function farewell(name: string): string {
 export const RUST_DOC_COMMENT = `/// The function this file is really about.
 /// Its doc comment must survive, both lines of it.`;
 
-/** Rust: two collapsible functions above the target, a struct and an impl below. */
+/** The outer attribute {@link FUNCTIONS_RS}'s target must keep, alongside its doc. */
+export const RUST_ATTRIBUTE = `#[inline]`;
+
+/**
+ * Rust: two collapsible functions above the target, a struct and an impl below. The
+ * target and the struct both carry outer attributes, because tree-sitter-rust parses
+ * `#[…]` as a top-level *sibling* of the item it decorates — the exact shape that once
+ * detached an attribute (and the doc comment above it) from a kept declaration.
+ */
 export const FUNCTIONS_RS = `/// Parses a raw config string into pairs. Boring on purpose.
 fn parse_config(raw: &str) -> Vec<(String, String)> {
     raw.lines().filter_map(|l| l.split_once('=')).map(|(k, v)| (k.into(), v.into())).collect()
@@ -207,11 +215,13 @@ fn normalise(path: &str) -> String {
 }
 
 ${RUST_DOC_COMMENT}
+${RUST_ATTRIBUTE}
 pub fn resolve_target(name: &str) -> String {
     format!("target::{}", normalise(name))
 }
 
 /// A struct sibling below the target.
+#[derive(Debug, Clone)]
 pub struct Registry {
     entries: Vec<String>,
 }
@@ -312,5 +322,26 @@ func Normalise(path string) string {
 // LogLine writes one line nobody reads.
 func LogLine(line string) {
 	println(line)
+}
+`;
+
+/**
+ * Go with a build constraint: `//go:build` must be followed by a blank line (the Go
+ * spec requires it), so it can never *attach* to a declaration — it must be pinned to
+ * the file instead, or the survivor silently loses its build constraint.
+ */
+export const BUILD_TAG_GO = `//go:build linux
+
+// Package tagged exists so the build-tag pinning has something to collapse around.
+package tagged
+
+// Helper is a collapsible sibling with enough doc text to make the cut profitable.
+func Helper(value int) int {
+	return value + 1
+}
+
+// Target is the declaration the focus keeps.
+func Target(value int) int {
+	return value + 2
 }
 `;

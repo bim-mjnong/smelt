@@ -330,6 +330,38 @@ const MUTATIONS = [
     replace: '',
     why: 'the python marker landing as a bare `<<smelt/v1 …>>` line — significant indentation lets the ERROR node swallow the neighbouring definitions, so the survivor stops being python at all',
   },
+  {
+    id: 'structural-rust-attribute-detached',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: "    attributeTypes: new Set(['attribute_item']),",
+    replace: '    attributeTypes: new Set(),',
+    why: 'rust outer attributes treated as their own units again — a kept declaration loses its `#[inline]`, and the doc comment above it, to the sibling collapse',
+  },
+  {
+    id: 'structural-python-midline-marker-comments-out-kept-code',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: '    if (markerIsLineComment && !restOfLineIsBlank(input.text, group[group.length - 1]!.end)) {\n      return;\n    }',
+    replace: '',
+    why: 'the mid-line refusal dropped — a `# `-led marker replacing the first of two semicolon-separated statements comments out the kept one, syntactically alive and semantically dead',
+  },
+  {
+    id: 'structural-go-buildtag-collapsed',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: '    pinnedCommentPattern: /^\\/\\/(go:build|\\s*\\+build)\\s/,',
+    replace: '',
+    why: 'the build-tag pin removed — `//go:build linux` collapses into the head run and the survivor silently loses its build constraint',
+  },
+  {
+    id: 'apply-default-marker-ignores-language',
+    guard: 'test/guards/structural.test.ts',
+    file: 'apply.ts',
+    find: '  const buildMarker = options.marker ?? markerForLanguage(plan.language);',
+    replace: '  const buildMarker = options.marker ?? defaultMarker;',
+    why: 'bare applyPlan reverted to the bare marker — the documented planStructural → applyPlan composition would land `<<smelt/v1…>>` in a python survivor and break its parse',
+  },
 ];
 
 function runGuard(guard, guardSrc, guardRoot = corePackage) {
