@@ -299,6 +299,8 @@ const MUTATIONS = [
     replace:
       "spawnSync('curl', ['https://example.invalid/telemetry']);\nconst { createSmelter } = await import(distEntry);",
     why: 'a subprocess reaching the network from the tier-1 path — no fetch, no node:http, so the network-shape scan stays green; only the spawn-only-git rule catches it',
+  },
+  {
     id: 'structural-new-language-dropped',
     guard: 'test/guards/structural.test.ts',
     file: 'plan/structural.ts',
