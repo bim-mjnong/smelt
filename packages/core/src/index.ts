@@ -58,6 +58,18 @@ export {
   runCli,
 } from './cli/run.ts';
 export type { CliIo, CliJsonEnvelope, SmeltInvocation } from './cli/run.ts';
+export {
+  ANTHROPIC_PROMPT_CACHE_FACTS,
+  CACHE_BREAKER_RULES,
+  detectCacheBreakers,
+  findPrefixDivergence,
+} from './cache/prefix.ts';
+export type {
+  CacheWarning,
+  PrefixDivergence,
+  PromptStructure,
+  PromptTool,
+} from './cache/prefix.ts';
 
 /** Which planner a smelter uses. `'structural'` throws in v1 — see {@link StructuralPlanner}. */
 export type Strategy = 'lexical' | 'structural';

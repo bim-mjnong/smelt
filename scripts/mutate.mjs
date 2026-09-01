@@ -6,8 +6,8 @@
  * ships with at least one *mutation*: a specific, minimal break in the source that the
  * guard must catch. This script copies `packages/core/src` to a scratch directory,
  * applies one mutation, points the guard at the copy via `SMELT_GUARD_SRC`, and
- * asserts the guard goes **red**. A mutation the guard survives is reported as a
- * failure of the *guard*, not of the mutation.
+ * asserts the guard goes **red**. Sixteen mutations across seven guards; a mutation the
+ * guard survives is reported as a failure of the *guard*, not of the mutation.
  *
  * It also runs every guard against the pristine tree first, because a guard that fails
  * on clean source proves nothing when it fails on broken source.
@@ -51,6 +51,7 @@ const GUARDS = [
   'test/guards/marker-format.test.ts',
   'test/guards/third-party.test.ts',
   'test/guards/persistent-store.test.ts',
+  'test/guards/cache-hygiene.test.ts',
 ];
 
 /**
@@ -175,6 +176,23 @@ const MUTATIONS = [
     find: "    this.#appendLog('hit', hash);",
     replace: "    // this.#appendLog('hit', hash);",
     why: 'the retrieval journal never written — the expansion rate resets to a flattering zero on every restart',
+    id: 'cache-hygiene-rewrites-input',
+    guard: 'test/guards/cache-hygiene.test.ts',
+    file: 'cache/prefix.ts',
+    find: '  const keys = Object.keys(record);',
+    replace:
+      '  const keys = Object.keys(record).toSorted();\n' +
+      '  for (const key of keys) { const kept = record[key]; delete record[key]; record[key] = kept; }',
+    why: 'the helpful in-place fix — sorting the caller\'s JSON keys for the cache — that "detect and warn, never rewrite" exists to refuse',
+  },
+  {
+    id: 'cache-hit-rate-claimed',
+    guard: 'test/guards/cache-hygiene.test.ts',
+    file: 'cache/prefix.ts',
+    find: 'export const ANTHROPIC_PROMPT_CACHE_FACTS = {',
+    replace:
+      '// smelt achieves a 90% cache hit rate\nexport const ANTHROPIC_PROMPT_CACHE_FACTS = {',
+    why: "the original pitch's unsupported figure reappearing as a comment — the exact claim Law 4 was written against",
   },
 ];
 

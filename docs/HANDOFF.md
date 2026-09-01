@@ -164,8 +164,9 @@ Everything below exists, is typechecked, linted, and covered. `pnpm verify` is g
 | `packages/core/test/guards/marker-format.test.ts`     | The wire surface. The rendered marker is pinned per version: the format cannot change without the version changing, and an unknown version fails.                                                                                                 |
 | `packages/core/test/guards/third-party.test.ts`       | Attribution. Reruns the real generator and fails if the committed `THIRD-PARTY.md` differs; also proves the generator refuses an unattributed grammar.                                                                                            |
 | `packages/core/test/guards/persistent-store.test.ts`  | Law 3 across a process boundary. A damaged blob is refused as `StoreCorruptionError`, never returned; the retrieval counters survive a restart; "we hold damaged bytes" stays distinct from "never existed".                                      |
+| `packages/core/test/guards/cache-hygiene.test.ts`     | Slice 6's promise: cache-prefix hygiene detects and warns, never rewrites — inputs stay unmutated, no export returns a "fixed" prompt, and no cache-hit-rate figure exists anywhere in `src`.                                                     |
 | `packages/core/test/guards/_source.ts`                | Shared source-walking helpers: `guardSrcRoot()`, `guardRoot()`, and the string/comment stripper that stops `net/policy.ts` reporting its own word list.                                                                                           |
-| `scripts/mutate.mjs`                                  | **The meta-guard.** Fourteen mutations across the six guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                                  |
+| `scripts/mutate.mjs`                                  | **The meta-guard.** Sixteen mutations across the seven guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                                 |
 | `scripts/bundle-grammars.mjs`                         | Copies the grammars `WASM_BY_LANGUAGE` names into the package, so they ship. Reads the built map rather than keeping a second list.                                                                                                               |
 | `scripts/generate-third-party.mjs`                    | Generates `THIRD-PARTY.md`. The grammar ↔ provenance mapping is a partition: an unattributed grammar throws.                                                                                                                                      |
 | `scripts/check-fresh-clone.sh`                        | Installs and verifies from `git archive` output — tracked files only.                                                                                                                                                                             |
@@ -302,17 +303,24 @@ supported engine range. The storage layout is documented on the class.
 - [x] Counters survive a restart: every retrieval appends one fsynced line to an append-only journal, and `stats()` is a fold over it, so `expansionRate` stays meaningful across a session.
 - [x] Concurrent writers do not corrupt the store. Tested with two processes, not two promises — `test/store-dir.test.ts` spawns two real `node` subprocesses against one directory. Writes are write-temp → fsync → `link(2)` (atomic, no-clobber), and `pnpm mutate` proves the verify-on-read and counter-persistence guards can go red.
 
-### Slice 6 — cache-prefix hygiene
+### Slice 6 — cache-prefix hygiene — **SHIPPED**
 
 Provider prompt caches invalidate on any prefix byte change, so a context optimizer that
 reorders or rewrites a prompt prefix can cost more than it saves. Headroom's CacheAligner
-detects and warns about this volatility; **it never rewrites**, and neither should this.
+detects and warns about this volatility; **it never rewrites**, and neither does this.
+
+**Shipped as** `src/cache/prefix.ts` — pure functions, zero new dependencies, exported
+from the package entrypoint. Provider cache facts (byte-matched prefix over
+tools → system → messages, ≈1024-token minimum, 4 breakpoints, 5 min/1 h TTL,
+1.25×/2× write and ≈0.1× read pricing) are encoded as cited constants naming
+Anthropic's docs and the date they were verified. Guarded by
+`test/guards/cache-hygiene.test.ts`, with two mutations proving it goes red.
 
 **Acceptance criteria**
 
-- [ ] A function that, given two successive prompt prefixes, reports the byte offset of first divergence and what changed.
-- [ ] Warnings only. No automatic rewriting of anybody's prompt — an optimizer that silently edits a prefix to help a cache is exactly the class of magic this library refuses.
-- [ ] No claim about cache hit rates anywhere. See Law 4; this is the specific claim that was wrong in the original pitch.
+- [x] A function that, given two successive prompt prefixes, reports the byte offset of first divergence and what changed — `findPrefixDivergence()`, UTF-8 byte offsets, excerpts that never split a multi-byte character.
+- [x] Warnings only. No automatic rewriting of anybody's prompt — an optimizer that silently edits a prefix to help a cache is exactly the class of magic this library refuses. `detectCacheBreakers()` names each silent breaker (system-prompt timestamps and UUIDs, unsorted JSON keys, a tool set that varies between calls) with the `ElisionReason`-style rule id + explanation pair; the guard asserts on frozen inputs that nothing is ever mutated or "fixed".
+- [x] No claim about cache hit rates anywhere. See Law 4; this is the specific claim that was wrong in the original pitch. The guard scans every source file for the phrase and a mutation proves the scan can go red.
 
 ### Slice 7 — the repo-map planner (cross-file)
 
@@ -352,8 +360,8 @@ pnpm mutate
 ```
 
 It copies `packages/core/src` to a scratch tree, applies one deliberate break, points the
-guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Fourteen
-mutations across six guards; a survivor is reported as a hole in the guard, not in the
+guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Sixteen
+mutations across seven guards; a survivor is reported as a hole in the guard, not in the
 mutation.
 
 Not every guard guards source code, so there is a second mutation kind: an `artifact`
