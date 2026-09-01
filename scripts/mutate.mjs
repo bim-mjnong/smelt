@@ -6,11 +6,8 @@
  * ships with at least one *mutation*: a specific, minimal break in the source that the
  * guard must catch. This script copies `packages/core/src` to a scratch directory,
  * applies one mutation, points the guard at the copy via `SMELT_GUARD_SRC`, and
- * asserts the guard goes **red**. Sixteen mutations across seven guards; a mutation the
+ * asserts the guard goes **red**. Twenty mutations across eight guards; a mutation the
  * guard survives is reported as a failure of the *guard*, not of the mutation.
- * asserts the guard goes **red**. Sixteen mutations across six guards; a mutation the
- * guard survives is reported as a
- * failure of the *guard*, not of the mutation.
  *
  * It also runs every guard against the pristine tree first, because a guard that fails
  * on clean source proves nothing when it fails on broken source.
