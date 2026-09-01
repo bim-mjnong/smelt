@@ -61,6 +61,15 @@ export class UnknownHashError extends SmeltError {
 }
 
 /**
+ * The CLI was invoked wrongly — a missing `--budget`, an unknown flag, a budget that
+ * is not a number. Distinct from every other `SmeltError` so the CLI can exit with a
+ * usage code rather than pretending the library refused.
+ */
+export class CliUsageError extends SmeltError {
+  override readonly name = 'CliUsageError';
+}
+
+/**
  * Two different blobs hashed to the same key. Astronomically unlikely, and yet: the
  * alternative to throwing is handing the model the wrong bytes and calling it a
  * retrieval, which is precisely the silent failure this library exists to avoid.

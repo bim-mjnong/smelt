@@ -17,6 +17,23 @@ export function packageRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 }
 
+/** The repository root. */
+export function repoRoot(): string {
+  return resolve(packageRoot(), '../..');
+}
+
+/**
+ * The tree a *file-level* guard reads its committed artefacts from — `THIRD-PARTY.md`,
+ * for instance. Defaults to this package's real root; the mutation runner overrides it
+ * with a directory holding a deliberately stale copy, so a freshness guard can be
+ * watched going red without anything touching the working tree.
+ */
+export function guardRoot(): string {
+  const override = process.env['SMELT_GUARD_ROOT'];
+  if (override !== undefined && override !== '') return resolve(override);
+  return packageRoot();
+}
+
 /** Every `.ts` file under the guard source root, as paths relative to that root. */
 export function allSourceFiles(root = guardSrcRoot()): readonly string[] {
   const found: string[] = [];

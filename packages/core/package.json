@@ -28,7 +28,9 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "grammars",
+    "README.md",
+    "THIRD-PARTY.md"
   ],
   "exports": {
     ".": {
@@ -37,23 +39,19 @@
     },
     "./package.json": "./package.json"
   },
+  "bin": {
+    "smelt": "./dist/cli/bin.js"
+  },
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/bundle-grammars.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepack": "pnpm run build && node ../../scripts/generate-third-party.mjs"
   },
   "dependencies": {
     "web-tree-sitter": "^0.27.0"
-  },
-  "peerDependencies": {
-    "tree-sitter-wasms": "^0.1.13"
-  },
-  "peerDependenciesMeta": {
-    "tree-sitter-wasms": {
-      "optional": true
-    }
   },
   "devDependencies": {
     "@types/node": "^26.4.0",

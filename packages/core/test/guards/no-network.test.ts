@@ -25,13 +25,13 @@ import {
 /**
  * ZERO-NETWORK GUARD — Law 1.
  *
- * This test fails if any module reachable from the public entrypoint can reach the
+ * This test fails if any module reachable from a published entrypoint can reach the
  * network. It is a *partition of a discovered set*, not an allowlist over an assumed
  * one: it walks the real import graph and classifies every edge it finds into exactly
  * one of five buckets. An import that matches nothing — a transport nobody thought to
  * forbid — lands in "unclassified" and fails. Forgetting cannot be silent.
  *
- * Three separate holes are closed here, because each one has let a check pass while
+ * Four separate holes are closed here, because each one has let a check pass while
  * doing nothing:
  *
  *  1. *Vacuous pass* — a walker with a broken entrypoint visits zero files and reports
@@ -41,19 +41,77 @@ import {
  *     declared unreachable.
  *  3. *Unclassified dependency* — a package added to `package.json` that no list
  *     mentions. Checked directly against the manifest.
+ *  4. *Unwalked entrypoint* — the CLI. A `bin` is a second front door, and a walk that
+ *     only started at `index.ts` would never scan it, so the most argv-shaped, most
+ *     tempting place to add a network call would be the one place unguarded. The
+ *     entrypoints are therefore **derived from `exports` and `bin` in the manifest**,
+ *     not listed here: adding a binary adds it to the walk automatically.
  *
  * Watching it fail is not optional. See CONTRIBUTING.md § "A guard nobody has watched
  * fail is not a guard" for the recorded transcript, and `pnpm mutate` to reproduce it.
  */
 
-const ENTRYPOINT = 'index.ts';
-
 /**
- * Modules that are legitimately not reachable from `index.ts`. Empty today, and it must
- * stay justified line by line — this is the escape hatch, so it is the thing to be
+ * Modules that are legitimately not reachable from any entrypoint. Empty today, and it
+ * must stay justified line by line — this is the escape hatch, so it is the thing to be
  * suspicious of in review.
  */
 const UNREACHABLE_BY_DESIGN: readonly string[] = [];
+
+interface Manifest {
+  readonly dependencies?: Record<string, string>;
+  readonly peerDependencies?: Record<string, string>;
+  readonly exports?: unknown;
+  readonly bin?: Record<string, string>;
+  readonly files?: readonly string[];
+}
+
+function manifest(): Manifest {
+  return JSON.parse(readFileSync(resolve(packageRoot(), 'package.json'), 'utf8')) as Manifest;
+}
+
+/** Every `./dist/**.js` path anywhere inside a JSON value. */
+function distPaths(value: unknown, found: string[] = []): readonly string[] {
+  if (typeof value === 'string') {
+    if (/^\.\/dist\/.+\.js$/.test(value)) found.push(value);
+    return found;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) distPaths(item, found);
+    return found;
+  }
+  if (typeof value === 'object' && value !== null) {
+    for (const item of Object.values(value)) distPaths(item, found);
+  }
+  return found;
+}
+
+/**
+ * The published front doors, as source paths.
+ *
+ * Derived from the manifest so it cannot fall behind it: every `./dist/x/y.js` the
+ * package advertises maps to `x/y.ts` in `src`. A declared entrypoint with no source
+ * file is a failure, not a skip — that would be the vacuous case wearing a new hat.
+ */
+function entrypoints(root: string): readonly string[] {
+  const { exports: exported, bin } = manifest();
+  const declared = [...new Set([...distPaths(exported), ...distPaths(bin)])].toSorted();
+
+  const missing: string[] = [];
+  const sources = declared.map((path) => {
+    const source = path.replace(/^\.\/dist\//, '').replace(/\.js$/, '.ts');
+    if (!existsSync(join(root, source))) missing.push(`${path} → src/${source}`);
+    return source;
+  });
+  if (missing.length > 0) {
+    throw new Error(
+      `the manifest advertises entrypoints with no source file: ${missing.join(', ')}. ` +
+        `The zero-network walk starts at these, so a broken mapping would silently ` +
+        `shrink the guard.`,
+    );
+  }
+  return sources;
+}
 
 interface Edge {
   readonly from: string;
@@ -92,12 +150,14 @@ function classify(edge: Edge, root: string): Classification {
 interface WalkResult {
   readonly visited: readonly string[];
   readonly edges: readonly (Edge & { readonly classification: Classification })[];
+  readonly entrypoints: readonly string[];
 }
 
 function walk(root: string): WalkResult {
   const visited: string[] = [];
   const edges: (Edge & { classification: Classification })[] = [];
-  const queue = [ENTRYPOINT];
+  const starts = entrypoints(root);
+  const queue = [...starts];
 
   while (queue.length > 0) {
     const file = queue.shift()!;
@@ -112,20 +172,38 @@ function walk(root: string): WalkResult {
       if (classification.kind === 'relative') queue.push(classification.target);
     }
   }
-  return { visited, edges };
+  return { visited, edges, entrypoints: starts };
 }
 
 describe('Law 1 — zero network', () => {
   const root = guardSrcRoot();
   const result = walk(root);
 
+  it('starts from every front door the manifest advertises', () => {
+    expect(
+      result.entrypoints.length,
+      'no entrypoints derived from the manifest — the walk would be vacuous',
+    ).toBeGreaterThanOrEqual(2);
+    expect(result.entrypoints).toContain('index.ts');
+    const { bin } = manifest();
+    expect(
+      Object.keys(bin ?? {}),
+      'the CLI ships as a `bin` on this package (one package, one version, one install) ' +
+        'and the walk starts from it, so losing the bin would quietly shrink the guard',
+    ).toContain('smelt');
+    for (const entry of result.entrypoints) expect(result.visited).toContain(entry);
+  });
+
   it('actually walked the graph (a guard that visits nothing passes vacuously)', () => {
-    expect(result.visited).toContain(ENTRYPOINT);
+    expect(result.visited).toContain('index.ts');
     expect(result.visited.length).toBeGreaterThanOrEqual(8);
     expect(result.edges.length).toBeGreaterThanOrEqual(15);
-    // The two modules with the most dangerous surface must be in the walk, by name.
+    // The modules with the most dangerous surface must be in the walk, by name: the
+    // policy itself, the grammar loader, and the CLI's argument handling.
     expect(result.visited).toContain('net/policy.ts');
     expect(result.visited).toContain('plan/grammar.ts');
+    expect(result.visited).toContain('cli/args.ts');
+    expect(result.visited).toContain('cli/run.ts');
   });
 
   it('reaches every source file, or says why not', () => {
@@ -135,9 +213,9 @@ describe('Law 1 — zero network', () => {
     );
     expect(
       unreached,
-      `these modules are never reached from ${ENTRYPOINT}, so nothing scans them for ` +
-        `network access. Export them from the entrypoint, or justify them in ` +
-        `UNREACHABLE_BY_DESIGN.`,
+      `these modules are never reached from any manifest entrypoint, so nothing scans ` +
+        `them for network access. Export them from the entrypoint, reach them from a ` +
+        `\`bin\`, or justify them in UNREACHABLE_BY_DESIGN.`,
     ).toEqual([]);
   });
 
@@ -176,13 +254,9 @@ describe('Law 1 — zero network', () => {
   });
 
   it('declares no dependency that could reach the network', () => {
-    const manifest = JSON.parse(readFileSync(resolve(packageRoot(), 'package.json'), 'utf8')) as {
-      dependencies?: Record<string, string>;
-      peerDependencies?: Record<string, string>;
-    };
     const declared = [
-      ...Object.keys(manifest.dependencies ?? {}),
-      ...Object.keys(manifest.peerDependencies ?? {}),
+      ...Object.keys(manifest().dependencies ?? {}),
+      ...Object.keys(manifest().peerDependencies ?? {}),
     ];
     expect(
       declared.length,
