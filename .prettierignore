@@ -8,3 +8,6 @@ assets/*.svg
 packages/core/THIRD-PARTY.md
 .claude/
 .remember/
+
+# bench corpus — byte-exact committed tool outputs; formatting them would falsify them
+packages/core/bench/corpus/

@@ -1,0 +1,10 @@
+file:///Users/mjnong/repos/smelt/.claude/worktrees/wf_5f0ad6e1-102-1/packages/core/dist/store.js:33
+            throw new UnknownHashError(hash);
+                  ^
+
+UnknownHashError: smelt: no stored content for hash "feedfacedeadbeef". It was never elided, or the store was reset.
+    at MemoryElisionStore.retrieve (file:///Users/mjnong/repos/smelt/.claude/worktrees/wf_5f0ad6e1-102-1/packages/core/dist/store.js:33:19)
+    at [eval]:5:9
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v26.4.0

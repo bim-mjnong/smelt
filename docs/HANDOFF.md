@@ -255,9 +255,20 @@ signature, doc comment, body — and collapse its _siblings_ into one marker nam
 - [x] A snapshot test per fixture, so a plan change shows up as a reviewable diff.
 - [x] `pnpm mutate` gains a mutation for whatever new guarantee this slice claims.
 
-### Slice 3 — the measurement harness
+### Slice 3 — the measurement harness — **SHIPPED** (tier 3 built, not yet run)
 
 The slice that lets smelt say a number. Until this exists, Law 4 forbids all of them.
+
+**Shipped as** `packages/core/bench/` — outside `src/`, so the zero-network guard's
+walk is untouched, and outside `files`, so it ships in no tarball. A committed corpus
+of real tool outputs (`bench/corpus/`, provenance per file in `bench/README.md`), a
+runner (`pnpm bench`, node + built dist, zero dependencies), and an append-only
+`bench/RESULTS.md`. Network access exists only in `tier2.mjs`/`tier3.mjs`, loaded
+dynamically on their tiers; tier 1 is offline by construction, and
+`test/guards/bench-results.test.ts` plus three mutations keep it that way. Tier 3 is
+implemented but has not been run — it is the paid tier, the founder runs it once and
+commits `bench/tier3-log/` — so no expansion-rate number exists yet, and none is
+claimed.
 
 **Build:** `packages/core/bench/` — a corpus of real tool outputs (files, greps, stack
 traces, `cargo build` output), a set of realistic tasks with known answers, and a runner
@@ -274,12 +285,12 @@ tokenizer changed by ~30% between generations, and an edit would silently rewrit
 
 **Acceptance criteria**
 
-- [ ] The corpus is committed, or fetched from a pinned public commit. Reproducible by a stranger.
-- [ ] Reports bytes _and_ tokens, per the tiers above. Never a byte count converted to tokens with a fudge factor.
-- [ ] Reports expansion rate per case, and the aggregate. A case where the model retrieved everything back is reported as a **loss**, with its input.
-- [ ] Output is a committed markdown table with the date, the corpus commit, and the model used. A number without those three is not a measurement.
-- [ ] The README's numbers section is written from this table or stays empty. No rounding up, no "up to".
-- [ ] The harness has no network access on the smelt side. Model calls are the harness's, made explicitly, outside the library.
+- [x] The corpus is committed, or fetched from a pinned public commit. Reproducible by a stranger. Committed under `bench/corpus/`; the runner refuses to run against uncommitted corpus changes, so every row's corpus commit is real.
+- [x] Reports bytes _and_ tokens, per the tiers above. Never a byte count converted to tokens with a fudge factor. Tokens come only from `count_tokens` (tier 2, key-gated) and every token row names its model; no conversion exists anywhere in the harness, and the guard's row check plus `resultRow()`'s own throw enforce it.
+- [ ] Reports expansion rate per case, and the aggregate. A case where the model retrieved everything back is reported as a **loss**, with its input. _Implemented (tier 3, `bench/tier3.mjs`: real model calls, the store's own counters, per-case retrieval log, LOSS verdict), but deliberately not run — it is the paid tier; the founder runs it once and commits `bench/tier3-log/` per Decision 8. Unticked until that run exists._
+- [x] Output is a committed markdown table with the date, the corpus commit, and the model used. A number without those three is not a measurement. `bench/RESULTS.md`, append-only, guarded.
+- [x] The README's numbers section is written from this table or stays empty. No rounding up, no "up to". It stays empty until the founder decides otherwise; the guard forbids "up to" in the results file itself.
+- [x] The harness has no network access on the smelt side. Model calls are the harness's, made explicitly, outside the library. `src/` cannot reach `bench/`; the guard confines network shapes to `tier2.mjs`/`tier3.mjs` and a mutation proves it goes red.
 
 ### Slice 4 — structural planning for Rust, Python and Go
 

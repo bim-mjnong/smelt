@@ -15,6 +15,7 @@
     "format:check": "prettier --check .",
     "mutate": "node scripts/mutate.mjs",
     "generate:third-party": "node scripts/generate-third-party.mjs",
+    "bench": "pnpm --filter @smeltjs/core run bench",
     "verify": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run mutate"
   },
   "devDependencies": {
