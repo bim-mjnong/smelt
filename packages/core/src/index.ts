@@ -41,6 +41,12 @@ export type { StructuralPlannerOptions } from './plan/structural.ts';
 export { createRetrieveTool, RETRIEVE_TOOL_NAME } from './retrieve.ts';
 export { unconfiguredDistillStage, unconfiguredRerankStage } from './stages.ts';
 export { MemoryElisionStore } from './store.ts';
+export {
+  DIRECTORY_STORE_FORMAT,
+  DIRECTORY_STORE_VERSION,
+  DirectoryElisionStore,
+} from './store-dir.ts';
+export type { DirectoryElisionStoreOptions } from './store-dir.ts';
 export * from './types.ts';
 export {
   CLI_JSON_FORMAT,

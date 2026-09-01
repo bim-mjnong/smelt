@@ -84,3 +84,31 @@ export class HashCollisionError extends SmeltError {
     );
   }
 }
+
+/**
+ * A persistent store holds bytes under this hash, but they no longer hash to it — a
+ * torn write, a truncation, an edit behind the store's back. Deliberately distinct from
+ * {@link UnknownHashError}: "we hold damaged bytes" and "never existed" call for
+ * different responses, and returning the damaged bytes as a retrieval would be the
+ * silent wrong answer this library exists to refuse.
+ */
+export class StoreCorruptionError extends SmeltError {
+  override readonly name = 'StoreCorruptionError';
+
+  constructor(hash: string) {
+    super(
+      `smelt: the bytes stored under hash "${hash}" do not hash to "${hash}". Refusing ` +
+        `to return them — they are damaged, not merely unknown. The store directory was ` +
+        `truncated or edited outside smelt.`,
+    );
+  }
+}
+
+/**
+ * A directory offered as a persistent store carries a format marker this version of
+ * smelt does not understand — or no parseable marker at all. Refusing beats guessing:
+ * reinterpreting an unknown layout could hand back the wrong bytes with no error.
+ */
+export class StoreFormatError extends SmeltError {
+  override readonly name = 'StoreFormatError';
+}

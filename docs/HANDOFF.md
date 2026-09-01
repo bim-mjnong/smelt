@@ -163,8 +163,9 @@ Everything below exists, is typechecked, linted, and covered. `pnpm verify` is g
 | `packages/core/test/guards/expansion-counter.test.ts` | The retrieve counter and `allElisionsRetrieved`, i.e. the observability half of Law 3.                                                                                                                                                            |
 | `packages/core/test/guards/marker-format.test.ts`     | The wire surface. The rendered marker is pinned per version: the format cannot change without the version changing, and an unknown version fails.                                                                                                 |
 | `packages/core/test/guards/third-party.test.ts`       | Attribution. Reruns the real generator and fails if the committed `THIRD-PARTY.md` differs; also proves the generator refuses an unattributed grammar.                                                                                            |
+| `packages/core/test/guards/persistent-store.test.ts`  | Law 3 across a process boundary. A damaged blob is refused as `StoreCorruptionError`, never returned; the retrieval counters survive a restart; "we hold damaged bytes" stays distinct from "never existed".                                      |
 | `packages/core/test/guards/_source.ts`                | Shared source-walking helpers: `guardSrcRoot()`, `guardRoot()`, and the string/comment stripper that stops `net/policy.ts` reporting its own word list.                                                                                           |
-| `scripts/mutate.mjs`                                  | **The meta-guard.** Twelve mutations across the five guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                                   |
+| `scripts/mutate.mjs`                                  | **The meta-guard.** Fourteen mutations across the six guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                                  |
 | `scripts/bundle-grammars.mjs`                         | Copies the grammars `WASM_BY_LANGUAGE` names into the package, so they ship. Reads the built map rather than keeping a second list.                                                                                                               |
 | `scripts/generate-third-party.mjs`                    | Generates `THIRD-PARTY.md`. The grammar ↔ provenance mapping is a partition: an unattributed grammar throws.                                                                                                                                      |
 | `scripts/check-fresh-clone.sh`                        | Installs and verifies from `git archive` output — tracked files only.                                                                                                                                                                             |
@@ -175,7 +176,6 @@ Everything below exists, is typechecked, linted, and covered. `pnpm verify` is g
 - No structural planning, so smelt cannot yet say "collapsed 3 sibling functions" about
   real code. **Slice 2 — the reason the project exists.**
 - No benchmark, so no number smelt owns. **Slice 3.**
-- No persistent store, so elisions die with the process. **Slice 5.**
 - No cross-file reasoning: smelt sees one blob at a time. **Slice 7.**
 
 ---
@@ -286,16 +286,21 @@ Same machinery, three more node-kind sets.
 - [ ] `SUPPORTED_LANGUAGES` and `WASM_BY_LANGUAGE` stay total — adding an id without a grammar is already a compile error; keep it that way.
 - [ ] Bench numbers from Slice 3 re-run and committed, per language.
 
-### Slice 5 — a persistent elision store
+### Slice 5 — a persistent elision store — **SHIPPED**
 
-Elisions currently die with the process. A long-lived agent session outlives the process.
+Elisions used to die with the process. A long-lived agent session outlives the process.
+
+**Shipped as** `DirectoryElisionStore` (`src/store-dir.ts`): a second `ElisionStore` over
+a content-addressed directory, `node:fs` only — SQLite would have been either a new
+runtime dependency (`better-sqlite3`) or `node:sqlite`, which is not stable across the
+supported engine range. The storage layout is documented on the class.
 
 **Acceptance criteria**
 
-- [ ] A second `ElisionStore` implementation over SQLite or a content-addressed directory. The interface does not change.
-- [ ] Still no eviction. If a size cap is genuinely required, retrieval of an evicted hash must throw a _distinct_ error that says "evicted", never `UnknownHashError` — the model must be able to tell "never existed" from "we lost it".
-- [ ] Counters survive a restart, or the docs state plainly that they do not.
-- [ ] Concurrent writers do not corrupt the store. Test it with two processes, not two promises.
+- [x] A second `ElisionStore` implementation over SQLite or a content-addressed directory. The interface does not change. The reversibility and expansion-counter guards run against both stores.
+- [x] Still no eviction — no cap at all, so no "evicted" error exists to need. If a size cap is genuinely required, retrieval of an evicted hash must throw a _distinct_ error that says "evicted", never `UnknownHashError` — the model must be able to tell "never existed" from "we lost it". (The class doc restates this for whoever adds a cap.) The same distinction already exists for damage: a blob whose bytes no longer hash to their name throws `StoreCorruptionError`, never `UnknownHashError`, and reads verify bytes against the hash so a torn write can never be handed back as a faithful retrieval.
+- [x] Counters survive a restart: every retrieval appends one fsynced line to an append-only journal, and `stats()` is a fold over it, so `expansionRate` stays meaningful across a session.
+- [x] Concurrent writers do not corrupt the store. Tested with two processes, not two promises — `test/store-dir.test.ts` spawns two real `node` subprocesses against one directory. Writes are write-temp → fsync → `link(2)` (atomic, no-clobber), and `pnpm mutate` proves the verify-on-read and counter-persistence guards can go red.
 
 ### Slice 6 — cache-prefix hygiene
 
@@ -347,8 +352,8 @@ pnpm mutate
 ```
 
 It copies `packages/core/src` to a scratch tree, applies one deliberate break, points the
-guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Twelve
-mutations across five guards; a survivor is reported as a hole in the guard, not in the
+guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Fourteen
+mutations across six guards; a survivor is reported as a hole in the guard, not in the
 mutation.
 
 Not every guard guards source code, so there is a second mutation kind: an `artifact`

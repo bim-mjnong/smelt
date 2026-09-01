@@ -1,7 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterAll, describe, expect, it } from 'vitest';
 
 import { createSmelter } from '@guard/index';
 import { MemoryElisionStore } from '@guard/store';
+import { DirectoryElisionStore } from '@guard/store-dir';
+import type { ElisionStore } from '@guard/types';
 
 /**
  * EXPANSION-COUNTER GUARD — the honest half of Law 3.
@@ -14,14 +20,36 @@ import { MemoryElisionStore } from '@guard/store';
  * pinned at a flattering zero forever, which is exactly the shape of failure this
  * project exists to refuse.
  *
+ * Every case runs against both stores, because the counter contract is the *store*
+ * contract: a persistent store whose counters drifted from the in-memory one would make
+ * `expansionRate` mean different things depending on where the bytes happen to live.
+ *
  * Mutation: `pnpm mutate` deletes the increment in `store.ts`, and this must go red.
  * A second mutation nails the degenerate-outcome flag flat to `false`, because a flag
  * that can never fire is the same silence in a different shape.
  */
 
-describe('the expansion rate is actually counted', () => {
+const roots: string[] = [];
+
+afterAll(() => {
+  for (const root of roots) rmSync(root, { recursive: true, force: true });
+});
+
+const STORES: readonly (readonly [string, () => ElisionStore])[] = [
+  ['MemoryElisionStore', () => new MemoryElisionStore()],
+  [
+    'DirectoryElisionStore',
+    () => {
+      const root = mkdtempSync(join(tmpdir(), 'smelt-expansion-guard-'));
+      roots.push(root);
+      return new DirectoryElisionStore(root);
+    },
+  ],
+];
+
+describe.each(STORES)('the expansion rate is actually counted — %s', (_name, makeStore) => {
   it('starts at zero, and says so honestly for an empty store', () => {
-    const stats = new MemoryElisionStore().stats();
+    const stats = makeStore().stats();
     expect(stats).toEqual({
       elisionsStored: 0,
       bytesStored: 0,
@@ -34,7 +62,7 @@ describe('the expansion rate is actually counted', () => {
   });
 
   it('counts every retrieve call, and distinguishes unique hashes from repeats', () => {
-    const store = new MemoryElisionStore();
+    const store = makeStore();
     const a = store.put('alpha content');
     const b = store.put('beta content');
 
@@ -65,7 +93,7 @@ describe('the expansion rate is actually counted', () => {
   });
 
   it('does not count a peek as a retrieval — inspection is not the model asking', () => {
-    const store = new MemoryElisionStore();
+    const store = makeStore();
     const hash = store.put('content');
     store.peek(hash);
     store.has(hash);
@@ -74,14 +102,14 @@ describe('the expansion rate is actually counted', () => {
   });
 
   it('counts a miss, and a miss is a bug rather than over-pruning', () => {
-    const store = new MemoryElisionStore();
+    const store = makeStore();
     store.put('content');
     expect(() => store.retrieve('deadbeefdeadbeef')).toThrow(/no stored content/);
     expect(store.stats()).toMatchObject({ retrieveCalls: 1, misses: 1, uniqueRetrieved: 0 });
   });
 
   it('surfaces the rate through the tool the model actually calls', async () => {
-    const smelter = createSmelter();
+    const smelter = createSmelter({ store: makeStore() });
     const text = Array.from({ length: 300 }, (_, i) => `line ${String(i)} padding padding`).join(
       '\n',
     );
@@ -106,7 +134,7 @@ describe('the expansion rate is actually counted', () => {
    * counter that never increments.
    */
   it('names the degenerate outcome: everything hidden was pulled back', () => {
-    const store = new MemoryElisionStore();
+    const store = makeStore();
     const a = store.put('alpha content');
     const b = store.put('beta content');
 
@@ -126,6 +154,6 @@ describe('the expansion rate is actually counted', () => {
   });
 
   it('is false for an empty store — nothing was hidden, so nothing was defeated', () => {
-    expect(new MemoryElisionStore().stats().allElisionsRetrieved).toBe(false);
+    expect(makeStore().stats().allElisionsRetrieved).toBe(false);
   });
 });

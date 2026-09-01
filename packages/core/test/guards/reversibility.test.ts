@@ -1,8 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterAll, describe, expect, it } from 'vitest';
 
 import { applyPlan, reconstruct } from '@guard/apply';
 import { createSmelter } from '@guard/index';
 import { MemoryElisionStore } from '@guard/store';
+import { DirectoryElisionStore } from '@guard/store-dir';
 import type { ElisionPlan } from '@guard/types';
 
 /**
@@ -145,5 +150,49 @@ describe('Law 3 — every elision is reversible', () => {
     };
     const result = applyPlan(text, plan, store);
     expect(() => reconstruct(result, new MemoryElisionStore())).toThrow(/no stored content/);
+  });
+});
+
+/**
+ * The same law, against the persistent store — including the case the in-memory store
+ * cannot have: the process that elided is gone, and a *different* store instance over
+ * the same directory must still put every byte back.
+ */
+describe('Law 3 — reversible against the persistent store, across a restart', () => {
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  });
+  const newRoot = (): string => {
+    const root = mkdtempSync(join(tmpdir(), 'smelt-reversibility-guard-'));
+    roots.push(root);
+    return root;
+  };
+
+  for (const { name, text } of CASES) {
+    it(`round-trips: ${name}`, async () => {
+      const smelter = createSmelter({ store: new DirectoryElisionStore(newRoot()) });
+      const result = await smelter.smelt(text, { budgetBytes: 1_500, focus: ['TARGET'] });
+      expect(smelter.reconstruct(result)).toBe(text);
+    });
+
+    it(`round-trips through a second store instance over the same directory: ${name}`, async () => {
+      const root = newRoot();
+      const smelter = createSmelter({ store: new DirectoryElisionStore(root) });
+      const result = await smelter.smelt(text, { budgetBytes: 1_500, focus: ['TARGET'] });
+      // The smelter and its store are gone from memory; only the directory remains.
+      expect(reconstruct(result, new DirectoryElisionStore(root))).toBe(text);
+    });
+  }
+
+  it('stores bytes on disk for every elision it reports', async () => {
+    const root = newRoot();
+    const smelter = createSmelter({ store: new DirectoryElisionStore(root) });
+    const result = await smelter.smelt(CASES[0]!.text, { budgetBytes: 800 });
+    expect(result.elisions.length).toBeGreaterThan(0);
+    const reopened = new DirectoryElisionStore(root);
+    for (const elision of result.elisions) {
+      expect(reopened.has(elision.hash)).toBe(true);
+    }
   });
 });

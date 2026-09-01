@@ -50,6 +50,7 @@ const GUARDS = [
   'test/guards/expansion-counter.test.ts',
   'test/guards/marker-format.test.ts',
   'test/guards/third-party.test.ts',
+  'test/guards/persistent-store.test.ts',
 ];
 
 /**
@@ -158,6 +159,22 @@ const MUTATIONS = [
     find: '| `tree-sitter-rust.wasm` |',
     replace: '| `tree-sitter-omitted.wasm` |',
     why: 'a bundled grammar losing its attribution in the committed notices — redistribution without a licence',
+  },
+  {
+    id: 'law3-dir-store-verify-skipped',
+    guard: 'test/guards/persistent-store.test.ts',
+    file: 'store-dir.ts',
+    find: "    if (this.#hash(content) !== hash) {\n      this.#appendLog('corrupt', hash);",
+    replace: "    if (false) {\n      this.#appendLog('corrupt', hash);",
+    why: 'verify-on-read disabled — a torn blob would be handed back as a faithful retrieval',
+  },
+  {
+    id: 'law3-dir-store-counters-die-with-process',
+    guard: 'test/guards/persistent-store.test.ts',
+    file: 'store-dir.ts',
+    find: "    this.#appendLog('hit', hash);",
+    replace: "    // this.#appendLog('hit', hash);",
+    why: 'the retrieval journal never written — the expansion rate resets to a flattering zero on every restart',
   },
 ];
 
