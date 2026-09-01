@@ -200,7 +200,13 @@ smelt --budget 4000 --focus TypeError < build.log
 
 Prints the smelted text to stdout, and a report to stderr so the two can be piped apart:
 
-A real run, on this repository's own `plan/lexical.ts`:
+A real run of the built binary, on this repository's own `plan/lexical.ts` — `--version`,
+a smelt with its report, the marker it produced, the round trip closing byte for byte, and
+the non-zero exit when the plan came back over budget:
+
+![the smelt CLI running on packages/core/src/plan/lexical.ts](images/slice-1-cli.png)
+
+The same run, as text:
 
 ```
 smelt  packages/core/src/plan/lexical.ts  typescript  lexical/v1
@@ -219,7 +225,7 @@ in 7,297 B → out 985 B   (-86.5%, 3 elisions)
 - [x] The report totals equal `inputBytes`/`outputBytes` from the result — no separate accounting.
 - [x] `--reconstruct` reads a `--json` result back and prints the original, proving the round trip from the command line. It verifies every hash against the bytes it keys and the reconstructed length against the recorded `inputBytes`, so an almost-right round trip fails.
 - [x] Exit code is non-zero when the plan came back over budget, and says so. Never silently over budget. Codes are distinct: 1 over budget, 2 usage, 3 refused, 4 unexpected.
-- [x] A screenshot of the built binary running on a real file is in the PR. Not the dev server, not the test output.
+- [x] A screenshot of the built binary running on a real file: [`docs/images/slice-1-cli.png`](images/slice-1-cli.png). `node packages/core/dist/cli/bin.js` — the built artifact, not the dev server and not test output.
 
 **Not in Slice 1, deliberately:** the CLI has no way to pass a `Measure`. A CLI flag
 cannot name a function, and a plugin loader would be a dependency and an eval surface.

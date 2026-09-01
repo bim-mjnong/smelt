@@ -131,6 +131,8 @@ smelt --budget 4000 --focus TypeError < build.log
 Smelted text goes to **stdout**, the report to **stderr**, so the two pipe apart:
 `smelt big.log --budget 4000 > small.log`.
 
+![the smelt CLI running on a real file](docs/images/slice-1-cli.png)
+
 ```
 smelt  packages/core/src/plan/lexical.ts  typescript  lexical/v1
 in 7,297 B → out 985 B   (-86.5%, 3 elisions)
