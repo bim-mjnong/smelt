@@ -39,6 +39,10 @@ try {
     stderr: (text) => void process.stderr.write(text),
     stdin: readStdin,
     version: packageVersion(),
+    cwd: process.cwd(),
+    // `smelt init` reads answers line by line, so it gets the stream, not readStdin's
+    // one-shot slurp of fd 0.
+    initInput: process.stdin,
   });
 } catch (error) {
   process.stderr.write(

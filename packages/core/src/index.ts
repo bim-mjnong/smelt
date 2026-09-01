@@ -94,6 +94,24 @@ export type { FileTagsEntry, RankedDefinition } from './repomap/rank.ts';
 export { extractTags } from './repomap/tags.ts';
 export type { DefinitionTag, FileTags, ReferenceTag } from './repomap/tags.ts';
 export { TAGS_CACHE_FORMAT, TAGS_CACHE_VERSION, tagsCacheKey } from './repomap/cache.ts';
+export {
+  CONFIG_FILE_NAME,
+  CONFIG_VERSION,
+  findConfigFile,
+  loadNearestConfig,
+  parseConfig,
+  resolveStorePath,
+} from './cli/config.ts';
+export type { LoadedConfig, SmeltConfig, SmeltConfigStore } from './cli/config.ts';
+export {
+  MEASURE_STUB_FILE,
+  measureStubSource,
+  renderConfig,
+  RERANK_STUB_FILE,
+  rerankStubSource,
+  runInit,
+} from './cli/init.ts';
+export type { InitIo } from './cli/init.ts';
 
 /**
  * Which planner a smelter uses. `'structural'` parses TypeScript, TSX, Rust, Python

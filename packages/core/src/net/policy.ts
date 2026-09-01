@@ -69,6 +69,7 @@ export const ALLOWED_NODE_BUILTINS: readonly string[] = [
   'node:module', // web-tree-sitter's own loader shim needs createRequire
   'node:util', // parseArgs, for the CLI. Argument parsing with zero dependencies.
   'node:process', // argv, stdin/stdout/stderr and the exit code, for the CLI
+  'node:readline/promises', // line-by-line answers for `smelt init` — reads streams it is handed, opens nothing
 ];
 
 /** Third-party packages any smelt module may import. Keep this list boring and short. */

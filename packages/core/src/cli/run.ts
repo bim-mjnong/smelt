@@ -1,14 +1,19 @@
 import { readFileSync } from 'node:fs';
+import process from 'node:process';
 
 import { reconstruct } from '../apply.ts';
 import { CliUsageError, SmeltError } from '../errors.ts';
 import { createSmelter } from '../index.ts';
 import type { SmeltCallOptions } from '../index.ts';
 import { MemoryElisionStore } from '../store.ts';
+import { DirectoryElisionStore } from '../store-dir.ts';
 import type { ElisionStore, SmeltResult } from '../types.ts';
 
 import { CLI_NAME, cliUsage, parseSmeltArgs } from './args.ts';
 import type { SmeltInvocation } from './args.ts';
+import { CONFIG_FILE_NAME, loadNearestConfig, resolveStorePath } from './config.ts';
+import type { LoadedConfig } from './config.ts';
+import { runInit } from './init.ts';
 import { formatReport } from './report.ts';
 
 export { CLI_NAME, cliUsage, parseSmeltArgs } from './args.ts';
@@ -65,6 +70,17 @@ export interface CliIo {
   readonly stdin: () => string;
   /** The package version, for `--version`. */
   readonly version: string;
+  /**
+   * Where `smelt.config.json` discovery starts, and where `init` writes. Defaults to
+   * the process working directory; tests pass a temp directory to stay hermetic.
+   */
+  readonly cwd?: string;
+  /**
+   * Interactive input for `smelt init` — the wizard reads answers line by line, which
+   * the one-shot `stdin()` above cannot provide. `bin.ts` passes the real stdin
+   * stream; tests pass a scripted one. Absent means `init` is a usage error.
+   */
+  readonly initInput?: NodeJS.ReadableStream;
 }
 
 /**
@@ -87,14 +103,21 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         return EXIT.ok;
       case 'reconstruct':
         return runReconstruct(readInput(invocation.file, io), io);
-      case 'smelt': {
-        // Belt and braces: `parseSmeltArgs` refuses a budget-less smelt, and if that
-        // ever stops being true this throws instead of picking a number.
-        if (invocation.budgetBytes === undefined) {
-          throw new CliUsageError(`${CLI_NAME}: --budget is required, in UTF-8 bytes.`);
+      case 'init': {
+        if (io.initInput === undefined) {
+          throw new CliUsageError(
+            `${CLI_NAME}: init is interactive, and this invocation has no interactive ` +
+              `input stream. Run \`${CLI_NAME} init\` from a terminal.`,
+          );
         }
-        return await runSmelt(invocation, invocation.budgetBytes, io);
+        return await runInit({
+          input: io.initInput,
+          output: io.stdout,
+          cwd: io.cwd ?? process.cwd(),
+        });
       }
+      case 'smelt':
+        return await runSmelt(invocation, io);
     }
   } catch (error) {
     if (error instanceof CliUsageError) {
@@ -109,15 +132,34 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
 }
 
-async function runSmelt(
-  invocation: SmeltInvocation,
-  budgetBytes: number,
-  io: CliIo,
-): Promise<number> {
+/**
+ * One smelt run, with `smelt.config.json` supplying DEFAULTS and nothing more.
+ *
+ * The precedence is strict and one-directional: an explicit flag always wins over the
+ * config, and the config only fills what the flags left unsaid. A malformed config is
+ * a usage error even when every flag was given — a config smelt silently skipped
+ * would be a setting the user *believed* was in force.
+ */
+async function runSmelt(invocation: SmeltInvocation, io: CliIo): Promise<number> {
+  const loaded = loadNearestConfig(io.cwd ?? process.cwd());
+
+  const budgetBytes = invocation.budgetBytes ?? loaded?.config.defaultBudgetBytes;
+  if (budgetBytes === undefined) {
+    throw new CliUsageError(
+      `${CLI_NAME}: --budget is required, in UTF-8 bytes. There is no default, because ` +
+        `a budget smelt invented would silently decide how much of your context to ` +
+        `throw away. Pass --budget, or set defaultBudgetBytes in ${CONFIG_FILE_NAME} ` +
+        `(\`${CLI_NAME} init\` writes one).\n` +
+        `  ${CLI_NAME} src/server.ts --budget 4000 --focus handleRequest`,
+    );
+  }
+
   const inputText = readInput(invocation.file, io);
   const source = invocation.file ?? '<stdin>';
 
-  const smelter = createSmelter({ strategy: invocation.strategy });
+  const strategy = invocation.strategy ?? loaded?.config.strategy ?? 'lexical';
+  const store = storeFromConfig(loaded);
+  const smelter = createSmelter({ strategy, ...(store === undefined ? {} : { store }) });
   const options: SmeltCallOptions = {
     budgetBytes,
     ...(invocation.file === undefined ? {} : { path: invocation.file }),
@@ -134,6 +176,18 @@ async function runSmelt(
   io.stderr(formatReport({ result, source, budgetBytes, inputText }));
 
   return result.outputBytes > budgetBytes ? EXIT.overBudget : EXIT.ok;
+}
+
+/**
+ * The store the config asks for, or `undefined` for the library's own default
+ * (a fresh in-memory store). `store.path` resolves relative to the config file, so
+ * one config serves every subdirectory it covers without scattering store roots.
+ */
+function storeFromConfig(loaded: LoadedConfig | undefined): ElisionStore | undefined {
+  if (loaded?.config.store === undefined || loaded.config.store.kind === 'memory') {
+    return undefined;
+  }
+  return new DirectoryElisionStore(resolveStorePath(loaded, loaded.config.store.path));
 }
 
 /**
