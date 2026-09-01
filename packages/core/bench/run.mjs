@@ -27,7 +27,7 @@
  * Zero dependencies: `node:` builtins plus the built `dist/` of this package.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +37,7 @@ import {
   renderTable,
   resultRow,
   tier3Aggregate,
+  tier3RowNote,
   tier3Verdict,
   validateCases,
 } from './lib.mjs';
@@ -51,8 +52,8 @@ Measured by \`bench/run.mjs\` on the committed corpus (\`bench/corpus/\`,
 \`bench/cases.json\`). Every row states what was measured, on which date, at which
 corpus commit, under which tier — and, for token and retrieval rows, on which model,
 because those numbers are model-specific. Rows are **append-only**: a re-run, or a
-run on a newer model, adds rows and never edits one (HANDOFF Decision 8 — Claude's
-tokenizer changed ~30% between generations, and an edit would rewrite history).
+run on a newer model, adds rows and never edits one — tokenizers shift between
+model generations (HANDOFF Decision 8), and an edit would rewrite history.
 
 Units mean exactly what they say: \`bytes\` is UTF-8 bytes of the input and the
 smelted output; \`tokens\` is Anthropic's \`/v1/messages/count_tokens\` for the text
@@ -74,22 +75,37 @@ if (!existsSync(distEntry)) {
   fail('dist/ is missing — run `pnpm build` first. The harness measures the built library.');
 }
 
-// -- corpus provenance --------------------------------------------------------
+// -- corpus and code provenance -----------------------------------------------
 
 const git = (argv) => spawnSync('git', argv, { cwd: benchDir, encoding: 'utf8' });
 
-const dirty = git(['status', '--porcelain', '--', 'corpus', 'cases.json']);
+// The dirty check covers the code being measured, not just the corpus: a row
+// produced from an edited src/ names a commit that cannot reproduce its numbers.
+const dirty = git(['status', '--porcelain', '--', 'corpus', 'cases.json', '../src']);
 if (dirty.status !== 0) fail('git status failed — the corpus commit cannot be established.');
 if (dirty.stdout.trim() !== '') {
   fail(
-    'bench/corpus or cases.json has uncommitted changes. A number measured against an ' +
-      'uncommitted corpus names no commit and is not reproducible — commit first (Law 4).',
+    'bench/corpus, cases.json or src/ has uncommitted changes. A number measured against ' +
+      'uncommitted inputs names no commit and is not reproducible — commit first (Law 4).',
   );
 }
 const commitResult = git(['log', '-n', '1', '--format=%H', '--', 'corpus', 'cases.json']);
 const corpusCommit = commitResult.stdout.trim().slice(0, 12);
 if (commitResult.status !== 0 || corpusCommit === '') {
   fail('could not resolve the corpus commit — is bench/corpus committed?');
+}
+
+// A dist/ built before the latest src/ change measures old code under a fresh date.
+const newestMtime = (dir) => {
+  let newest = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    newest = Math.max(newest, entry.isDirectory() ? newestMtime(full) : statSync(full).mtimeMs);
+  }
+  return newest;
+};
+if (newestMtime(join(benchDir, '../src')) > statSync(distEntry).mtimeMs) {
+  fail('dist/ is older than src/ — run `pnpm build` first, or the rows measure stale code.');
 }
 
 // -- load and validate the cases ---------------------------------------------
@@ -189,7 +205,8 @@ if (wantTier3) {
   const { measureExpansion } = await import('./tier3.mjs');
   const logDir = join(benchDir, 'tier3-log');
   mkdirSync(logDir, { recursive: true });
-  const verdictInputs = [];
+  const completed = [];
+  let truncatedCount = 0;
   for (const benchCase of manifest.cases) {
     const { smelter, result } = await smeltCase(benchCase);
     const log = await measureExpansion({
@@ -201,7 +218,8 @@ if (wantTier3) {
     });
     writeFileSync(join(logDir, `${benchCase.id}.json`), `${JSON.stringify(log, null, 2)}\n`);
     const verdict = tier3Verdict(log.stats);
-    verdictInputs.push(log.stats);
+    if (log.truncated) truncatedCount += 1;
+    else completed.push(log.stats);
     rows.push(
       resultRow({
         caseId: benchCase.id,
@@ -212,13 +230,19 @@ if (wantTier3) {
         unit: 'elisions retrieved',
         input: log.stats.elisionsStored,
         output: log.stats.uniqueRetrieved,
-        note:
-          `expansion rate ${verdict.expansionRate.toFixed(2)}, ` +
-          `${String(log.stats.retrieveCalls)} calls` +
-          (verdict.loss ? ' — LOSS: the model retrieved everything back' : ''),
+        note: tier3RowNote({
+          verdict,
+          retrieveCalls: log.stats.retrieveCalls,
+          truncated: log.truncated,
+          maxRounds: log.maxRounds,
+        }),
       }),
     );
   }
+  // Truncated cases stay out of the aggregate: their retrieval counts are floors
+  // from cut-off runs, and folding them in would understate the aggregate rate.
+  const excluded =
+    truncatedCount > 0 ? `; ${String(truncatedCount)} truncated case(s) excluded` : '';
   rows.push(
     resultRow({
       caseId: 'ALL CASES',
@@ -227,9 +251,13 @@ if (wantTier3) {
       corpusCommit,
       model,
       unit: 'elisions retrieved',
-      input: verdictInputs.reduce((sum, entry) => sum + entry.elisionsStored, 0),
-      output: verdictInputs.reduce((sum, entry) => sum + entry.uniqueRetrieved, 0),
-      note: `aggregate expansion rate ${tier3Aggregate(verdictInputs).toFixed(2)}`,
+      input: completed.reduce((sum, entry) => sum + entry.elisionsStored, 0),
+      output: completed.reduce((sum, entry) => sum + entry.uniqueRetrieved, 0),
+      note:
+        completed.length === 0
+          ? `no aggregate — every case was truncated at the round cap${excluded}`
+          : `aggregate expansion rate ${tier3Aggregate(completed).toFixed(2)} ` +
+            `over ${String(completed.length)} completed case(s)${excluded}`,
     }),
   );
   process.stderr.write(`bench: tier 3 retrieval logs written to ${logDir} — commit them.\n`);

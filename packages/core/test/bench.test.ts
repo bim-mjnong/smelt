@@ -39,6 +39,12 @@ interface BenchLib {
     loss: boolean;
   };
   tier3Aggregate(inputs: readonly { elisionsStored: number; uniqueRetrieved: number }[]): number;
+  tier3RowNote(input: {
+    verdict: { expansionRate: number; loss: boolean };
+    retrieveCalls: number;
+    truncated: boolean;
+    maxRounds: number;
+  }): string;
 }
 
 let lib: BenchLib;
@@ -186,6 +192,126 @@ describe('tier 3 verdicts', () => {
         { elisionsStored: 5, uniqueRetrieved: 1 },
       ]),
     ).toBe(0.5);
+  });
+
+  it('a truncated row says TRUNCATED and never claims a LOSS — the run was cut off, not measured', () => {
+    const verdict = { expansionRate: 0.5, loss: false };
+    expect(lib.tier3RowNote({ verdict, retrieveCalls: 4, truncated: false, maxRounds: 16 })).toBe(
+      'expansion rate 0.50, 4 calls',
+    );
+    expect(
+      lib.tier3RowNote({
+        verdict: { expansionRate: 1, loss: true },
+        retrieveCalls: 3,
+        truncated: false,
+        maxRounds: 16,
+      }),
+    ).toContain('LOSS');
+    const truncatedNote = lib.tier3RowNote({
+      verdict: { expansionRate: 1, loss: true },
+      retrieveCalls: 3,
+      truncated: true,
+      maxRounds: 16,
+    });
+    expect(truncatedNote).toContain('TRUNCATED');
+    expect(truncatedNote).toContain('16-round cap');
+    expect(truncatedNote).not.toContain('LOSS');
+  });
+});
+
+/** A stand-in smelter for tier-3 tests: one retrievable hash, library-shaped counters. */
+function fakeSmelter(): unknown {
+  return {
+    tool: {
+      name: 'smelt_retrieve',
+      description: 'retrieve an elision',
+      inputSchema: { type: 'object' },
+      invoke: ({ hash }: { hash: string }) => `RESTORED:${hash}`,
+    },
+    stats: () => ({
+      elisionsStored: 2,
+      retrieveCalls: 1,
+      uniqueRetrieved: 1,
+      misses: 0,
+      expansionRate: 0.5,
+      allElisionsRetrieved: false,
+    }),
+  };
+}
+
+describe('the tier-3 retrieval log is the whole conversation', () => {
+  interface Tier3Log {
+    format: string;
+    maxRounds: number;
+    stopReasons: readonly string[];
+    truncated: boolean;
+    transcript: readonly { role: string; content: unknown }[];
+    stats: Record<string, unknown>;
+  }
+  interface Tier3Module {
+    measureExpansion(input: {
+      model: string;
+      benchCase: { id: string; task: string };
+      smelter: unknown;
+      smeltedText: string;
+      transport: (payload: unknown) => Promise<unknown>;
+    }): Promise<Tier3Log>;
+  }
+
+  let measureExpansion: Tier3Module['measureExpansion'];
+  beforeAll(async () => {
+    const tier3 = (await import(
+      pathToFileURL(join(benchDir, 'tier3.mjs')).href
+    )) as unknown as Tier3Module;
+    measureExpansion = tier3.measureExpansion;
+  });
+
+  const toolUseResponse = {
+    stop_reason: 'tool_use',
+    content: [{ type: 'tool_use', id: 'call-1', name: 'smelt_retrieve', input: { hash: 'abc' } }],
+  };
+  const endTurnResponse = {
+    stop_reason: 'end_turn',
+    content: [{ type: 'text', text: 'done' }],
+  };
+
+  it('captures the prompt shown to the model, every tool_result payload, and the final answer', async () => {
+    const responses = [toolUseResponse, endTurnResponse];
+    const log = await measureExpansion({
+      model: 'test-model',
+      benchCase: { id: 'case-x', task: 'find the thing' },
+      smelter: fakeSmelter(),
+      smeltedText: 'THE SMELTED TEXT',
+      transport: () => Promise.resolve(responses.shift()),
+    });
+
+    expect(log.truncated).toBe(false);
+    expect(log.stopReasons).toEqual(['tool_use', 'end_turn']);
+    // The initial user message — task and smelted text — is in the log verbatim.
+    const [prompt] = log.transcript;
+    expect(prompt?.role).toBe('user');
+    expect(String(prompt?.content)).toContain('find the thing');
+    expect(String(prompt?.content)).toContain('THE SMELTED TEXT');
+    // The tool_result payload the harness sent back is in the log too.
+    expect(JSON.stringify(log.transcript)).toContain('RESTORED:abc');
+    // And the final assistant message closes the transcript.
+    expect(log.transcript.at(-1)).toEqual({ role: 'assistant', content: endTurnResponse.content });
+  });
+
+  it('flags a run cut off at the round cap mid-task as truncated', async () => {
+    const log = await measureExpansion({
+      model: 'test-model',
+      benchCase: { id: 'case-y', task: 'keep digging' },
+      smelter: fakeSmelter(),
+      smeltedText: 'S',
+      transport: () => Promise.resolve(toolUseResponse),
+    });
+
+    expect(log.truncated).toBe(true);
+    expect(log.stopReasons).toHaveLength(log.maxRounds);
+    expect(log.stopReasons.at(-1)).toBe('tool_use');
+    // Even the cut-off conversation is fully logged, tool results included.
+    expect(log.transcript).toHaveLength(1 + 2 * log.maxRounds);
   });
 });
 

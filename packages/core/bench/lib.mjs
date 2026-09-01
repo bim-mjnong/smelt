@@ -130,8 +130,8 @@ export function renderTable(rows) {
 /**
  * Appends a section to an existing results document, refusing to touch what is
  * already there. Rows are append-only: a re-run on a newer model is a new row,
- * never an edit — Claude's tokenizer changed ~30% between generations, and editing
- * a row would silently rewrite history (HANDOFF Decision 8).
+ * never an edit — tokenizers shift between model generations (HANDOFF Decision 8),
+ * and editing a row would silently rewrite history.
  */
 export function appendResults(existing, section) {
   const base = existing.trimEnd();
@@ -186,4 +186,22 @@ export function tier3Aggregate(verdictInputs) {
   const stored = verdictInputs.reduce((sum, entry) => sum + entry.elisionsStored, 0);
   const retrieved = verdictInputs.reduce((sum, entry) => sum + entry.uniqueRetrieved, 0);
   return stored === 0 ? 0 : retrieved / stored;
+}
+
+/**
+ * The note cell for one tier-3 row. A truncated run — the round cap hit while the
+ * model was still calling tools — is stated as such and outranks a LOSS verdict:
+ * its retrieval count is a floor from a cut-off conversation, so both the
+ * flattering reading ("sub-1.0 rate") and the damning one ("LOSS") would be
+ * unmeasured claims about a run that never finished (Law 4).
+ */
+export function tier3RowNote({ verdict, retrieveCalls, truncated, maxRounds }) {
+  const base = `expansion rate ${verdict.expansionRate.toFixed(2)}, ${String(retrieveCalls)} calls`;
+  if (truncated) {
+    return (
+      `${base} — TRUNCATED: the ${String(maxRounds)}-round cap was hit mid-task; ` +
+      'the rate is a floor from a cut-off run, not a completed measurement'
+    );
+  }
+  return verdict.loss ? `${base} — LOSS: the model retrieved everything back` : base;
 }

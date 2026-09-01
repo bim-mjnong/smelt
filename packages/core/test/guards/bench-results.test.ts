@@ -133,4 +133,45 @@ describe('bench honesty guard (Law 4 — the harness that states the numbers)', 
       }
     }
   });
+
+  it("non-tier bench modules spawn only a literal 'git' — child_process is not a network side door", () => {
+    // The network scan above cannot see `spawnSync('curl', [url])`: a subprocess
+    // reaches the wire without fetch or node:http ever appearing in the file. The
+    // runner legitimately shells out to git for corpus provenance, so the rule is:
+    // outside tier2/3, every subprocess call site must name the literal 'git'.
+    // Bare calls only: `.exec(...)` on a RegExp is not a subprocess, so a leading
+    // `.` (or identifier character) exempts a match.
+    const SPAWN_CALL =
+      /(?<![.\w$])(?:spawnSync|spawn|execFileSync|execFile|execSync|exec|fork)\s*\(/g;
+    const ALLOWED = new Set(['tier2.mjs', 'tier3.mjs']);
+    const benchFiles = readdirSync(join(packageRoot(), 'bench'))
+      .filter((entry) => entry.endsWith('.mjs'))
+      .toSorted();
+
+    for (const file of benchFiles) {
+      if (ALLOWED.has(file)) continue;
+      const raw = artifact(`bench/${file}`);
+      // stripStringsAndComments preserves length, so match positions in the
+      // stripped text index straight back into the raw text — comments and string
+      // contents cannot hide a call site or fake a 'git' literal.
+      const stripped = stripStringsAndComments(raw);
+      for (const match of stripped.matchAll(SPAWN_CALL)) {
+        const site = raw.slice(match.index, match.index + match[0].length + 8);
+        expect(
+          site,
+          `bench/${file} spawns a subprocess that is not a literal 'git' (${site.trim()}…) — ` +
+            'a spawned curl or fetch-via-CLI would make tier 1 reach the network while the network scan stays green',
+        ).toMatch(/^\w+\s*\(\s*'git'/);
+      }
+      // Method-style calls (`cp.spawnSync(...)`) would dodge the literal check, so
+      // they are banned outright. Known residual hole: `.exec(` cannot be banned —
+      // it is indistinguishable from RegExp.prototype.exec — so `cp.exec('curl …')`
+      // would pass; the bare-import convention above is what keeps that visible.
+      expect(
+        /\.\s*(?:spawnSync|spawn|execFileSync|execFile|execSync|fork)\s*\(/.test(stripped),
+        `bench/${file} makes a method-style subprocess call — import the named function ` +
+          "so the spawn-only-'git' rule can see the argv",
+      ).toBe(false);
+    }
+  });
 });

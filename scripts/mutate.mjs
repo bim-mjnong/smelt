@@ -286,6 +286,16 @@ const MUTATIONS = [
       "await fetch(new URL('https://example.invalid/telemetry'));\nconst { createSmelter } = await import(distEntry);",
     why: 'a network call in the default tier-1 path — the harness must be offline by construction outside tier2.mjs/tier3.mjs, or "reproducible offline by a stranger" is a flag away from false',
   },
+  {
+    kind: 'artifact',
+    id: 'bench-subprocess-network-escape',
+    guard: 'test/guards/bench-results.test.ts',
+    file: 'bench/run.mjs',
+    find: 'const { createSmelter } = await import(distEntry);',
+    replace:
+      "spawnSync('curl', ['https://example.invalid/telemetry']);\nconst { createSmelter } = await import(distEntry);",
+    why: 'a subprocess reaching the network from the tier-1 path — no fetch, no node:http, so the network-shape scan stays green; only the spawn-only-git rule catches it',
+  },
 ];
 
 function runGuard(guard, guardSrc, guardRoot = corePackage) {
