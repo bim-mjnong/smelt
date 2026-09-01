@@ -1,7 +1,7 @@
 import { Parser } from 'web-tree-sitter';
 import type { Node, Tree } from 'web-tree-sitter';
 
-import { defaultMarker } from '../apply.ts';
+import { markerForLanguage, MARKER_LINE_COMMENT_LEADERS } from '../apply.ts';
 import { GrammarUnavailableError } from '../errors.ts';
 import { HASH_LENGTH } from '../hash.ts';
 import type { ElisionPlan, PlanInput, PlannedElision, Planner } from '../types.ts';
@@ -11,11 +11,13 @@ import { loadGrammar } from './grammar.ts';
 export const STRUCTURAL_PLANNER_ID = 'structural/v1';
 
 /**
- * The languages this planner actually parses. Slice 2 scopes it to two grammars on
- * purpose — the machinery generalises in Slice 4, and claiming a language before its
- * node kinds have been mapped would produce markers that mislabel what they collapsed.
+ * The languages this planner actually parses. Slice 2 scoped it to two grammars;
+ * Slice 4 added rust, python and go — the same machinery, three more node-kind sets.
+ * A language appears here only once its node kinds are mapped in
+ * {@link STRUCTURE_BY_LANGUAGE}, because claiming a language before that would produce
+ * markers that mislabel what they collapsed.
  */
-const STRUCTURAL_LANGUAGES = ['typescript', 'tsx'] as const;
+const STRUCTURAL_LANGUAGES = ['typescript', 'tsx', 'rust', 'python', 'go'] as const;
 type StructuralLanguage = (typeof STRUCTURAL_LANGUAGES)[number];
 
 /**
@@ -51,12 +53,18 @@ export interface StructuralPlannerOptions {
  * string); they are converted to UTF-8 byte offsets in one place, at the end.
  */
 interface Unit {
-  /** Start of the unit — the first attached comment if there is one. */
+  /** Start of the unit — the first attached comment or attribute if there is one. */
   readonly start: number;
   /** End of the declaration node. */
   readonly end: number;
   /** Human word for the declaration's kind, e.g. `'function'`. */
   readonly kind: string;
+  /**
+   * A unit the planner must never collapse, matched or not — a `//go:build`
+   * constraint, which governs the whole file yet can never *attach* to a declaration
+   * (the Go spec requires a blank line after it).
+   */
+  readonly pinned?: boolean;
 }
 
 /**
@@ -125,7 +133,7 @@ export async function planStructural(
     return {
       planner: STRUCTURAL_PLANNER_ID,
       language: input.language,
-      elisions: planFromTree(tree, input, options),
+      elisions: planFromTree(tree, input, options, language),
     };
   } finally {
     tree?.delete();
@@ -137,8 +145,11 @@ function assertStructuralLanguage(language: PlanInput['language']): StructuralLa
   for (const supported of STRUCTURAL_LANGUAGES) {
     if (language === supported) return supported;
   }
+  const named = `${STRUCTURAL_LANGUAGES.slice(0, -1).join(', ')} and ${
+    STRUCTURAL_LANGUAGES[STRUCTURAL_LANGUAGES.length - 1]
+  }`;
   throw new GrammarUnavailableError(
-    `smelt: structural planning covers ${STRUCTURAL_LANGUAGES.join(' and ')} in this ` +
+    `smelt: structural planning covers ${named} in this ` +
       `slice; got "${language}". It does not fall back to the lexical planner — output ` +
       `labelled structural/v1 that is really line windows would be undetectable from ` +
       `the outside. Use the lexical planner explicitly if that is what you want.`,
@@ -149,8 +160,15 @@ function planFromTree(
   tree: Tree,
   input: PlanInput,
   options: StructuralPlannerOptions,
+  language: StructuralLanguage,
 ): readonly PlannedElision[] {
-  const units = unitsOf(tree.rootNode, input.text);
+  const structure = STRUCTURE_BY_LANGUAGE[language];
+  const buildMarker = markerForLanguage(language);
+  // When the marker lands as a line comment (python), it comments out everything to the
+  // end of its line — so a collapse is only legal where nothing kept follows on the
+  // marker's own line. See the flush below.
+  const markerIsLineComment = MARKER_LINE_COMMENT_LEADERS[language] !== undefined;
+  const units = unitsOf(tree.rootNode, input.text, structure);
   const matched = matchUnits(units, input, options);
   const minSiblings = options.minSiblings ?? 1;
   const toByte = utf8OffsetIndex(
@@ -166,16 +184,25 @@ function planFromTree(
     const group = run;
     run = [];
     if (group.length < minSiblings) return;
+    // A line-comment marker swallows the rest of its line. When the run's last unit
+    // ends mid-line — python's `stmt_a(); stmt_b()` puts two top-level statements on
+    // one line — the marker's `# ` leader would comment out the *kept* code after it.
+    // Refusing the collapse is the honest move; extending the range would elide code
+    // no unit accounted for.
+    if (markerIsLineComment && !restOfLineIsBlank(input.text, group[group.length - 1]!.end)) {
+      return;
+    }
     const start = toByte.get(group[0]!.start)!;
     const end = toByte.get(group[group.length - 1]!.end)!;
     const cutBytes = end - start;
     const explanation = explain(group);
     // Profitability, measured rather than estimated: render the exact marker this cut
-    // would earn — the explanation's length varies with kind diversity, so a fixed
+    // would earn — the explanation's length varies with kind diversity and the
+    // language's marker may carry a comment leader (see markerForLanguage), so a fixed
     // estimate can pass a cut whose marker is bigger than what it removes, and a
     // marker that costs more than it removes grows the output.
     const markerBytes = Buffer.byteLength(
-      defaultMarker({
+      buildMarker({
         hash: PLACEHOLDER_HASH,
         bytes: cutBytes,
         rule: SIBLING_COLLAPSE_RULE,
@@ -191,7 +218,7 @@ function planFromTree(
   };
 
   for (let i = 0; i < units.length; i += 1) {
-    if (matched[i] === true) {
+    if (matched[i] === true || units[i]!.pinned === true) {
       flush();
     } else {
       run.push(units[i]!);
@@ -201,56 +228,105 @@ function planFromTree(
   return elisions;
 }
 
+/** True when nothing but whitespace follows `index` on its own line. */
+function restOfLineIsBlank(text: string, index: number): boolean {
+  for (let i = index; i < text.length; i += 1) {
+    const ch = text[i]!;
+    if (ch === '\n') return true;
+    if (!/\s/.test(ch)) return false;
+  }
+  return true;
+}
+
 /**
  * Group the root's named children into units: each declaration plus the comment block
- * attached to it. A comment attaches when only blank-free whitespace separates it from
- * what follows — one newline at most — so a doc comment travels with its declaration,
- * while a comment left floating above a blank line stands alone.
+ * — and, in rust, the outer attributes — attached to it. A comment attaches when only
+ * blank-free whitespace separates it from what follows — one newline at most — so a doc
+ * comment travels with its declaration, while a comment left floating above a blank
+ * line stands alone.
+ *
+ * Attributes attach *unconditionally*: tree-sitter-rust parses `#[inline]` as a
+ * top-level sibling of the item it decorates, but the language's own rule is that an
+ * outer attribute modifies the next item, blank lines or not. So once an attribute is
+ * pending, the whole pending prefix (doc comments included) rides forward to the next
+ * declaration — treating it as its own unit would let a collapse strip `#[derive(…)]`
+ * and the doc comment above it off a kept declaration.
  */
-function unitsOf(root: Node, text: string): readonly Unit[] {
+function unitsOf(root: Node, text: string, structure: LanguageStructure): readonly Unit[] {
   const units: Unit[] = [];
-  let pendingComments: Node[] = [];
+  /** Comments and attributes waiting to attach to the next declaration. */
+  let pending: Node[] = [];
+  /** Once true, blank lines no longer detach the pending prefix — see above. */
+  let pendingHasAttribute = false;
 
-  const flushComments = (): void => {
-    if (pendingComments.length === 0) return;
+  const flushPending = (): void => {
+    if (pending.length === 0) return;
     units.push({
-      start: pendingComments[0]!.startIndex,
-      end: pendingComments[pendingComments.length - 1]!.endIndex,
-      kind: 'comment',
+      start: pending[0]!.startIndex,
+      end: pending[pending.length - 1]!.endIndex,
+      kind: pendingHasAttribute ? 'attribute' : 'comment',
+      pinned: !pendingHasAttribute && pending.some((node) => pinnedComment(node, text, structure)),
     });
-    pendingComments = [];
+    pending = [];
+    pendingHasAttribute = false;
   };
 
   for (const child of root.namedChildren) {
     if (child === null) continue;
-    if (child.type === 'comment') {
+    const isComment = structure.commentTypes.has(child.type);
+    const isAttribute = structure.attributeTypes.has(child.type);
+    if (isComment || isAttribute) {
       if (
-        pendingComments.length > 0 &&
-        !adjacent(text, pendingComments[pendingComments.length - 1]!.endIndex, child.startIndex)
+        pending.length > 0 &&
+        !pendingHasAttribute &&
+        !adjacent(text, pending[pending.length - 1]!.endIndex, child.startIndex)
       ) {
-        flushComments();
+        flushPending();
       }
-      pendingComments.push(child);
+      pending.push(child);
+      pendingHasAttribute ||= isAttribute;
       continue;
     }
 
     const attached =
-      pendingComments.length > 0 &&
-      adjacent(text, pendingComments[pendingComments.length - 1]!.endIndex, child.startIndex);
-    if (attached) {
+      pending.length > 0 &&
+      (pendingHasAttribute ||
+        adjacent(text, pending[pending.length - 1]!.endIndex, child.startIndex));
+    if (attached && pending.some((node) => pinnedComment(node, text, structure))) {
+      // A pinned comment (`//go:build`) governs the file, not the declaration it
+      // happens to touch — keep it a standalone, uncollapsible unit either way.
+      flushPending();
       units.push({
-        start: pendingComments[0]!.startIndex,
+        start: child.startIndex,
         end: child.endIndex,
-        kind: kindOf(child),
+        kind: kindOf(child, structure),
       });
-      pendingComments = [];
+    } else if (attached) {
+      units.push({
+        start: pending[0]!.startIndex,
+        end: child.endIndex,
+        kind: kindOf(child, structure),
+      });
+      pending = [];
+      pendingHasAttribute = false;
     } else {
-      flushComments();
-      units.push({ start: child.startIndex, end: child.endIndex, kind: kindOf(child) });
+      flushPending();
+      units.push({
+        start: child.startIndex,
+        end: child.endIndex,
+        kind: kindOf(child, structure),
+      });
     }
   }
-  flushComments();
+  flushPending();
   return units;
+}
+
+/** Whether this comment node is one the language pins to the file. See {@link Unit}. */
+function pinnedComment(node: Node, text: string, structure: LanguageStructure): boolean {
+  if (structure.pinnedCommentPattern === undefined) return false;
+  if (!structure.commentTypes.has(node.type)) return false;
+  return structure.pinnedCommentPattern.test(text.slice(node.startIndex, node.endIndex));
 }
 
 /** Nothing but whitespace between the two indices, and at most one newline. */
@@ -308,6 +384,8 @@ const NON_DECLARATION_KINDS: ReadonlySet<string> = new Set([
   'statement',
   'comment',
   'unparsed region',
+  'package clause',
+  'attribute',
 ]);
 
 function countNoun(kind: string, count: number): string {
@@ -322,7 +400,7 @@ function countNoun(kind: string, count: number): string {
  * `'statement'`, and only what remains is called a `'declaration'` — a marker that
  * calls a parse error or a log line a declaration would be lying about the tree.
  */
-const KIND_LABELS: Readonly<Record<string, string>> = {
+const TS_KIND_LABELS: Readonly<Record<string, string>> = {
   function_declaration: 'function',
   generator_function_declaration: 'function',
   function_signature: 'function',
@@ -341,17 +419,123 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   comment: 'comment',
 };
 
-/** The kind of a declaration, unwrapping `export` so the marker names what it hides. */
-function kindOf(node: Node): string {
-  if (node.type === 'export_statement') {
+/**
+ * What this planner needs to know about a language, beyond its grammar: which node
+ * types are comments (so a doc comment travels with its declaration), which node types
+ * merely wrap the declaration that should be named (`export function f()` is a
+ * function, `@cached def f()` is a function), and the human word for each top-level
+ * node kind. One entry per {@link StructuralLanguage} — the `Record` keeps the two
+ * lists total, so adding a language without mapping its kinds is a compile error.
+ */
+interface LanguageStructure {
+  /** Top-level node types that are comments, in this grammar's vocabulary. */
+  readonly commentTypes: ReadonlySet<string>;
+  /**
+   * Top-level node types that are outer attributes — parsed as siblings of the item
+   * they decorate, but attached forward to it unconditionally by {@link unitsOf},
+   * because that is what the attribute means in the language.
+   */
+  readonly attributeTypes: ReadonlySet<string>;
+  /**
+   * Comments matching this pattern are pinned to the file — never attached, never
+   * collapsed. Go's `//go:build` is the one user: it governs which builds see the whole
+   * file, and the spec's mandatory blank line after it means it could never attach.
+   */
+  readonly pinnedCommentPattern?: RegExp;
+  /**
+   * Node types that wrap the declaration worth naming — the marker should say what is
+   * inside, not name the wrapper. The value is the label to fall back to when nothing
+   * nameable is found inside.
+   */
+  readonly wrapperTypes: Readonly<Record<string, string>>;
+  /** Human words per node type. See {@link TS_KIND_LABELS} for the labelling rules. */
+  readonly kindLabels: Readonly<Record<string, string>>;
+}
+
+const TS_STRUCTURE: LanguageStructure = {
+  commentTypes: new Set(['comment']),
+  attributeTypes: new Set(),
+  wrapperTypes: { export_statement: 'export' },
+  kindLabels: TS_KIND_LABELS,
+};
+
+const STRUCTURE_BY_LANGUAGE: Readonly<Record<StructuralLanguage, LanguageStructure>> = {
+  typescript: TS_STRUCTURE,
+  tsx: TS_STRUCTURE,
+  rust: {
+    // `///` and `//!` doc comments are line_comment nodes; `/** … */` is block_comment.
+    commentTypes: new Set(['line_comment', 'block_comment']),
+    // `#[…]` is a top-level sibling in tree-sitter-rust; it rides forward to its item.
+    attributeTypes: new Set(['attribute_item']),
+    wrapperTypes: {},
+    kindLabels: {
+      function_item: 'function',
+      struct_item: 'struct',
+      enum_item: 'enum',
+      union_item: 'union',
+      trait_item: 'trait',
+      impl_item: 'impl block',
+      mod_item: 'module',
+      macro_definition: 'macro',
+      type_item: 'type alias',
+      const_item: 'constant',
+      static_item: 'static item',
+      use_declaration: 'use declaration',
+      extern_crate_declaration: 'extern crate declaration',
+      attribute_item: 'attribute',
+      foreign_mod_item: 'extern block',
+    },
+  },
+  python: {
+    // Docstrings are not comments — they live inside the definition's body, so a kept
+    // definition keeps its docstring because units are kept whole. `#` comments above
+    // a definition attach the same way `/** … */` does in TypeScript.
+    commentTypes: new Set(['comment']),
+    attributeTypes: new Set(),
+    wrapperTypes: { decorated_definition: 'declaration' },
+    kindLabels: {
+      function_definition: 'function',
+      class_definition: 'class',
+      import_statement: 'import statement',
+      import_from_statement: 'import statement',
+      future_import_statement: 'import statement',
+      expression_statement: 'statement',
+    },
+  },
+  go: {
+    commentTypes: new Set(['comment']),
+    attributeTypes: new Set(),
+    // `//go:build` (and the legacy `// +build`) constrain the whole file's builds.
+    pinnedCommentPattern: /^\/\/(go:build|\s*\+build)\s/,
+    wrapperTypes: {},
+    kindLabels: {
+      function_declaration: 'function',
+      method_declaration: 'method',
+      type_declaration: 'type declaration',
+      const_declaration: 'constant',
+      var_declaration: 'variable',
+      import_declaration: 'import declaration',
+      package_clause: 'package clause',
+    },
+  },
+};
+
+/**
+ * The kind of a declaration, unwrapping wrappers (`export …`, `@decorator`) so the
+ * marker names what it hides. What the language's map does not name is still labelled
+ * honestly — see {@link TS_KIND_LABELS}.
+ */
+function kindOf(node: Node, structure: LanguageStructure): string {
+  const wrapperFallback = structure.wrapperTypes[node.type];
+  if (wrapperFallback !== undefined) {
     for (const child of node.namedChildren) {
-      if (child === null || child.type === 'comment') continue;
-      const label = KIND_LABELS[child.type];
+      if (child === null || structure.commentTypes.has(child.type)) continue;
+      const label = structure.kindLabels[child.type];
       if (label !== undefined) return label;
     }
-    return 'export';
+    return wrapperFallback;
   }
-  const label = KIND_LABELS[node.type];
+  const label = structure.kindLabels[node.type];
   if (label !== undefined) return label;
   if (node.type === 'ERROR') return 'unparsed region';
   if (node.type.endsWith('_statement') || node.type === 'statement_block') return 'statement';
@@ -359,7 +543,6 @@ function kindOf(node: Node): string {
 }
 
 /**
- * UTF-16 code-unit index → UTF-8 byte offset, for exactly the indices asked about.
  *
  * web-tree-sitter reports positions in code units of the JS string it parsed;
  * {@link ElisionPlan} ranges are UTF-8 bytes. Because every converted index is a parse
