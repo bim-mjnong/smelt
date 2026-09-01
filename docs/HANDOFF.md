@@ -163,8 +163,9 @@ Everything below exists, is typechecked, linted, and covered. `pnpm verify` is g
 | `packages/core/test/guards/expansion-counter.test.ts` | The retrieve counter and `allElisionsRetrieved`, i.e. the observability half of Law 3.                                                                                                                                                            |
 | `packages/core/test/guards/marker-format.test.ts`     | The wire surface. The rendered marker is pinned per version: the format cannot change without the version changing, and an unknown version fails.                                                                                                 |
 | `packages/core/test/guards/third-party.test.ts`       | Attribution. Reruns the real generator and fails if the committed `THIRD-PARTY.md` differs; also proves the generator refuses an unattributed grammar.                                                                                            |
+| `packages/core/test/guards/persistent-store.test.ts`  | Law 3 across a process boundary. A damaged blob is refused as `StoreCorruptionError`, never returned; the retrieval counters survive a restart; "we hold damaged bytes" stays distinct from "never existed".                                      |
 | `packages/core/test/guards/_source.ts`                | Shared source-walking helpers: `guardSrcRoot()`, `guardRoot()`, and the string/comment stripper that stops `net/policy.ts` reporting its own word list.                                                                                           |
-| `scripts/mutate.mjs`                                  | **The meta-guard.** Twelve mutations across the five guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                                   |
+| `scripts/mutate.mjs`                                  | **The meta-guard.** Fourteen mutations across the six guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                                  |
 | `scripts/bundle-grammars.mjs`                         | Copies the grammars `WASM_BY_LANGUAGE` names into the package, so they ship. Reads the built map rather than keeping a second list.                                                                                                               |
 | `scripts/generate-third-party.mjs`                    | Generates `THIRD-PARTY.md`. The grammar ↔ provenance mapping is a partition: an unattributed grammar throws.                                                                                                                                      |
 | `scripts/check-fresh-clone.sh`                        | Installs and verifies from `git archive` output — tracked files only.                                                                                                                                                                             |
@@ -351,8 +352,8 @@ pnpm mutate
 ```
 
 It copies `packages/core/src` to a scratch tree, applies one deliberate break, points the
-guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Twelve
-mutations across five guards; a survivor is reported as a hole in the guard, not in the
+guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Fourteen
+mutations across six guards; a survivor is reported as a hole in the guard, not in the
 mutation.
 
 Not every guard guards source code, so there is a second mutation kind: an `artifact`

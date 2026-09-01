@@ -111,9 +111,15 @@ export class DirectoryElisionStore implements ElisionStore {
     this.#blobsDir = join(root, 'blobs');
     this.#tmpDir = join(root, 'tmp');
     this.#logPath = join(root, 'retrievals.log');
+    const markerPath = join(root, 'format.json');
+    // Validate before mutating: a directory carrying a marker this code does not
+    // understand is refused with the directory exactly as it was found — no blobs/,
+    // no tmp/, no staged temp file created inside someone else's layout.
+    const existing = this.#readMarker(markerPath);
+    if (existing !== undefined) this.#verifyMarker(markerPath, existing);
     mkdirSync(this.#blobsDir, { recursive: true });
     mkdirSync(this.#tmpDir, { recursive: true });
-    this.#claimFormat(join(root, 'format.json'));
+    this.#claimFormat(markerPath);
   }
 
   put(content: string): string {
@@ -126,6 +132,9 @@ export class DirectoryElisionStore implements ElisionStore {
     }
     const existing = this.#readBlob(hash);
     if (existing !== undefined) {
+      // Verify the stored bytes before comparing: a damaged blob is corruption, not a
+      // collision. Only intact bytes that still differ earn HashCollisionError.
+      if (this.#hash(existing) !== hash) throw new StoreCorruptionError(hash);
       if (existing !== content) throw new HashCollisionError(hash);
       return hash;
     }
@@ -137,8 +146,12 @@ export class DirectoryElisionStore implements ElisionStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       // Another writer published this hash between our existence check and our link.
-      // Same bytes: idempotent put, done. Different bytes: a collision, refused loudly.
+      // Same bytes: idempotent put, done. Damaged or vanished bytes: corruption — the
+      // store was torn or edited outside smelt. Intact different bytes: a collision.
       const winner = this.#readBlob(hash);
+      if (winner === undefined || this.#hash(winner) !== hash) {
+        throw new StoreCorruptionError(hash);
+      }
       if (winner !== content) throw new HashCollisionError(hash);
     } finally {
       unlinkSync(tmpPath);
@@ -220,7 +233,13 @@ export class DirectoryElisionStore implements ElisionStore {
     const tmpPath = join(this.#tmpDir, `${String(process.pid)}-${randomBytes(8).toString('hex')}`);
     const fd = openSync(tmpPath, 'wx');
     try {
-      writeSync(fd, Buffer.from(content, 'utf8'));
+      // writeSync may write fewer bytes than asked; loop, or a short write would be
+      // fsynced and published under the full content's hash as a torn blob.
+      const bytes = Buffer.from(content, 'utf8');
+      let written = 0;
+      while (written < bytes.length) {
+        written += writeSync(fd, bytes, written);
+      }
       fsyncSync(fd);
     } finally {
       closeSync(fd);
@@ -231,11 +250,18 @@ export class DirectoryElisionStore implements ElisionStore {
   /**
    * One durable journal line. The hash is JSON-encoded because `retrieve()` takes it
    * from the model verbatim — a hash containing a newline must not forge a second line.
+   * The record starts with its own newline so a torn tail from an earlier crash — a
+   * partial record with no trailing newline — can never bleed into this one: the tear
+   * stays on its own line and is skipped by `stats()`, as blank lines are.
    */
   #appendLog(kind: 'hit' | 'miss' | 'corrupt', hash: string): void {
     const fd = openSync(this.#logPath, 'a');
     try {
-      writeSync(fd, `${kind} ${JSON.stringify(hash)}\n`);
+      const record = Buffer.from(`\n${kind} ${JSON.stringify(hash)}\n`, 'utf8');
+      let written = 0;
+      while (written < record.length) {
+        written += writeSync(fd, record, written);
+      }
       fsyncSync(fd);
     } finally {
       closeSync(fd);
@@ -254,7 +280,8 @@ export class DirectoryElisionStore implements ElisionStore {
   /**
    * Write the format marker if this directory has none, or verify the one it has.
    * Creation is atomic (write to `tmp/`, then `link`), so a concurrent creator never
-   * observes a half-written marker.
+   * observes a half-written marker. The constructor pre-verified any pre-existing
+   * marker; the verify here catches only a concurrent creator's claim.
    */
   #claimFormat(markerPath: string): void {
     const claim = (): string | undefined => {
@@ -276,7 +303,21 @@ export class DirectoryElisionStore implements ElisionStore {
 
     const existing = claim();
     if (existing === undefined) return;
+    this.#verifyMarker(markerPath, existing);
+  }
 
+  /** The marker's body, or `undefined` when the directory carries none. */
+  #readMarker(markerPath: string): string | undefined {
+    try {
+      return readFileSync(markerPath, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    }
+  }
+
+  /** Refuse a marker this version of smelt does not understand. */
+  #verifyMarker(markerPath: string, existing: string): void {
     let parsed: { format?: unknown; version?: unknown };
     try {
       parsed = JSON.parse(existing) as { format?: unknown; version?: unknown };
@@ -301,19 +342,25 @@ export class DirectoryElisionStore implements ElisionStore {
  * Flush the directory entry after a publish, so the *name* survives a crash as well as
  * the bytes. Where the platform refuses to fsync a directory (Windows does), the publish
  * is still atomic — only the durability of the directory entry falls back to the OS's
- * own schedule.
+ * own schedule. Only that refusal is swallowed: a real I/O failure (`EIO`) propagates,
+ * because "the disk could not flush" must never be reported as a successful put.
  */
 function fsyncDirBestEffort(path: string): void {
   let fd: number;
   try {
     fd = openSync(path, 'r');
   } catch {
-    return;
+    return; // the platform refuses to even open a directory for reading (Windows)
   }
   try {
     fsyncSync(fd);
-  } catch {
-    // See the doc comment: refusing platforms keep atomicity, not entry durability.
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // EINVAL/ENOTSUP/EPERM/EBADF: the platform refuses to fsync a directory — see the
+    // doc comment. Anything else (EIO above all) is a genuine write failure.
+    if (code !== 'EINVAL' && code !== 'ENOTSUP' && code !== 'EPERM' && code !== 'EBADF') {
+      throw error;
+    }
   } finally {
     closeSync(fd);
   }

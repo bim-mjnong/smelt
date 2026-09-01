@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -95,6 +95,21 @@ describe('the persistent store keeps Law 3 across restarts', () => {
 
     expect(errorName(() => store.retrieve(hash))).toBe('StoreCorruptionError');
     expect(errorName(() => store.retrieve('feedfacefeedface'))).toBe('UnknownHashError');
+    // A re-put of the original content sees damaged bytes under its hash: that is
+    // corruption, and must never be misreported as a hash collision.
+    expect(errorName(() => store.put('content that will be damaged'))).toBe('StoreCorruptionError');
+  });
+
+  it('a torn journal tail costs only its own record, never the next one', () => {
+    const root = newRoot();
+    const store = new DirectoryElisionStore(root);
+    const hash = store.put('content whose retrieval must still be counted');
+    store.retrieve(hash);
+    // What a crash mid-append leaves: a partial record with no trailing newline.
+    appendFileSync(join(root, 'retrievals.log'), 'hit "aaaa');
+
+    store.retrieve(hash);
+    expect(store.stats()).toMatchObject({ retrieveCalls: 2, uniqueRetrieved: 1, misses: 0 });
   });
 
   it('refuses a hash collision, including one discovered only after a restart', () => {
@@ -116,6 +131,9 @@ describe('the persistent store keeps Law 3 across restarts', () => {
       JSON.stringify({ format: 'smelt-elision-store', version: 999 }),
     );
     expect(() => new DirectoryElisionStore(root)).toThrow(/version 999/);
+    // Refused before mutated: the unrecognized directory gains no blobs/ or tmp/.
+    expect(existsSync(join(root, 'blobs'))).toBe(false);
+    expect(existsSync(join(root, 'tmp'))).toBe(false);
   });
 
   it('ignores what is not a blob: staging leftovers and finder droppings', () => {
