@@ -2,6 +2,7 @@ import { OverlappingElisionError, RangeOutOfBoundsError } from './errors.ts';
 import type {
   AppliedElision,
   ByteRange,
+  DetectedLanguage,
   ElisionPlan,
   ElisionStore,
   Measure,
@@ -48,6 +49,41 @@ export const MARKER_FORMAT_VERSION = 'v1';
  */
 export const defaultMarker: MarkerBuilder = ({ explanation, bytes, hash }) =>
   `<<smelt/${MARKER_FORMAT_VERSION}: ${explanation} (${String(bytes)}B) — retrieve("${hash}")>>`;
+
+/**
+ * Line-comment leaders for languages where a bare marker line breaks the syntax of
+ * what remains around it.
+ *
+ * Python is the one entry, and it earns its place: significant indentation means a
+ * parse error does not stay local. Reparsing a survivor whose marker sits bare between
+ * two `def`s shows the ERROR node swallowing the *neighbouring definitions too* — the
+ * survivor stops being Python at all, not just at the marker line. Brace-delimited
+ * languages keep their structure around an unparsable line, so they keep the bare
+ * marker.
+ *
+ * This does **not** move the frozen wire surface. The `<<smelt/v1: … >>` core is
+ * rendered by {@link defaultMarker}, byte-identical and still versioned in band; the
+ * leader is part of the substituted marker text, so `outputRange` covers it and
+ * reconstruction stays byte-exact. A comment leader in the survivor's own syntax is
+ * the one wrapping that cannot change what a model reads out of the marker.
+ */
+export const MARKER_LINE_COMMENT_LEADERS: Readonly<Partial<Record<DetectedLanguage, string>>> = {
+  python: '# ',
+};
+
+/**
+ * The marker builder for a language: {@link defaultMarker}, wrapped in the language's
+ * line-comment leader when {@link MARKER_LINE_COMMENT_LEADERS} names one — so a Python
+ * survivor still parses as Python. Everything else gets `base` unchanged.
+ */
+export function markerForLanguage(
+  language: DetectedLanguage,
+  base: MarkerBuilder = defaultMarker,
+): MarkerBuilder {
+  const leader = MARKER_LINE_COMMENT_LEADERS[language];
+  if (leader === undefined) return base;
+  return (info) => `${leader}${base(info)}`;
+}
 
 export interface ApplyOptions {
   readonly marker?: MarkerBuilder;

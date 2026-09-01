@@ -178,6 +178,8 @@ const MUTATIONS = [
     find: "    this.#appendLog('hit', hash);",
     replace: "    // this.#appendLog('hit', hash);",
     why: 'the retrieval journal never written — the expansion rate resets to a flattering zero on every restart',
+  },
+  {
     id: 'cache-hygiene-rewrites-input',
     guard: 'test/guards/cache-hygiene.test.ts',
     file: 'cache/prefix.ts',
@@ -195,6 +197,8 @@ const MUTATIONS = [
     replace:
       '// smelt achieves a 90% cache hit rate\nexport const ANTHROPIC_PROMPT_CACHE_FACTS = {',
     why: "the original pitch's unsupported figure reappearing as a comment — the exact claim Law 4 was written against",
+  },
+  {
     id: 'structural-explanation-loses-kind',
     guard: 'test/guards/structural.test.ts',
     file: 'plan/structural.ts',
@@ -206,9 +210,9 @@ const MUTATIONS = [
     id: 'structural-silent-lexical-fallback',
     guard: 'test/guards/structural.test.ts',
     file: 'plan/structural.ts',
-    find: "  throw new GrammarUnavailableError(\n    `smelt: structural planning covers ${STRUCTURAL_LANGUAGES.join(' and ')} in this ` +",
+    find: '  throw new GrammarUnavailableError(\n    `smelt: structural planning covers ${named} in this ` +',
     replace:
-      "  return 'typescript';\n  throw new GrammarUnavailableError(\n    `smelt: structural planning covers ${STRUCTURAL_LANGUAGES.join(' and ')} in this ` +",
+      "  return 'typescript';\n  throw new GrammarUnavailableError(\n    `smelt: structural planning covers ${named} in this ` +",
     why: 'the no-fallback rule broken: an unmapped language quietly parsed as typescript instead of refused — structural/v1 output nobody asked the grammar to justify',
   },
   {
@@ -295,6 +299,36 @@ const MUTATIONS = [
     replace:
       "spawnSync('curl', ['https://example.invalid/telemetry']);\nconst { createSmelter } = await import(distEntry);",
     why: 'a subprocess reaching the network from the tier-1 path — no fetch, no node:http, so the network-shape scan stays green; only the spawn-only-git rule catches it',
+    id: 'structural-new-language-dropped',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: "const STRUCTURAL_LANGUAGES = ['typescript', 'tsx', 'rust', 'python', 'go'] as const;",
+    replace: "const STRUCTURAL_LANGUAGES = ['typescript', 'tsx', 'rust', 'python'] as const;",
+    why: 'a Slice 4 language quietly dropped from the planner — go callers would be refused while the docs still claim it',
+  },
+  {
+    id: 'structural-rust-function-mislabelled',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: "      function_item: 'function',",
+    replace: "      function_item: 'declaration',",
+    why: "rust's node kinds unmapped in the marker — `collapsed 2 sibling declarations` where the tree says functions, Law 2 decayed to a vaguer truth",
+  },
+  {
+    id: 'structural-go-method-mislabelled',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: "      method_declaration: 'method',",
+    replace: "      method_declaration: 'declaration',",
+    why: "go's method kind erased from the marker — a mixed collapse that can no longer say what it mixed",
+  },
+  {
+    id: 'python-survivor-marker-not-a-comment',
+    guard: 'test/guards/structural.test.ts',
+    file: 'apply.ts',
+    find: "  python: '# ',",
+    replace: '',
+    why: 'the python marker landing as a bare `<<smelt/v1 …>>` line — significant indentation lets the ERROR node swallow the neighbouring definitions, so the survivor stops being python at all',
   },
 ];
 

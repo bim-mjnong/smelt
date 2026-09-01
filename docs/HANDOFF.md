@@ -155,7 +155,8 @@ Everything below exists, is typechecked, linted, and covered. `pnpm verify` is g
 | `packages/core/src/stages.ts` | `unconfiguredRerankStage` and `unconfiguredDistillStage`. Both name the interface you were meant to implement. Out of v1 — see below. |
 
 `packages/core/src/plan/structural.ts` is no longer a stub: **Slice 2 shipped it**, for
-TypeScript and TSX. It still refuses rather than falling back — an unmapped language or
+TypeScript and TSX, and **Slice 4 extended it** to Rust, Python and Go. It still refuses
+rather than falling back — an unmapped language or
 a failed grammar load throws `GrammarUnavailableError`, because output labelled
 `structural/v1` that is really line windows is undetectable from outside.
 
@@ -179,8 +180,6 @@ a failed grammar load throws `GrammarUnavailableError`, because output labelled
 
 ### Not built at all
 
-- No structural planning beyond TypeScript and TSX — the machinery generalises in
-  **Slice 4**.
 - No benchmark, so no number smelt owns. **Slice 3.**
 - No cross-file reasoning: smelt sees one blob at a time. **Slice 7.**
 
@@ -292,16 +291,31 @@ tokenizer changed by ~30% between generations, and an edit would silently rewrit
 - [x] The README's numbers section is written from this table or stays empty. No rounding up, no "up to". It stays empty until the founder decides otherwise; the guard forbids "up to" in the results file itself.
 - [x] The harness has no network access on the smelt side. Model calls are the harness's, made explicitly, outside the library. `src/` cannot reach `bench/`; the guard confines network shapes to `tier2.mjs`/`tier3.mjs` and a mutation proves it goes red.
 
-### Slice 4 — structural planning for Rust, Python and Go
+### Slice 4 — structural planning for Rust, Python and Go — **SHIPPED**
 
 Same machinery, three more node-kind sets.
 
+**Shipped as** three more entries in the structural planner's language table
+(`STRUCTURE_BY_LANGUAGE` in `src/plan/structural.ts`): each language names its comment
+node types, its wrapper types (`export …`, `@decorator`), and a human word per top-level
+node kind. The grammars were already bundled and load through the same
+`assertLocalResource` + `readFile` path — no new dependency, no new transport.
+
+The Python-specific decision: **the survivor must still parse.** Reparsing a survivor
+whose marker sits bare between two `def`s shows the ERROR node swallowing the
+neighbouring definitions — significant indentation means a parse error does not stay
+local. So for Python the marker lands wrapped in the language's line-comment leader
+(`# <<smelt/v1: … >>`, `markerForLanguage` in `src/apply.ts`). This does not move the
+frozen wire surface: the `<<smelt/v1: … >>` core is byte-identical and still versioned
+in band, and the leader is part of the substituted marker text, so `outputRange` covers
+it and reconstruction stays byte-exact. Brace-delimited languages keep the bare marker.
+
 **Acceptance criteria**
 
-- [ ] One fixture per language, each with a sibling collapse and a preserved doc comment (`///`, docstring, `//`).
-- [ ] Python's significant indentation does not produce a marker that breaks the block structure of what remains. A fixture asserts the survivor still parses.
-- [ ] `SUPPORTED_LANGUAGES` and `WASM_BY_LANGUAGE` stay total — adding an id without a grammar is already a compile error; keep it that way.
-- [ ] Bench numbers from Slice 3 re-run and committed, per language.
+- [x] One fixture per language, each with a sibling collapse and a preserved doc comment (`///`, docstring, `//`). Snapshot-tested, and determinism is asserted over every fixture.
+- [x] Python's significant indentation does not produce a marker that breaks the block structure of what remains. The guard reparses the post-`applyPlan` survivor with the python grammar and asserts it introduces no ERROR or missing nodes the original parse did not have.
+- [x] `SUPPORTED_LANGUAGES` and `WASM_BY_LANGUAGE` stay total — adding an id without a grammar is already a compile error; kept that way (no type changed).
+- [ ] Bench numbers from Slice 3 re-run and committed, per language. Follows the bench merge — Slice 3's harness lands in a sibling branch, and per-language rows are added once both are on main.
 
 ### Slice 5 — a persistent elision store — **SHIPPED**
 

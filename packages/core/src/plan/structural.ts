@@ -1,7 +1,7 @@
 import { Parser } from 'web-tree-sitter';
 import type { Node, Tree } from 'web-tree-sitter';
 
-import { defaultMarker } from '../apply.ts';
+import { markerForLanguage } from '../apply.ts';
 import { GrammarUnavailableError } from '../errors.ts';
 import { HASH_LENGTH } from '../hash.ts';
 import type { ElisionPlan, PlanInput, PlannedElision, Planner } from '../types.ts';
@@ -11,11 +11,13 @@ import { loadGrammar } from './grammar.ts';
 export const STRUCTURAL_PLANNER_ID = 'structural/v1';
 
 /**
- * The languages this planner actually parses. Slice 2 scopes it to two grammars on
- * purpose — the machinery generalises in Slice 4, and claiming a language before its
- * node kinds have been mapped would produce markers that mislabel what they collapsed.
+ * The languages this planner actually parses. Slice 2 scoped it to two grammars;
+ * Slice 4 added rust, python and go — the same machinery, three more node-kind sets.
+ * A language appears here only once its node kinds are mapped in
+ * {@link STRUCTURE_BY_LANGUAGE}, because claiming a language before that would produce
+ * markers that mislabel what they collapsed.
  */
-const STRUCTURAL_LANGUAGES = ['typescript', 'tsx'] as const;
+const STRUCTURAL_LANGUAGES = ['typescript', 'tsx', 'rust', 'python', 'go'] as const;
 type StructuralLanguage = (typeof STRUCTURAL_LANGUAGES)[number];
 
 /**
@@ -125,7 +127,7 @@ export async function planStructural(
     return {
       planner: STRUCTURAL_PLANNER_ID,
       language: input.language,
-      elisions: planFromTree(tree, input, options),
+      elisions: planFromTree(tree, input, options, language),
     };
   } finally {
     tree?.delete();
@@ -137,8 +139,11 @@ function assertStructuralLanguage(language: PlanInput['language']): StructuralLa
   for (const supported of STRUCTURAL_LANGUAGES) {
     if (language === supported) return supported;
   }
+  const named = `${STRUCTURAL_LANGUAGES.slice(0, -1).join(', ')} and ${
+    STRUCTURAL_LANGUAGES[STRUCTURAL_LANGUAGES.length - 1]
+  }`;
   throw new GrammarUnavailableError(
-    `smelt: structural planning covers ${STRUCTURAL_LANGUAGES.join(' and ')} in this ` +
+    `smelt: structural planning covers ${named} in this ` +
       `slice; got "${language}". It does not fall back to the lexical planner — output ` +
       `labelled structural/v1 that is really line windows would be undetectable from ` +
       `the outside. Use the lexical planner explicitly if that is what you want.`,
@@ -149,8 +154,11 @@ function planFromTree(
   tree: Tree,
   input: PlanInput,
   options: StructuralPlannerOptions,
+  language: StructuralLanguage,
 ): readonly PlannedElision[] {
-  const units = unitsOf(tree.rootNode, input.text);
+  const structure = STRUCTURE_BY_LANGUAGE[language];
+  const buildMarker = markerForLanguage(language);
+  const units = unitsOf(tree.rootNode, input.text, structure);
   const matched = matchUnits(units, input, options);
   const minSiblings = options.minSiblings ?? 1;
   const toByte = utf8OffsetIndex(
@@ -171,11 +179,12 @@ function planFromTree(
     const cutBytes = end - start;
     const explanation = explain(group);
     // Profitability, measured rather than estimated: render the exact marker this cut
-    // would earn — the explanation's length varies with kind diversity, so a fixed
+    // would earn — the explanation's length varies with kind diversity and the
+    // language's marker may carry a comment leader (see markerForLanguage), so a fixed
     // estimate can pass a cut whose marker is bigger than what it removes, and a
     // marker that costs more than it removes grows the output.
     const markerBytes = Buffer.byteLength(
-      defaultMarker({
+      buildMarker({
         hash: PLACEHOLDER_HASH,
         bytes: cutBytes,
         rule: SIBLING_COLLAPSE_RULE,
@@ -207,7 +216,7 @@ function planFromTree(
  * what follows — one newline at most — so a doc comment travels with its declaration,
  * while a comment left floating above a blank line stands alone.
  */
-function unitsOf(root: Node, text: string): readonly Unit[] {
+function unitsOf(root: Node, text: string, structure: LanguageStructure): readonly Unit[] {
   const units: Unit[] = [];
   let pendingComments: Node[] = [];
 
@@ -223,7 +232,7 @@ function unitsOf(root: Node, text: string): readonly Unit[] {
 
   for (const child of root.namedChildren) {
     if (child === null) continue;
-    if (child.type === 'comment') {
+    if (structure.commentTypes.has(child.type)) {
       if (
         pendingComments.length > 0 &&
         !adjacent(text, pendingComments[pendingComments.length - 1]!.endIndex, child.startIndex)
@@ -241,12 +250,16 @@ function unitsOf(root: Node, text: string): readonly Unit[] {
       units.push({
         start: pendingComments[0]!.startIndex,
         end: child.endIndex,
-        kind: kindOf(child),
+        kind: kindOf(child, structure),
       });
       pendingComments = [];
     } else {
       flushComments();
-      units.push({ start: child.startIndex, end: child.endIndex, kind: kindOf(child) });
+      units.push({
+        start: child.startIndex,
+        end: child.endIndex,
+        kind: kindOf(child, structure),
+      });
     }
   }
   flushComments();
@@ -308,6 +321,8 @@ const NON_DECLARATION_KINDS: ReadonlySet<string> = new Set([
   'statement',
   'comment',
   'unparsed region',
+  'package clause',
+  'attribute',
 ]);
 
 function countNoun(kind: string, count: number): string {
@@ -322,7 +337,7 @@ function countNoun(kind: string, count: number): string {
  * `'statement'`, and only what remains is called a `'declaration'` — a marker that
  * calls a parse error or a log line a declaration would be lying about the tree.
  */
-const KIND_LABELS: Readonly<Record<string, string>> = {
+const TS_KIND_LABELS: Readonly<Record<string, string>> = {
   function_declaration: 'function',
   generator_function_declaration: 'function',
   function_signature: 'function',
@@ -341,17 +356,104 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   comment: 'comment',
 };
 
-/** The kind of a declaration, unwrapping `export` so the marker names what it hides. */
-function kindOf(node: Node): string {
-  if (node.type === 'export_statement') {
+/**
+ * What this planner needs to know about a language, beyond its grammar: which node
+ * types are comments (so a doc comment travels with its declaration), which node types
+ * merely wrap the declaration that should be named (`export function f()` is a
+ * function, `@cached def f()` is a function), and the human word for each top-level
+ * node kind. One entry per {@link StructuralLanguage} — the `Record` keeps the two
+ * lists total, so adding a language without mapping its kinds is a compile error.
+ */
+interface LanguageStructure {
+  /** Top-level node types that are comments, in this grammar's vocabulary. */
+  readonly commentTypes: ReadonlySet<string>;
+  /**
+   * Node types that wrap the declaration worth naming — the marker should say what is
+   * inside, not name the wrapper. The value is the label to fall back to when nothing
+   * nameable is found inside.
+   */
+  readonly wrapperTypes: Readonly<Record<string, string>>;
+  /** Human words per node type. See {@link TS_KIND_LABELS} for the labelling rules. */
+  readonly kindLabels: Readonly<Record<string, string>>;
+}
+
+const TS_STRUCTURE: LanguageStructure = {
+  commentTypes: new Set(['comment']),
+  wrapperTypes: { export_statement: 'export' },
+  kindLabels: TS_KIND_LABELS,
+};
+
+const STRUCTURE_BY_LANGUAGE: Readonly<Record<StructuralLanguage, LanguageStructure>> = {
+  typescript: TS_STRUCTURE,
+  tsx: TS_STRUCTURE,
+  rust: {
+    // `///` and `//!` doc comments are line_comment nodes; `/** … */` is block_comment.
+    commentTypes: new Set(['line_comment', 'block_comment']),
+    wrapperTypes: {},
+    kindLabels: {
+      function_item: 'function',
+      struct_item: 'struct',
+      enum_item: 'enum',
+      union_item: 'union',
+      trait_item: 'trait',
+      impl_item: 'impl block',
+      mod_item: 'module',
+      macro_definition: 'macro',
+      type_item: 'type alias',
+      const_item: 'constant',
+      static_item: 'static item',
+      use_declaration: 'use declaration',
+      extern_crate_declaration: 'extern crate declaration',
+      attribute_item: 'attribute',
+      foreign_mod_item: 'extern block',
+    },
+  },
+  python: {
+    // Docstrings are not comments — they live inside the definition's body, so a kept
+    // definition keeps its docstring because units are kept whole. `#` comments above
+    // a definition attach the same way `/** … */` does in TypeScript.
+    commentTypes: new Set(['comment']),
+    wrapperTypes: { decorated_definition: 'declaration' },
+    kindLabels: {
+      function_definition: 'function',
+      class_definition: 'class',
+      import_statement: 'import statement',
+      import_from_statement: 'import statement',
+      future_import_statement: 'import statement',
+      expression_statement: 'statement',
+    },
+  },
+  go: {
+    commentTypes: new Set(['comment']),
+    wrapperTypes: {},
+    kindLabels: {
+      function_declaration: 'function',
+      method_declaration: 'method',
+      type_declaration: 'type declaration',
+      const_declaration: 'constant',
+      var_declaration: 'variable',
+      import_declaration: 'import declaration',
+      package_clause: 'package clause',
+    },
+  },
+};
+
+/**
+ * The kind of a declaration, unwrapping wrappers (`export …`, `@decorator`) so the
+ * marker names what it hides. What the language's map does not name is still labelled
+ * honestly — see {@link TS_KIND_LABELS}.
+ */
+function kindOf(node: Node, structure: LanguageStructure): string {
+  const wrapperFallback = structure.wrapperTypes[node.type];
+  if (wrapperFallback !== undefined) {
     for (const child of node.namedChildren) {
-      if (child === null || child.type === 'comment') continue;
-      const label = KIND_LABELS[child.type];
+      if (child === null || structure.commentTypes.has(child.type)) continue;
+      const label = structure.kindLabels[child.type];
       if (label !== undefined) return label;
     }
-    return 'export';
+    return wrapperFallback;
   }
-  const label = KIND_LABELS[node.type];
+  const label = structure.kindLabels[node.type];
   if (label !== undefined) return label;
   if (node.type === 'ERROR') return 'unparsed region';
   if (node.type.endsWith('_statement') || node.type === 'statement_block') return 'statement';
@@ -359,7 +461,6 @@ function kindOf(node: Node): string {
 }
 
 /**
- * UTF-16 code-unit index → UTF-8 byte offset, for exactly the indices asked about.
  *
  * web-tree-sitter reports positions in code units of the JS string it parsed;
  * {@link ElisionPlan} ranges are UTF-8 bytes. Because every converted index is a parse
