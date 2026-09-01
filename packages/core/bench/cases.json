@@ -22,6 +22,16 @@
       "provenance": "the MIXED_TSX fixture from packages/core/test/structural-fixtures.ts, materialized to disk unchanged — the repository's committed TSX source"
     },
     {
+      "id": "java-classes",
+      "file": "corpus/request-handler.java",
+      "path": "src/RequestHandler.java",
+      "strategy": "structural",
+      "focus": ["RequestHandler"],
+      "budgetBytes": 400,
+      "task": "an agent opened a java file to change RequestHandler and nothing else — the slice-4b path through a prebuilt grammar",
+      "provenance": "the FUNCTIONS_JAVA fixture from packages/core/test/structural-fixtures.ts, materialized to disk unchanged"
+    },
+    {
       "id": "multi-file-grep",
       "file": "corpus/grep-elision.txt",
       "path": "grep-elision.txt",

@@ -18,6 +18,20 @@ const BY_EXTENSION: Readonly<Record<string, LanguageId>> = {
   py: 'python',
   pyi: 'python',
   go: 'go',
+  java: 'java',
+  c: 'c',
+  h: 'c',
+  cc: 'cpp',
+  cpp: 'cpp',
+  hpp: 'cpp',
+  cs: 'c_sharp',
+  rb: 'ruby',
+  php: 'php',
+  kt: 'kotlin',
+  kts: 'kotlin',
+  swift: 'swift',
+  sh: 'bash',
+  bash: 'bash',
 };
 
 /** Every language smelt has a grammar mapping for. Used by tests to stay total. */
@@ -28,6 +42,15 @@ export const SUPPORTED_LANGUAGES: readonly LanguageId[] = [
   'rust',
   'python',
   'go',
+  'java',
+  'c',
+  'cpp',
+  'c_sharp',
+  'ruby',
+  'php',
+  'kotlin',
+  'swift',
+  'bash',
 ];
 
 /**

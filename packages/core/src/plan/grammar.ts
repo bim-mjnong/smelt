@@ -24,6 +24,15 @@ export const WASM_BY_LANGUAGE: Readonly<Record<LanguageId, string>> = {
   rust: 'tree-sitter-rust.wasm',
   python: 'tree-sitter-python.wasm',
   go: 'tree-sitter-go.wasm',
+  java: 'tree-sitter-java.wasm',
+  c: 'tree-sitter-c.wasm',
+  cpp: 'tree-sitter-cpp.wasm',
+  c_sharp: 'tree-sitter-c_sharp.wasm',
+  ruby: 'tree-sitter-ruby.wasm',
+  php: 'tree-sitter-php.wasm',
+  kotlin: 'tree-sitter-kotlin.wasm',
+  swift: 'tree-sitter-swift.wasm',
+  bash: 'tree-sitter-bash.wasm',
 };
 
 /**

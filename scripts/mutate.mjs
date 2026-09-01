@@ -6,7 +6,7 @@
  * ships with at least one *mutation*: a specific, minimal break in the source that the
  * guard must catch. This script copies `packages/core/src` to a scratch directory,
  * applies one mutation, points the guard at the copy via `SMELT_GUARD_SRC`, and
- * asserts the guard goes **red**. Twenty-one mutations across eight guards; a mutation the
+ * asserts the guard goes **red**. Forty-four mutations across twelve guards; a mutation the
  * guard survives is reported as a failure of the *guard*, not of the mutation.
  *
  * It also runs every guard against the pristine tree first, because a guard that fails
@@ -53,6 +53,7 @@ const GUARDS = [
   'test/guards/persistent-store.test.ts',
   'test/guards/cache-hygiene.test.ts',
   'test/guards/structural.test.ts',
+  'test/guards/structural-totality.test.ts',
   'test/guards/bench-results.test.ts',
   'test/guards/repo-map.test.ts',
   'test/guards/init-wizard.test.ts',
@@ -306,9 +307,33 @@ const MUTATIONS = [
     id: 'structural-new-language-dropped',
     guard: 'test/guards/structural.test.ts',
     file: 'plan/structural.ts',
-    find: "const STRUCTURAL_LANGUAGES = ['typescript', 'tsx', 'rust', 'python', 'go'] as const;",
-    replace: "const STRUCTURAL_LANGUAGES = ['typescript', 'tsx', 'rust', 'python'] as const;",
+    find: "  'python',\n  'go',\n  'java',",
+    replace: "  'python',\n  'java',",
     why: 'a Slice 4 language quietly dropped from the planner — go callers would be refused while the docs still claim it',
+  },
+  {
+    id: 'structural-language-claimed-without-tests',
+    guard: 'test/guards/structural-totality.test.ts',
+    file: 'plan/structural.ts',
+    find: "  'bash',\n] as const;",
+    replace: "  'bash',\n  'lua',\n] as const;",
+    why: 'a language claimed by the planner with no fixture, no snapshot and no doc-comment case — exactly the untested-language ship the totality guard exists to refuse',
+  },
+  {
+    id: 'structural-bash-shebang-collapsed',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: '    pinnedCommentPattern: /^#!/,',
+    replace: '',
+    why: "the bash shebang pin removed — `#!/usr/bin/env bash` collapses into the head run and the survivor silently changes which interpreter runs it, go build tags' exact failure in a new language",
+  },
+  {
+    id: 'ruby-survivor-marker-not-a-comment',
+    guard: 'test/guards/structural.test.ts',
+    file: 'apply.ts',
+    find: "  ruby: '# ',\n",
+    replace: '',
+    why: 'the ruby marker landing as a bare `<<smelt/v1 …>>` line — ruby reads `<<` as a heredoc operator, so the marker swallows every kept declaration after it into a string and the survivor stops being ruby at all',
   },
   {
     id: 'structural-rust-function-mislabelled',

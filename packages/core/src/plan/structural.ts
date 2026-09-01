@@ -12,13 +12,33 @@ export const STRUCTURAL_PLANNER_ID = 'structural/v1';
 
 /**
  * The languages this planner actually parses. Slice 2 scoped it to two grammars;
- * Slice 4 added rust, python and go — the same machinery, three more node-kind sets.
- * A language appears here only once its node kinds are mapped in
- * {@link STRUCTURE_BY_LANGUAGE}, because claiming a language before that would produce
- * markers that mislabel what they collapsed.
+ * Slice 4 added rust, python and go, and Slice 4b added the ten prebuilt grammars
+ * below — the same machinery, ten more node-kind sets. A language appears here only
+ * once its node kinds are mapped in {@link STRUCTURE_BY_LANGUAGE}, because claiming a
+ * language before that would produce markers that mislabel what they collapsed.
+ *
+ * Exported for the totality guard (`test/guards/structural-totality.test.ts`): every
+ * language named here must have a fixture, a snapshot and a doc-comment case, so a
+ * language cannot be claimed without tests.
  */
-const STRUCTURAL_LANGUAGES = ['typescript', 'tsx', 'rust', 'python', 'go'] as const;
-type StructuralLanguage = (typeof STRUCTURAL_LANGUAGES)[number];
+export const STRUCTURAL_LANGUAGES = [
+  'typescript',
+  'tsx',
+  'javascript',
+  'rust',
+  'python',
+  'go',
+  'java',
+  'c',
+  'cpp',
+  'c_sharp',
+  'ruby',
+  'php',
+  'kotlin',
+  'swift',
+  'bash',
+] as const;
+export type StructuralLanguage = (typeof STRUCTURAL_LANGUAGES)[number];
 
 /**
  * Every elision this planner produces carries this rule id, and the profitability
@@ -60,9 +80,12 @@ interface Unit {
   /** Human word for the declaration's kind, e.g. `'function'`. */
   readonly kind: string;
   /**
-   * A unit the planner must never collapse, matched or not — a `//go:build`
-   * constraint, which governs the whole file yet can never *attach* to a declaration
-   * (the Go spec requires a blank line after it).
+   * A unit the planner must never collapse, matched or not. Three languages use it:
+   * go's `//go:build` constraint governs the whole file yet can never *attach* to a
+   * declaration (the Go spec requires a blank line after it); shebang lines (bash,
+   * ruby) and ruby's `# frozen_string_literal:` magic comment govern how the file is
+   * executed at all; and php's `<?php` open tag is what makes the rest of the file
+   * php. Collapsing any of them silently changes what the survivor *is*.
    */
   readonly pinned?: boolean;
 }
@@ -273,6 +296,18 @@ function unitsOf(root: Node, text: string, structure: LanguageStructure): readon
 
   for (const child of root.namedChildren) {
     if (child === null) continue;
+    if (structure.pinnedTypes?.has(child.type) === true) {
+      // A pinned node type (php's `<?php` tag, javascript's `#!` line) is its own
+      // uncollapsible unit — nothing attaches to it, and no run may swallow it.
+      flushPending();
+      units.push({
+        start: child.startIndex,
+        end: child.endIndex,
+        kind: kindOf(child, structure),
+        pinned: true,
+      });
+      continue;
+    }
     const isComment = structure.commentTypes.has(child.type);
     const isAttribute = structure.attributeTypes.has(child.type);
     if (isComment || isAttribute) {
@@ -385,7 +420,14 @@ const NON_DECLARATION_KINDS: ReadonlySet<string> = new Set([
   'comment',
   'unparsed region',
   'package clause',
+  'package header',
+  'package declaration',
   'attribute',
+  'command',
+  'variable assignment',
+  'include directive',
+  'shebang',
+  'php tag',
 ]);
 
 function countNoun(kind: string, count: number): string {
@@ -438,10 +480,18 @@ interface LanguageStructure {
   readonly attributeTypes: ReadonlySet<string>;
   /**
    * Comments matching this pattern are pinned to the file — never attached, never
-   * collapsed. Go's `//go:build` is the one user: it governs which builds see the whole
-   * file, and the spec's mandatory blank line after it means it could never attach.
+   * collapsed. Go's `//go:build` governs which builds see the whole file, and the
+   * spec's mandatory blank line after it means it could never attach; bash and ruby
+   * shebang lines, and ruby's `# frozen_string_literal:` magic comment, govern how
+   * the file executes at all.
    */
   readonly pinnedCommentPattern?: RegExp;
+  /**
+   * Non-comment node types pinned to the file the same way — php's `<?php` open tag,
+   * javascript's `#!` hash-bang line. Each is its own uncollapsible unit: a run that
+   * swallowed one would change what the survivor *is*, not just what it contains.
+   */
+  readonly pinnedTypes?: ReadonlySet<string>;
   /**
    * Node types that wrap the declaration worth naming — the marker should say what is
    * inside, not name the wrapper. The value is the label to fall back to when nothing
@@ -462,6 +512,25 @@ const TS_STRUCTURE: LanguageStructure = {
 const STRUCTURE_BY_LANGUAGE: Readonly<Record<StructuralLanguage, LanguageStructure>> = {
   typescript: TS_STRUCTURE,
   tsx: TS_STRUCTURE,
+  javascript: {
+    commentTypes: new Set(['comment']),
+    attributeTypes: new Set(),
+    // `#!/usr/bin/env node` parses as a hash_bang_line node, and it decides how the
+    // file executes — a collapse that swallowed it would break every direct invocation.
+    pinnedTypes: new Set(['hash_bang_line']),
+    wrapperTypes: { export_statement: 'export' },
+    kindLabels: {
+      function_declaration: 'function',
+      generator_function_declaration: 'function',
+      class_declaration: 'class',
+      lexical_declaration: 'variable',
+      variable_declaration: 'variable',
+      import_statement: 'import statement',
+      expression_statement: 'statement',
+      hash_bang_line: 'shebang',
+      comment: 'comment',
+    },
+  },
   rust: {
     // `///` and `//!` doc comments are line_comment nodes; `/** … */` is block_comment.
     commentTypes: new Set(['line_comment', 'block_comment']),
@@ -516,6 +585,166 @@ const STRUCTURE_BY_LANGUAGE: Readonly<Record<StructuralLanguage, LanguageStructu
       var_declaration: 'variable',
       import_declaration: 'import declaration',
       package_clause: 'package clause',
+    },
+  },
+  java: {
+    // `//` is line_comment, `/** … */` javadoc is block_comment — both attach.
+    commentTypes: new Set(['line_comment', 'block_comment']),
+    attributeTypes: new Set(),
+    wrapperTypes: {},
+    kindLabels: {
+      class_declaration: 'class',
+      interface_declaration: 'interface',
+      enum_declaration: 'enum',
+      record_declaration: 'record',
+      annotation_type_declaration: 'annotation type',
+      package_declaration: 'package declaration',
+      import_declaration: 'import declaration',
+      module_declaration: 'module declaration',
+    },
+  },
+  c: {
+    commentTypes: new Set(['comment']),
+    attributeTypes: new Set(),
+    wrapperTypes: {},
+    kindLabels: {
+      function_definition: 'function',
+      declaration: 'declaration',
+      struct_specifier: 'struct',
+      union_specifier: 'union',
+      enum_specifier: 'enum',
+      type_definition: 'type definition',
+      preproc_include: 'include directive',
+      preproc_def: 'macro definition',
+      preproc_function_def: 'macro definition',
+    },
+  },
+  cpp: {
+    commentTypes: new Set(['comment']),
+    attributeTypes: new Set(),
+    // `template <typename T> class Box {}` — the marker should say what the template
+    // declares, not just that it is a template.
+    wrapperTypes: { template_declaration: 'template' },
+    kindLabels: {
+      function_definition: 'function',
+      declaration: 'declaration',
+      struct_specifier: 'struct',
+      class_specifier: 'class',
+      union_specifier: 'union',
+      enum_specifier: 'enum',
+      type_definition: 'type definition',
+      alias_declaration: 'type alias',
+      namespace_definition: 'namespace',
+      using_declaration: 'using declaration',
+      linkage_specification: 'extern block',
+      preproc_include: 'include directive',
+      preproc_def: 'macro definition',
+      preproc_function_def: 'macro definition',
+    },
+  },
+  c_sharp: {
+    // `///` doc comments and `//` line comments are both plain comment nodes.
+    commentTypes: new Set(['comment']),
+    attributeTypes: new Set(),
+    wrapperTypes: {},
+    kindLabels: {
+      class_declaration: 'class',
+      interface_declaration: 'interface',
+      struct_declaration: 'struct',
+      enum_declaration: 'enum',
+      record_declaration: 'record',
+      delegate_declaration: 'delegate',
+      namespace_declaration: 'namespace',
+      file_scoped_namespace_declaration: 'namespace',
+      using_directive: 'using directive',
+      global_statement: 'statement',
+    },
+  },
+  ruby: {
+    commentTypes: new Set(['comment']),
+    attributeTypes: new Set(),
+    // The shebang and the `# frozen_string_literal:` magic comment both govern how
+    // the whole file executes; neither may collapse into a run.
+    pinnedCommentPattern: /^#(?:!|\s*frozen_string_literal:)/,
+    wrapperTypes: {},
+    kindLabels: {
+      method: 'method',
+      singleton_method: 'method',
+      class: 'class',
+      module: 'module',
+      // Top-level `require "json"` and `CONSTANT = 1` are expression nodes in
+      // tree-sitter-ruby; "statement" is the honest generic word for both.
+      call: 'statement',
+      assignment: 'statement',
+      comment: 'comment',
+    },
+  },
+  php: {
+    // `//`, `#` and `/** … */` PHPDoc are all comment nodes.
+    commentTypes: new Set(['comment']),
+    attributeTypes: new Set(),
+    // `<?php` is what makes the rest of the file php at all.
+    pinnedTypes: new Set(['php_tag']),
+    wrapperTypes: {},
+    kindLabels: {
+      function_definition: 'function',
+      class_declaration: 'class',
+      interface_declaration: 'interface',
+      trait_declaration: 'trait',
+      enum_declaration: 'enum',
+      const_declaration: 'constant',
+      namespace_definition: 'namespace',
+      namespace_use_declaration: 'use declaration',
+      expression_statement: 'statement',
+      php_tag: 'php tag',
+    },
+  },
+  kotlin: {
+    // `//` is line_comment; `/** … */` KDoc is multiline_comment.
+    commentTypes: new Set(['line_comment', 'multiline_comment']),
+    attributeTypes: new Set(),
+    wrapperTypes: {},
+    kindLabels: {
+      function_declaration: 'function',
+      // tree-sitter-kotlin parses class, interface and enum headers all as
+      // class_declaration — "type declaration" is the honest word for the union.
+      class_declaration: 'type declaration',
+      object_declaration: 'object',
+      property_declaration: 'property',
+      type_alias: 'type alias',
+      package_header: 'package header',
+      import_list: 'import list',
+    },
+  },
+  swift: {
+    // `//` and `///` are comment nodes; `/* … */` is multiline_comment.
+    commentTypes: new Set(['comment', 'multiline_comment']),
+    attributeTypes: new Set(),
+    wrapperTypes: {},
+    kindLabels: {
+      function_declaration: 'function',
+      // tree-sitter-swift parses struct, class, enum and extension declarations all
+      // as class_declaration — "type declaration" is the honest word for the union.
+      class_declaration: 'type declaration',
+      protocol_declaration: 'protocol',
+      property_declaration: 'property',
+      typealias_declaration: 'type alias',
+      import_declaration: 'import declaration',
+    },
+  },
+  bash: {
+    commentTypes: new Set(['comment']),
+    attributeTypes: new Set(),
+    // The shebang decides which interpreter runs the file. It parses as an ordinary
+    // comment node, so it is pinned the way go's build tag is — never collapsed.
+    pinnedCommentPattern: /^#!/,
+    wrapperTypes: {},
+    kindLabels: {
+      function_definition: 'function',
+      command: 'command',
+      variable_assignment: 'variable assignment',
+      declaration_command: 'variable assignment',
+      comment: 'comment',
     },
   },
 };

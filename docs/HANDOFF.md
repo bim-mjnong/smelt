@@ -155,7 +155,9 @@ Everything below exists, is typechecked, linted, and covered. `pnpm verify` is g
 | `packages/core/src/stages.ts` | `unconfiguredRerankStage` and `unconfiguredDistillStage`. Both name the interface you were meant to implement. Out of v1 — see below. |
 
 `packages/core/src/plan/structural.ts` is no longer a stub: **Slice 2 shipped it**, for
-TypeScript and TSX, and **Slice 4 extended it** to Rust, Python and Go. It still refuses
+TypeScript and TSX, **Slice 4 extended it** to Rust, Python and Go, and **Slice 4b
+extended it again** to JavaScript, Java, C, C++, C#, Ruby, PHP, Kotlin, Swift and
+Bash. It still refuses
 rather than falling back — an unmapped language or
 a failed grammar load throws `GrammarUnavailableError`, because output labelled
 `structural/v1` that is really line windows is undetectable from outside.
@@ -172,7 +174,7 @@ a failed grammar load throws `GrammarUnavailableError`, because output labelled
 | `packages/core/test/guards/persistent-store.test.ts`  | Law 3 across a process boundary. A damaged blob is refused as `StoreCorruptionError`, never returned; the retrieval counters survive a restart; "we hold damaged bytes" stays distinct from "never existed".                                      |
 | `packages/core/test/guards/cache-hygiene.test.ts`     | Slice 6's promise: cache-prefix hygiene detects and warns, never rewrites — inputs stay unmutated, no export returns a "fixed" prompt, and no cache-hit-rate figure exists anywhere in `src`.                                                     |
 | `packages/core/test/guards/_source.ts`                | Shared source-walking helpers: `guardSrcRoot()`, `guardRoot()`, and the string/comment stripper that stops `net/policy.ts` reporting its own word list.                                                                                           |
-| `scripts/mutate.mjs`                                  | **The meta-guard.** Twenty-one mutations across the eight guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                              |
+| `scripts/mutate.mjs`                                  | **The meta-guard.** Forty-four mutations across the twelve guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                             |
 | `scripts/bundle-grammars.mjs`                         | Copies the grammars `WASM_BY_LANGUAGE` names into the package, so they ship. Reads the built map rather than keeping a second list.                                                                                                               |
 | `scripts/generate-third-party.mjs`                    | Generates `THIRD-PARTY.md`. The grammar ↔ provenance mapping is a partition: an unattributed grammar throws.                                                                                                                                      |
 | `scripts/check-fresh-clone.sh`                        | Installs and verifies from `git archive` output — tracked files only.                                                                                                                                                                             |
@@ -339,6 +341,55 @@ caller wiring the marker — the same behaviour `createSmelter` already had.
 - [x] `SUPPORTED_LANGUAGES` and `WASM_BY_LANGUAGE` stay total — adding an id without a grammar is already a compile error; kept that way (no type changed).
 - [ ] Bench numbers from Slice 3 re-run and committed, per language. Follows the bench merge — Slice 3's harness lands in a sibling branch, and per-language rows are added once both are on main.
 
+### Slice 4b — ten more structural languages — **SHIPPED**
+
+Same machinery again: JavaScript, Java, C, C++, C#, Ruby, PHP, Kotlin, Swift and Bash,
+all from grammars `tree-sitter-wasms` already prebuilds — zero new dependencies, ten
+more node-kind sets in `STRUCTURE_BY_LANGUAGE`, and each grammar's licence verified
+(all MIT) and recorded in `grammar-provenance.json` before it shipped.
+
+The decisions that were not just table entries:
+
+- **Ruby and bash read the marker itself as syntax.** The default marker _begins
+  with_ `<<`, which both languages parse as a heredoc operator — a bare marker line
+  does not stay a local error, it swallows every kept declaration after it into a
+  string. Both languages therefore get the python treatment: the marker lands behind
+  a `# ` leader (`markerForLanguage`), and the guard reparses the survivor and
+  asserts no new ERROR nodes. Same wire surface, same reasoning as python.
+- **More pins, same law as `//go:build`.** Shebang lines (`#!…` in bash, ruby and
+  javascript — javascript's is a `hash_bang_line` node, not a comment), ruby's
+  `# frozen_string_literal:` magic comment, and php's `<?php` open tag all govern
+  what the file _is_, so none of them may collapse into a run. `LanguageStructure`
+  grew a `pinnedTypes` set for the non-comment cases.
+- **Honest words where a grammar lumps kinds together.** tree-sitter-kotlin and
+  tree-sitter-swift parse structs, classes, enums, interfaces and extensions all as
+  `class_declaration`; the label is `type declaration`, because calling a swift
+  struct a class would be the marker overclaiming the tree. C# doc comments and C
+  fixtures follow each language's own doc idiom (`///`, `/* … */`, javadoc, PHPDoc,
+  KDoc, `#`).
+- **A totality guard for tests themselves**
+  (`test/guards/structural-totality.test.ts`): every id in `STRUCTURAL_LANGUAGES`
+  must have a fixture, a committed snapshot, and a doc-comment case in
+  `FIXTURE_BY_LANGUAGE` — claiming a language without tests goes red, and a mutation
+  proves it.
+
+**Size, measured** (2026-09-02, `ls -l packages/core/grammars/` after `pnpm build`):
+the nine newly bundled grammars add **21,384,606 bytes ≈ 20.4 MiB** — cpp 4.4,
+kotlin 3.9, c_sharp 3.8, swift 3.0, ruby 2.0, bash 1.3, php 0.8, c 0.8, java 0.4 MiB
+(javascript, 0.6 MiB, was already bundled) — taking the whole `grammars/` directory
+to 28,316,720 bytes ≈ 27.0 MiB, which is what `bundle-grammars` prints. That is the
+tarball cost of "works offline" for fifteen languages; the founder accepted it when
+scoping this slice.
+
+**Acceptance criteria**
+
+- [x] Nine new grammars bundled: `WASM_BY_LANGUAGE`, `SUPPORTED_LANGUAGES` and the extension map extended; totality stays a compile-time property (`Record<LanguageId, …>` everywhere).
+- [x] `grammar-provenance.json` entries and regenerated `THIRD-PARTY.md` rows for every new grammar, licences verified against the npm registry and each repository's LICENSE file. The generator still throws on an unattributed grammar.
+- [x] Per-language node-kind sets with attached doc comments in each idiom, and language-appropriate pins (shebangs, `# frozen_string_literal:`, `<?php`).
+- [x] One fixture per language with a sibling collapse and a preserved doc comment; snapshot and determinism per fixture; survivor-reparse assertions for ruby and bash (the heredoc languages) alongside python's.
+- [x] The totality guard, with a mutation proving it goes red when a language is claimed without tests.
+- [x] One tier-1 bench case through a new language (`java-classes`), so the harness proves the slice-4b path; full per-language corpus rows can follow.
+
 ### Slice 5 — a persistent elision store — **SHIPPED**
 
 Elisions used to die with the process. A long-lived agent session outlives the process.
@@ -429,8 +480,8 @@ pnpm mutate
 ```
 
 It copies `packages/core/src` to a scratch tree, applies one deliberate break, points the
-guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Twenty-one
-mutations across eight guards; a survivor is reported as a hole in the guard, not in the
+guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Forty-four
+mutations across twelve guards; a survivor is reported as a hole in the guard, not in the
 mutation.
 
 Not every guard guards source code, so there is a second mutation kind: an `artifact`

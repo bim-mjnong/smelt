@@ -54,12 +54,19 @@ export const defaultMarker: MarkerBuilder = ({ explanation, bytes, hash }) =>
  * Line-comment leaders for languages where a bare marker line breaks the syntax of
  * what remains around it.
  *
- * Python is the one entry, and it earns its place: significant indentation means a
- * parse error does not stay local. Reparsing a survivor whose marker sits bare between
- * two `def`s shows the ERROR node swallowing the *neighbouring definitions too* — the
- * survivor stops being Python at all, not just at the marker line. Brace-delimited
- * languages keep their structure around an unparsable line, so they keep the bare
- * marker.
+ * Each entry earns its place with a concrete parse failure:
+ *
+ *   - **python** — significant indentation means a parse error does not stay local.
+ *     Reparsing a survivor whose marker sits bare between two `def`s shows the ERROR
+ *     node swallowing the *neighbouring definitions too* — the survivor stops being
+ *     Python at all, not just at the marker line.
+ *   - **ruby** and **bash** — the marker *begins with* `<<`, which both languages read
+ *     as a heredoc operator. A bare marker line does not stay a local error: it opens
+ *     a heredoc whose terminator never arrives, and everything after it — every kept
+ *     declaration — is swallowed into a string literal.
+ *
+ * Brace-delimited languages keep their structure around an unparsable line, so they
+ * keep the bare marker.
  *
  * This does **not** move the frozen wire surface. The `<<smelt/v1: … >>` core is
  * rendered by {@link defaultMarker}, byte-identical and still versioned in band; the
@@ -69,6 +76,8 @@ export const defaultMarker: MarkerBuilder = ({ explanation, bytes, hash }) =>
  */
 export const MARKER_LINE_COMMENT_LEADERS: Readonly<Partial<Record<DetectedLanguage, string>>> = {
   python: '# ',
+  ruby: '# ',
+  bash: '# ',
 };
 
 /**

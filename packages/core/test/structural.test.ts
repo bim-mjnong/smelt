@@ -13,28 +13,32 @@ import type { PlanInput } from '../src/types.ts';
 
 import {
   BOUNDARY_TS,
-  FUNCTIONS_GO,
-  FUNCTIONS_PY,
-  FUNCTIONS_RS,
+  FIXTURE_BY_LANGUAGE,
   FUNCTIONS_TS,
   LONG_DOC_TS,
-  MIXED_TSX,
 } from './structural-fixtures.ts';
 
+/**
+ * One snapshot fixture per structural language — driven by the same registry the
+ * totality guard checks, so a language cannot gain a planner entry without gaining a
+ * snapshot here — plus the TypeScript special cases (a forty-line doc comment,
+ * multi-byte boundaries, and the no-focus form).
+ */
 const FIXTURES: readonly {
   readonly name: string;
   readonly text: string;
   readonly language: PlanInput['language'];
   readonly focus: readonly string[];
 }[] = [
-  { name: 'functions.ts', text: FUNCTIONS_TS, language: 'typescript', focus: ['handleRequest'] },
+  ...Object.entries(FIXTURE_BY_LANGUAGE).map(([language, fixture]) => ({
+    name: fixture.name,
+    text: fixture.text,
+    language: language as PlanInput['language'],
+    focus: fixture.focus,
+  })),
   { name: 'long-doc.ts', text: LONG_DOC_TS, language: 'typescript', focus: ['retryWithBackoff'] },
-  { name: 'mixed.tsx', text: MIXED_TSX, language: 'tsx', focus: ['Toolbar'] },
   { name: 'boundary.ts', text: BOUNDARY_TS, language: 'typescript', focus: ['greetTarget'] },
   { name: 'functions.ts, no focus', text: FUNCTIONS_TS, language: 'typescript', focus: [] },
-  { name: 'functions.rs', text: FUNCTIONS_RS, language: 'rust', focus: ['resolve_target'] },
-  { name: 'functions.py', text: FUNCTIONS_PY, language: 'python', focus: ['fetch_user'] },
-  { name: 'functions.go', text: FUNCTIONS_GO, language: 'go', focus: ['HandleRequest'] },
 ];
 
 function inputFor(fixture: (typeof FIXTURES)[number]): PlanInput {
@@ -46,9 +50,10 @@ function inputFor(fixture: (typeof FIXTURES)[number]): PlanInput {
   };
 }
 
+const TS_FIXTURE = FIXTURES.find((fixture) => fixture.name === 'functions.ts')!;
+const TSX_FIXTURE = FIXTURES.find((fixture) => fixture.name === 'mixed.tsx')!;
+
 describe('the structural planner', () => {
-  // One snapshot per fixture, so any change to what the planner decides — ranges,
-  // rules, explanations — shows up in review as a diff rather than as a surprise.
   for (const fixture of FIXTURES) {
     it(`plans ${fixture.name} (snapshot)`, async () => {
       const plan = await planStructural(inputFor(fixture));
@@ -58,7 +63,7 @@ describe('the structural planner', () => {
   }
 
   it('names the kind and the count of what it collapsed, from the parse tree', async () => {
-    const plan = await planStructural(inputFor(FIXTURES[0]!));
+    const plan = await planStructural(inputFor(TS_FIXTURE));
     expect(plan.elisions.length).toBeGreaterThan(0);
     for (const elision of plan.elisions) {
       expect(elision.reason.rule).toBe('sibling-collapse');
@@ -67,7 +72,7 @@ describe('the structural planner', () => {
   });
 
   it('names each kind in a mixed collapse', async () => {
-    const plan = await planStructural(inputFor(FIXTURES[2]!));
+    const plan = await planStructural(inputFor(TSX_FIXTURE));
     const explanations = plan.elisions.map((e) => e.reason.explanation);
     expect(
       explanations.some((text) => /^collapsed \d+ sibling declarations \(.+\)$/.test(text)),
@@ -76,9 +81,8 @@ describe('the structural planner', () => {
   });
 
   it('keeps the focused declaration whole — signature, doc comment, body', async () => {
-    const fixture = FIXTURES[0]!;
-    const plan = await planStructural(inputFor(fixture));
-    const result = applyPlan(fixture.text, plan, new MemoryElisionStore());
+    const plan = await planStructural(inputFor(TS_FIXTURE));
+    const result = applyPlan(TS_FIXTURE.text, plan, new MemoryElisionStore());
     expect(result.text).toContain('export function handleRequest(path: string, raw: string)');
     expect(result.text).toContain('/** The entry point every request goes through');
     expect(result.text).toContain('return renderResponse(normalisePath(path), config);');
@@ -95,11 +99,11 @@ describe('the structural planner', () => {
   });
 
   it('refuses every language it has not mapped, naming the ones it has', async () => {
-    for (const language of ['unknown', 'javascript'] as const) {
-      const attempt = planStructural({ ...inputFor(FIXTURES[0]!), language });
-      await expect(attempt).rejects.toThrow(GrammarUnavailableError);
-      await expect(attempt).rejects.toThrow(/typescript, tsx, rust, python and go/);
-    }
+    const attempt = planStructural({ ...inputFor(TS_FIXTURE), language: 'unknown' });
+    await expect(attempt).rejects.toThrow(GrammarUnavailableError);
+    await expect(attempt).rejects.toThrow(
+      /typescript, tsx, javascript, rust, python, go, java, c, cpp, c_sharp, ruby, php, kotlin, swift and bash/,
+    );
   });
 
   it('smelts end to end through createSmelter, and the result round-trips', async () => {

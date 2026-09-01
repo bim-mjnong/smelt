@@ -14,17 +14,15 @@ import type { ElisionPlan, PlanInput } from '@guard/types';
 import {
   BOUNDARY_TS,
   BUILD_TAG_GO,
-  FUNCTIONS_GO,
+  FIXTURE_BY_LANGUAGE,
   FUNCTIONS_PY,
+  FUNCTIONS_RB,
   FUNCTIONS_RS,
+  FUNCTIONS_SH,
   FUNCTIONS_TS,
-  GO_DOC_COMMENT,
   LONG_DOC_COMMENT,
   LONG_DOC_TS,
   MIXED_TSX,
-  PYTHON_DOCSTRING,
-  RUST_ATTRIBUTE,
-  RUST_DOC_COMMENT,
 } from '../structural-fixtures.ts';
 
 /**
@@ -151,11 +149,9 @@ describe('Slice 2 — the structural planner keeps its claims', () => {
   });
 
   it('throws GrammarUnavailableError instead of falling back to lexical', async () => {
-    for (const language of ['unknown', 'javascript'] as const) {
-      await expect(structuralPlan(FUNCTIONS_TS, ['handleRequest'], language)).rejects.toThrow(
-        GrammarUnavailableError,
-      );
-    }
+    await expect(structuralPlan(FUNCTIONS_TS, ['handleRequest'], 'unknown')).rejects.toThrow(
+      GrammarUnavailableError,
+    );
     const smelter = createSmelter({ strategy: 'structural' });
     await expect(
       smelter.smelt('just some prose, no language at all', { budgetBytes: 100 }),
@@ -260,23 +256,27 @@ describe('Slice 2 — the structural planner keeps its claims', () => {
 });
 
 /**
- * SLICE 4 — the same claims, three more languages.
+ * SLICE 4 AND 4B — the same claims, thirteen more languages.
  *
- * Rust, python and go are planned by the same machinery as TypeScript and TSX: the
- * marker names kind and count from the parse tree, a kept declaration keeps its
- * signature and its doc comment (`///`, a docstring, `//`), and grammar failure is an
- * exception, never lexical output. One claim is new and python-specific: **the
- * survivor still parses.** Python's significant indentation means a parse error does
- * not stay local — a bare marker line between two `def`s produces an ERROR node that
- * swallows the neighbouring definitions, so the survivor stops being python at all.
- * The marker therefore lands as a `#` comment (see `markerForLanguage`), and this
- * guard *reparses the post-applyPlan survivor* and asserts it introduces no ERROR or
- * missing nodes that the original parse did not have. Mutations for each of these
- * live in `scripts/mutate.mjs`.
+ * Every language in `FIXTURE_BY_LANGUAGE` is planned by the same machinery as
+ * TypeScript and TSX: the marker names kind and count from the parse tree, a kept
+ * declaration keeps its signature and its doc comment in the language's own idiom
+ * (`///`, javadoc, PHPDoc, KDoc, a docstring, `#`), and grammar failure is an
+ * exception, never lexical output. One claim is survivor-shaped: **for python, ruby
+ * and bash, the survivor still parses.** Python's significant indentation means a
+ * parse error does not stay local; ruby and bash read the marker's own `<<` as a
+ * heredoc operator, so a bare marker line would swallow every kept declaration after
+ * it into a string. The marker therefore lands as a `#` comment in all three (see
+ * `markerForLanguage`), and this guard *reparses the post-applyPlan survivor* and
+ * asserts it introduces no ERROR or missing nodes that the original parse did not
+ * have. Mutations for each of these live in `scripts/mutate.mjs`.
  */
-/** Every ERROR or missing node in an independent python parse of `text`. */
-async function parseIssues(text: string): Promise<readonly string[]> {
-  const grammar = await loadGrammar('python');
+/** Every ERROR or missing node in an independent parse of `text`. */
+async function parseIssues(
+  text: string,
+  language: PlanInput['language'],
+): Promise<readonly string[]> {
+  const grammar = await loadGrammar(language as Exclude<PlanInput['language'], 'unknown'>);
   const parser = new Parser();
   parser.setLanguage(grammar);
   const tree = parser.parse(text);
@@ -296,54 +296,30 @@ async function parseIssues(text: string): Promise<readonly string[]> {
   return issues;
 }
 
-describe('Slice 4 — rust, python and go keep the same claims', () => {
-  const CASES = [
-    {
-      language: 'rust',
-      text: FUNCTIONS_RS,
-      focus: ['resolve_target'],
-      signature: 'pub fn resolve_target(name: &str) -> String {',
-      // The doc comment, the outer attribute below it, and the signature must survive
-      // *as one block*: tree-sitter-rust parses `#[inline]` as a top-level sibling of
-      // the fn, and the cheap bug is a collapse that keeps the fn but hands its
-      // attribute — and the doc comment, which attaches to the attribute — to the run.
-      doc: `${RUST_DOC_COMMENT}\n${RUST_ATTRIBUTE}\npub fn resolve_target`,
-    },
-    {
-      language: 'python',
-      text: FUNCTIONS_PY,
-      focus: ['fetch_user'],
-      signature: 'def fetch_user(user_id):',
-      doc: PYTHON_DOCSTRING,
-    },
-    {
-      language: 'go',
-      text: FUNCTIONS_GO,
-      focus: ['HandleRequest'],
-      signature: 'func HandleRequest(path string) string {',
-      doc: GO_DOC_COMMENT,
-    },
-  ] as const;
+describe('Slices 4 and 4b — every claimed language keeps the same claims', () => {
+  const CASES = Object.entries(FIXTURE_BY_LANGUAGE).map(([language, fixture]) => ({
+    language: language as PlanInput['language'],
+    ...fixture,
+  }));
 
-  it('explains with kind and count in every language, including the pure-function form', async () => {
-    for (const { language, text, focus } of CASES) {
+  it('explains with kind and count in every language, including each pure same-kind form', async () => {
+    for (const { language, text, focus, pureCollapse } of CASES) {
       const plan = await structuralPlan(text, focus, language);
       expect(
         plan.elisions.length,
         `${language}: no elisions planned — this guard would be vacuous`,
-      ).toBeGreaterThan(1);
+      ).toBeGreaterThan(0);
       for (const { reason } of plan.elisions) {
         expect(reason.rule).toBe('sibling-collapse');
         expect(reason.explanation).toMatch(/^collapsed \d+ sibling [a-z]/);
         expect(reason.explanation).not.toMatch(/\d+ lines?\b/);
       }
-      // The same shape TypeScript earns — "collapsed N sibling functions", the count
-      // and the kind read off this language's own parse tree.
+      // The same shape TypeScript earns — kind and count read off this language's own
+      // parse tree, in its strongest guaranteed form ("collapsed 2 sibling functions",
+      // "… classes", "… methods" — the mixed form only where the fixture mixes kinds).
       expect(
-        plan.elisions.some(({ reason }) =>
-          /^collapsed \d+ sibling functions$/.test(reason.explanation),
-        ),
-        `${language}: expected a pure sibling-functions collapse among: ` +
+        plan.elisions.some(({ reason }) => pureCollapse.test(reason.explanation)),
+        `${language}: expected ${String(pureCollapse)} among: ` +
           plan.elisions.map((e) => e.reason.explanation).join(' | '),
       ).toBe(true);
     }
@@ -358,7 +334,11 @@ describe('Slice 4 — rust, python and go keep the same claims', () => {
       `rust: ${rust.elisions.map((e) => e.reason.explanation).join(' | ')}`,
     ).toBe(true);
 
-    const go = await structuralPlan(FUNCTIONS_GO, ['HandleRequest'], 'go');
+    const go = await structuralPlan(
+      FIXTURE_BY_LANGUAGE.go.text,
+      FIXTURE_BY_LANGUAGE.go.focus,
+      'go',
+    );
     const goMixed = go.elisions.map((e) => e.reason.explanation).join(' | ');
     expect(goMixed, `go: ${goMixed}`).toContain('1 method');
     expect(goMixed).toContain('1 type declaration');
@@ -368,6 +348,29 @@ describe('Slice 4 — rust, python and go keep the same claims', () => {
     const pyMixed = python.elisions.map((e) => e.reason.explanation).join(' | ');
     expect(pyMixed, `python: ${pyMixed}`).toContain('1 class');
     expect(pyMixed).toContain('1 import statement');
+
+    // A sample across the 4b languages: the kind words come from each parse tree.
+    const java = await structuralPlan(
+      FIXTURE_BY_LANGUAGE.java.text,
+      FIXTURE_BY_LANGUAGE.java.focus,
+      'java',
+    );
+    const javaMixed = java.elisions.map((e) => e.reason.explanation).join(' | ');
+    expect(javaMixed, `java: ${javaMixed}`).toContain('1 package declaration');
+    expect(javaMixed).toContain('1 import declaration');
+
+    const c = await structuralPlan(FIXTURE_BY_LANGUAGE.c.text, FIXTURE_BY_LANGUAGE.c.focus, 'c');
+    const cMixed = c.elisions.map((e) => e.reason.explanation).join(' | ');
+    expect(cMixed, `c: ${cMixed}`).toContain('include directive');
+    expect(cMixed).toContain('1 macro definition');
+
+    const bash = await structuralPlan(
+      FIXTURE_BY_LANGUAGE.bash.text,
+      FIXTURE_BY_LANGUAGE.bash.focus,
+      'bash',
+    );
+    const bashMixed = bash.elisions.map((e) => e.reason.explanation).join(' | ');
+    expect(bashMixed, `bash: ${bashMixed}`).toContain('1 command');
   });
 
   it('keeps the focused declaration whole — signature and doc comment — and round-trips', async () => {
@@ -384,33 +387,40 @@ describe('Slice 4 — rust, python and go keep the same claims', () => {
     }
   });
 
-  it('the python survivor still parses: the reparse introduces no ERROR nodes', async () => {
-    // Self-check: the fixture parses cleanly, so "no new ERROR nodes" below means
-    // exactly "no ERROR nodes at all" — the comparison cannot be vacuous.
-    expect(await parseIssues(FUNCTIONS_PY), 'the fixture itself must parse cleanly').toEqual([]);
-
-    const smelter = createSmelter({ strategy: 'structural' });
-    const result = await smelter.smelt(FUNCTIONS_PY, {
-      language: 'python',
-      budgetBytes: 600,
-      focus: ['fetch_user'],
-    });
-    expect(result.elisions.length, 'nothing elided — the reparse below is vacuous').toBeGreaterThan(
-      0,
-    );
-    expect(
-      await parseIssues(result.text),
-      'the survivor no longer parses as python — an elision broke the block structure of what remains',
-    ).toEqual([]);
-    // How that is achieved: every marker landed as a python comment, so the survivor's
-    // block structure is exactly the kept declarations' own.
-    for (const { marker } of result.elisions) {
-      expect(marker.startsWith('# <<smelt/'), `marker is not a python comment: ${marker}`).toBe(
-        true,
+  for (const [language, text, focus] of [
+    ['python', FUNCTIONS_PY, ['fetch_user']],
+    ['ruby', FUNCTIONS_RB, ['handle_request']],
+    ['bash', FUNCTIONS_SH, ['handle_request']],
+  ] as const) {
+    it(`the ${language} survivor still parses: the reparse introduces no ERROR nodes`, async () => {
+      // Self-check: the fixture parses cleanly, so "no new ERROR nodes" below means
+      // exactly "no ERROR nodes at all" — the comparison cannot be vacuous.
+      expect(await parseIssues(text, language), 'the fixture itself must parse cleanly').toEqual(
+        [],
       );
-    }
-    expect(smelter.reconstruct(result)).toBe(FUNCTIONS_PY);
-  });
+
+      const smelter = createSmelter({ strategy: 'structural' });
+      const result = await smelter.smelt(text, { language, budgetBytes: 600, focus });
+      expect(
+        result.elisions.length,
+        'nothing elided — the reparse below is vacuous',
+      ).toBeGreaterThan(0);
+      expect(
+        await parseIssues(result.text, language),
+        `the survivor no longer parses as ${language} — an elision broke the structure of what remains`,
+      ).toEqual([]);
+      // How that is achieved: every marker landed as a comment in the survivor's own
+      // syntax. In python a bare marker breaks the block structure; in ruby and bash
+      // the marker's own `<<` would open a heredoc and swallow what follows.
+      for (const { marker } of result.elisions) {
+        expect(
+          marker.startsWith('# <<smelt/'),
+          `marker is not a ${language} comment: ${marker}`,
+        ).toBe(true);
+      }
+      expect(smelter.reconstruct(result)).toBe(text);
+    });
+  }
 
   it('bare applyPlan defaults its marker to the plan language — python still parses', async () => {
     // The documented public composition is `planStructural → applyPlan`, with no
@@ -420,7 +430,7 @@ describe('Slice 4 — rust, python and go keep the same claims', () => {
     const plan = await structuralPlan(FUNCTIONS_PY, ['fetch_user'], 'python');
     const result = applyPlan(FUNCTIONS_PY, plan, new MemoryElisionStore());
     expect(result.elisions.length, 'nothing elided — the reparse is vacuous').toBeGreaterThan(0);
-    expect(await parseIssues(result.text)).toEqual([]);
+    expect(await parseIssues(result.text, 'python')).toEqual([]);
   });
 
   it('refuses a python collapse whose marker would comment out kept code on its line', async () => {
@@ -446,7 +456,7 @@ describe('Slice 4 — rust, python and go keep the same claims', () => {
       `the kept statement was swallowed into a comment: ${flagLine!}`,
     ).toBe(false);
     // …and the survivor still parses as python.
-    expect(await parseIssues(result.text)).toEqual([]);
+    expect(await parseIssues(result.text, 'python')).toEqual([]);
     expect(smelter.reconstruct(result)).toBe(text);
   });
 
@@ -466,5 +476,36 @@ describe('Slice 4 — rust, python and go keep the same claims', () => {
     ).toBeGreaterThan(0);
     expect(result.text, 'the build constraint did not survive').toContain('//go:build linux');
     expect(smelter.reconstruct(result)).toBe(BUILD_TAG_GO);
+  });
+
+  it('pins file-governing prefixes in the 4b languages: shebangs, magic comments, `<?php`', async () => {
+    // Same law as the go build tag: a run that swallows one of these changes what the
+    // survivor *is* — which interpreter runs it, whether its strings are frozen,
+    // whether the file is php at all — with no elision the caller asked for.
+    const PINS = [
+      { language: 'javascript', pinned: '#!/usr/bin/env node' },
+      { language: 'ruby', pinned: '#!/usr/bin/env ruby' },
+      { language: 'ruby', pinned: '# frozen_string_literal: true' },
+      { language: 'php', pinned: '<?php' },
+      { language: 'bash', pinned: '#!/usr/bin/env bash' },
+    ] as const;
+    for (const { language, pinned } of PINS) {
+      const fixture = FIXTURE_BY_LANGUAGE[language];
+      const smelter = createSmelter({ strategy: 'structural' });
+      const result = await smelter.smelt(fixture.text, {
+        language,
+        budgetBytes: 10,
+        focus: fixture.focus,
+      });
+      expect(
+        result.elisions.length,
+        `${language}: nothing elided — the pin assertion below is vacuous`,
+      ).toBeGreaterThan(0);
+      expect(
+        result.text,
+        `${language}: the pinned prefix ${JSON.stringify(pinned)} did not survive`,
+      ).toContain(pinned);
+      expect(smelter.reconstruct(result)).toBe(fixture.text);
+    }
   });
 });

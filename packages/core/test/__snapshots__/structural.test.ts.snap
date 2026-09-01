@@ -29,6 +29,93 @@ exports[`the structural planner > plans boundary.ts (snapshot) 1`] = `
 }
 `;
 
+exports[`the structural planner > plans functions.c (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 252,
+        "start": 0,
+      },
+      "reason": {
+        "explanation": "collapsed 4 sibling nodes (2 include directives, 1 macro definition, 1 function)",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 746,
+        "start": 413,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "c",
+  "planner": "structural/v1",
+}
+`;
+
+exports[`the structural planner > plans functions.cpp (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 196,
+        "start": 0,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling nodes (1 include directive, 1 function)",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 625,
+        "start": 327,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "cpp",
+  "planner": "structural/v1",
+}
+`;
+
+exports[`the structural planner > plans functions.cs (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 191,
+        "start": 0,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling declarations (1 using directive, 1 class)",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 673,
+        "start": 346,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling classes",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "c_sharp",
+  "planner": "structural/v1",
+}
+`;
+
 exports[`the structural planner > plans functions.go (snapshot) 1`] = `
 {
   "elisions": [
@@ -54,6 +141,122 @@ exports[`the structural planner > plans functions.go (snapshot) 1`] = `
     },
   ],
   "language": "go",
+  "planner": "structural/v1",
+}
+`;
+
+exports[`the structural planner > plans functions.java (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 232,
+        "start": 0,
+      },
+      "reason": {
+        "explanation": "collapsed 3 sibling nodes (1 package declaration, 1 import declaration, 1 class)",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 688,
+        "start": 376,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling classes",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "java",
+  "planner": "structural/v1",
+}
+`;
+
+exports[`the structural planner > plans functions.js (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 254,
+        "start": 20,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling declarations (1 import statement, 1 function)",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 710,
+        "start": 385,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "javascript",
+  "planner": "structural/v1",
+}
+`;
+
+exports[`the structural planner > plans functions.kt (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 193,
+        "start": 0,
+      },
+      "reason": {
+        "explanation": "collapsed 3 sibling nodes (1 package header, 1 import list, 1 function)",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 567,
+        "start": 319,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "kotlin",
+  "planner": "structural/v1",
+}
+`;
+
+exports[`the structural planner > plans functions.php (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 186,
+        "start": 7,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling nodes (1 statement, 1 function)",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 609,
+        "start": 317,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "php",
   "planner": "structural/v1",
 }
 `;
@@ -87,6 +290,35 @@ exports[`the structural planner > plans functions.py (snapshot) 1`] = `
 }
 `;
 
+exports[`the structural planner > plans functions.rb (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 173,
+        "start": 51,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling nodes (1 statement, 1 method)",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 505,
+        "start": 282,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling methods",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "ruby",
+  "planner": "structural/v1",
+}
+`;
+
 exports[`the structural planner > plans functions.rs (snapshot) 1`] = `
 {
   "elisions": [
@@ -112,6 +344,64 @@ exports[`the structural planner > plans functions.rs (snapshot) 1`] = `
     },
   ],
   "language": "rust",
+  "planner": "structural/v1",
+}
+`;
+
+exports[`the structural planner > plans functions.sh (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 145,
+        "start": 20,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling nodes (1 command, 1 function)",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 445,
+        "start": 231,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "bash",
+  "planner": "structural/v1",
+}
+`;
+
+exports[`the structural planner > plans functions.swift (snapshot) 1`] = `
+{
+  "elisions": [
+    {
+      "range": {
+        "end": 184,
+        "start": 0,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling declarations (1 import declaration, 1 function)",
+        "rule": "sibling-collapse",
+      },
+    },
+    {
+      "range": {
+        "end": 579,
+        "start": 309,
+      },
+      "reason": {
+        "explanation": "collapsed 2 sibling functions",
+        "rule": "sibling-collapse",
+      },
+    },
+  ],
+  "language": "swift",
   "planner": "structural/v1",
 }
 `;

@@ -1,11 +1,13 @@
 /**
- * TypeScript, TSX, Rust, Python and Go sources the structural-planner tests and guards
- * share.
+ * TypeScript, TSX, Rust, Python, Go — and the ten Slice 4b languages — sources the
+ * structural-planner tests and guards share.
  *
  * They are template literals rather than files on disk so the guards can import them
  * relatively — the `@guard` alias redirects only the library, and test data must not
  * move when the mutation runner points the guards at a broken copy of `src`.
  */
+
+import type { StructuralLanguage } from '../src/plan/structural.ts';
 
 /** Five top-level functions, doc comments attached, one of them the focus target. */
 export const FUNCTIONS_TS = `/** Parses the raw configuration file into a validated object. */
@@ -345,3 +347,477 @@ func Target(value int) int {
 	return value + 2
 }
 `;
+
+/* -------------------------------------------------------------------------- *
+ * Slice 4b — ten more languages, one fixture each. Every fixture has the same
+ * anatomy: a run of collapsible siblings above the focus target (mixed kinds,
+ * so the marker has something to name), a doc comment attached to the target
+ * in the language's own idiom, and two same-kind siblings below the target so
+ * one collapse takes the pure `collapsed 2 sibling <kind>s` form. Languages
+ * with a file-governing prefix (shebangs, `<?php`) include it, because the
+ * planner must pin it rather than collapse it.
+ * -------------------------------------------------------------------------- */
+
+/** The JSDoc line {@link FUNCTIONS_JS}'s target must keep. */
+export const JS_DOC_COMMENT = `/** The handler this file is really about. */`;
+
+/** JavaScript with a shebang: the hash-bang line must pin, never collapse. */
+export const FUNCTIONS_JS = `#!/usr/bin/env node
+import { readFile } from 'node:fs/promises';
+
+/** Reads a config file from disk and parses it. A boring, collapsible sibling. */
+async function readConfig(path) {
+  const raw = await readFile(path, 'utf8');
+  return JSON.parse(raw);
+}
+
+${JS_DOC_COMMENT}
+export function handleRequest(path) {
+  return renderResponse(normalise(path));
+}
+
+/** Renders a response object for a resolved path. Collapsible sibling below. */
+function renderResponse(path) {
+  return JSON.stringify({ path, ok: true });
+}
+
+/** Normalises a request path, dropping empty segments. The most boring sibling. */
+function normalise(path) {
+  return path.split('/').filter(Boolean).join('/');
+}
+`;
+
+/** The javadoc block {@link FUNCTIONS_JAVA}'s target must keep. */
+export const JAVA_DOC_COMMENT = `/** The class this file is really about. */`;
+
+/** Java: package and import above, javadoc'd classes as the collapsible siblings. */
+export const FUNCTIONS_JAVA = `package fixture.example;
+
+import java.util.List;
+
+/** A parser nobody asked about — javadoc attached, collapsible with it. */
+class ConfigParser {
+  static List<String> parse(String raw) {
+    return List.of(raw.split(","));
+  }
+}
+
+${JAVA_DOC_COMMENT}
+public class RequestHandler {
+  String handle(String path) {
+    return "handled:" + path;
+  }
+}
+
+/** Renders one response body. A collapsible sibling below the target. */
+class ResponseRenderer {
+  String render(String path) {
+    return "{" + path + "}";
+  }
+}
+
+/** Writes one line to stdout. The most boring sibling of all. */
+class LineLogger {
+  void log(String line) {
+    System.out.println(line);
+  }
+}
+`;
+
+/** The block comment {@link FUNCTIONS_C}'s target must keep. */
+export const C_DOC_COMMENT = `/* The function this file is really about. */`;
+
+/** C: preprocessor directives above, doc'd functions as the collapsible siblings. */
+export const FUNCTIONS_C = `#include <stdio.h>
+#include <string.h>
+
+#define MAX_PATH_BYTES 256
+
+/* Copies a raw config line into the out buffer. Boring and collapsible. */
+static int parse_config(const char *raw, char *out) {
+  strncpy(out, raw, MAX_PATH_BYTES - 1);
+  return 0;
+}
+
+${C_DOC_COMMENT}
+int handle_request(const char *path, char *out) {
+  return snprintf(out, MAX_PATH_BYTES, "handled:%s", path);
+}
+
+/* Renders one response line into the out buffer. Collapsible sibling below. */
+static int render_response(const char *path, char *out) {
+  return snprintf(out, MAX_PATH_BYTES, "{%s}", path);
+}
+
+/* Writes one line to stderr. The most boring sibling of all. */
+static void log_line(const char *line) {
+  fprintf(stderr, "%s", line);
+}
+`;
+
+/** The `///` doc comment {@link FUNCTIONS_CPP}'s target must keep. */
+export const CPP_DOC_COMMENT = `/// The function this file is really about.`;
+
+/** C++: an include above, `///` doc'd functions as the collapsible siblings. */
+export const FUNCTIONS_CPP = `#include <string>
+
+/// Trims a raw config string down to its first entry. Boring and collapsible.
+static std::string parse_config(const std::string &raw) {
+  return raw.substr(0, raw.find(';'));
+}
+
+${CPP_DOC_COMMENT}
+std::string handle_request(const std::string &path) {
+  return "handled:" + path;
+}
+
+/// Renders one response body. A collapsible sibling below the target.
+static std::string render_response(const std::string &path) {
+  return "{" + path + "}";
+}
+
+/// Swallows one log line. The most boring sibling of all.
+static void log_line(const std::string &line) {
+  static_cast<void>(line);
+}
+`;
+
+/** The `///` XML doc comment {@link FUNCTIONS_CS}'s target must keep. */
+export const CS_DOC_COMMENT = `/// <summary>The class this file is really about.</summary>`;
+
+/**
+ * C#: a using directive above, `///` doc'd classes as the collapsible siblings. No
+ * file-scoped namespace on purpose — `namespace X;` adopts everything after it as its
+ * children, which would leave this planner two top-level units and nothing to say.
+ */
+export const FUNCTIONS_CS = `using System;
+
+/// <summary>A parser nobody asked about — doc attached, collapsible with it.</summary>
+class ConfigParser
+{
+    public static string[] Parse(string raw) => raw.Split(',');
+}
+
+${CS_DOC_COMMENT}
+public class RequestHandler
+{
+    public string Handle(string path) => "handled:" + path;
+}
+
+/// <summary>Renders one response body. A collapsible sibling below.</summary>
+class ResponseRenderer
+{
+    public string Render(string path) => "{" + path + "}";
+}
+
+/// <summary>Writes one line to the console. The most boring sibling.</summary>
+class LineLogger
+{
+    public void Log(string line) => Console.WriteLine(line);
+}
+`;
+
+/** The `#` doc comment {@link FUNCTIONS_RB}'s target must keep. */
+export const RUBY_DOC_COMMENT = `# The method this file is really about.`;
+
+/**
+ * Ruby: shebang and `# frozen_string_literal:` magic comment (both pinned), then `#`
+ * doc'd methods. The survivor must *reparse* as ruby — `end`-delimited blocks mean a
+ * bare `<<smelt…>>` marker line would open a heredoc and swallow everything after it,
+ * which is why the marker lands as a `#` comment.
+ */
+export const FUNCTIONS_RB = `#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "json"
+
+# Parses a raw JSON config blob. A boring, collapsible sibling.
+def load_config(raw)
+  JSON.parse(raw)
+end
+
+${RUBY_DOC_COMMENT}
+def handle_request(path)
+  "handled:" + render_response(path)
+end
+
+# Renders one response as JSON. A collapsible sibling below the target.
+def render_response(path)
+  { path: path }.to_json
+end
+
+# Writes one line to stderr. The most boring sibling of all.
+def log_line(line)
+  warn line
+end
+`;
+
+/** The PHPDoc block {@link FUNCTIONS_PHP}'s target must keep. */
+export const PHP_DOC_COMMENT = `/** The function this file is really about. */`;
+
+/** PHP: the `<?php` tag (pinned), a declare, then PHPDoc'd functions as siblings. */
+export const FUNCTIONS_PHP = `<?php
+
+declare(strict_types=1);
+
+/** Splits a raw config string into parts. A boring, collapsible sibling. */
+function parse_config(string $raw): array {
+    return explode(',', $raw);
+}
+
+${PHP_DOC_COMMENT}
+function handle_request(string $path): string {
+    return 'handled:' . $path;
+}
+
+/** Renders one response body. A collapsible sibling below the target. */
+function render_response(string $path): string {
+    return '{' . $path . '}';
+}
+
+/** Writes one line to the error log. The most boring sibling of all. */
+function log_line(string $line): void {
+    error_log($line);
+}
+`;
+
+/** The KDoc block {@link FUNCTIONS_KT}'s target must keep. */
+export const KOTLIN_DOC_COMMENT = `/** The function this file is really about. */`;
+
+/**
+ * Kotlin: package header and import list above — kept apart from the first KDoc by a
+ * blank line and a doc'd function, because tree-sitter-kotlin extends the import_list
+ * node over a comment that directly follows it — then KDoc'd functions as siblings.
+ */
+export const FUNCTIONS_KT = `package fixture.example
+
+import kotlin.collections.List
+
+/** Splits a raw config string into parts. A boring, collapsible sibling. */
+fun parseConfig(raw: String): List<String> = raw.split(",")
+
+${KOTLIN_DOC_COMMENT}
+fun handleRequest(path: String): String = "handled:" + renderResponse(path)
+
+/** Renders one response body. A collapsible sibling below the target. */
+fun renderResponse(path: String): String = "{" + path + "}"
+
+/** Writes one line to stdout. The most boring sibling of all. */
+fun logLine(line: String) {
+    println(line)
+}
+`;
+
+/** The `///` doc comment {@link FUNCTIONS_SWIFT}'s target must keep. */
+export const SWIFT_DOC_COMMENT = `/// The function this file is really about.`;
+
+/** Swift: an import above, `///` doc'd functions as the collapsible siblings. */
+export const FUNCTIONS_SWIFT = `import Foundation
+
+/// Splits a raw config string into parts. A boring, collapsible sibling.
+func parseConfig(_ raw: String) -> [String] {
+    return raw.components(separatedBy: ",")
+}
+
+${SWIFT_DOC_COMMENT}
+func handleRequest(_ path: String) -> String {
+    return "handled:" + path
+}
+
+/// Renders one response body. A collapsible sibling below the target.
+func renderResponse(_ path: String) -> String {
+    return "{" + path + "}"
+}
+
+/// Writes one line to standard output. The most boring sibling of all.
+func logLine(_ line: String) {
+    print(line)
+}
+`;
+
+/** The `#` doc comment {@link FUNCTIONS_SH}'s target must keep. */
+export const BASH_DOC_COMMENT = `# The function this file is really about.`;
+
+/**
+ * Bash: the shebang is pinned — it decides which interpreter runs the file, exactly
+ * the way a go build tag decides which builds see it. The survivor must *reparse* as
+ * bash: `fi`/`done`/`}` delimited blocks mean a bare `<<smelt…>>` marker line would
+ * open a heredoc and swallow everything after it, so the marker lands as a `#`
+ * comment.
+ */
+export const FUNCTIONS_SH = `#!/usr/bin/env bash
+set -euo pipefail
+
+# Reads a config file from disk and prints it. A boring, collapsible sibling.
+load_config() {
+  cat "$1"
+}
+
+${BASH_DOC_COMMENT}
+handle_request() {
+  echo "handled:$1"
+}
+
+# Renders one response body to stdout. A collapsible sibling below the target.
+render_response() {
+  printf '{%s}' "$1"
+}
+
+# Writes one line to stderr. The most boring sibling of all.
+log_line() {
+  echo "$1" >&2
+}
+
+handle_request "$@"
+`;
+
+/**
+ * One canonical fixture per structural language: the text, the focus that keeps the
+ * target, the signature line and attached doc comment that must survive, and the
+ * strongest explanation shape this fixture guarantees.
+ */
+export interface StructuralFixture {
+  /** Snapshot fixture name, e.g. `'functions.java'`. */
+  readonly name: string;
+  readonly text: string;
+  readonly focus: readonly string[];
+  /** A line of the focused declaration's signature that must survive verbatim. */
+  readonly signature: string;
+  /** The attached doc comment (or docstring) that must survive verbatim. */
+  readonly doc: string;
+  /** The strongest same-kind collapse explanation this fixture guarantees. */
+  readonly pureCollapse: RegExp;
+}
+
+/**
+ * The registry the totality guard (`test/guards/structural-totality.test.ts`) checks
+ * against `STRUCTURAL_LANGUAGES`: every language the planner claims must have an
+ * entry here — a fixture, a snapshot under this entry's `name`, and a doc-comment
+ * case — or the guard goes red. The `Record` keeps it a compile-time property too:
+ * claiming a language in the planner without adding its fixture fails `tsc`.
+ */
+export const FIXTURE_BY_LANGUAGE: Readonly<Record<StructuralLanguage, StructuralFixture>> = {
+  typescript: {
+    name: 'functions.ts',
+    text: FUNCTIONS_TS,
+    focus: ['handleRequest'],
+    signature: 'export function handleRequest(path: string, raw: string): string {',
+    doc: '/** The entry point every request goes through — the one worth keeping. */',
+    pureCollapse: /^collapsed \d+ sibling functions$/,
+  },
+  tsx: {
+    name: 'mixed.tsx',
+    text: MIXED_TSX,
+    focus: ['Toolbar'],
+    signature: 'export function Toolbar({ align }: { align: Align }) {',
+    doc: '/** The toolbar — the component this file is really about. */',
+    // The tsx fixture is the mixed-kind case; its guaranteed collapse names kinds.
+    pureCollapse: /^collapsed \d+ sibling declarations \(.+\)$/,
+  },
+  javascript: {
+    name: 'functions.js',
+    text: FUNCTIONS_JS,
+    focus: ['handleRequest'],
+    signature: 'export function handleRequest(path) {',
+    doc: JS_DOC_COMMENT,
+    pureCollapse: /^collapsed \d+ sibling functions$/,
+  },
+  rust: {
+    name: 'functions.rs',
+    text: FUNCTIONS_RS,
+    focus: ['resolve_target'],
+    signature: 'pub fn resolve_target(name: &str) -> String {',
+    // The doc comment, the outer attribute below it, and the signature must survive
+    // *as one block* — see the guard for why the three are asserted together.
+    doc: `${RUST_DOC_COMMENT}\n${RUST_ATTRIBUTE}\npub fn resolve_target`,
+    pureCollapse: /^collapsed \d+ sibling functions$/,
+  },
+  python: {
+    name: 'functions.py',
+    text: FUNCTIONS_PY,
+    focus: ['fetch_user'],
+    signature: 'def fetch_user(user_id):',
+    doc: PYTHON_DOCSTRING,
+    pureCollapse: /^collapsed \d+ sibling functions$/,
+  },
+  go: {
+    name: 'functions.go',
+    text: FUNCTIONS_GO,
+    focus: ['HandleRequest'],
+    signature: 'func HandleRequest(path string) string {',
+    doc: GO_DOC_COMMENT,
+    pureCollapse: /^collapsed \d+ sibling functions$/,
+  },
+  java: {
+    name: 'functions.java',
+    text: FUNCTIONS_JAVA,
+    focus: ['RequestHandler'],
+    signature: 'public class RequestHandler {',
+    doc: JAVA_DOC_COMMENT,
+    pureCollapse: /^collapsed \d+ sibling classes$/,
+  },
+  c: {
+    name: 'functions.c',
+    text: FUNCTIONS_C,
+    focus: ['handle_request'],
+    signature: 'int handle_request(const char *path, char *out) {',
+    doc: C_DOC_COMMENT,
+    pureCollapse: /^collapsed \d+ sibling functions$/,
+  },
+  cpp: {
+    name: 'functions.cpp',
+    text: FUNCTIONS_CPP,
+    focus: ['handle_request'],
+    signature: 'std::string handle_request(const std::string &path) {',
+    doc: CPP_DOC_COMMENT,
+    pureCollapse: /^collapsed \d+ sibling functions$/,
+  },
+  c_sharp: {
+    name: 'functions.cs',
+    text: FUNCTIONS_CS,
+    focus: ['RequestHandler'],
+    signature: 'public class RequestHandler',
+    doc: CS_DOC_COMMENT,
+    pureCollapse: /^collapsed \d+ sibling classes$/,
+  },
+  ruby: {
+    name: 'functions.rb',
+    text: FUNCTIONS_RB,
+    focus: ['handle_request'],
+    signature: 'def handle_request(path)',
+    doc: RUBY_DOC_COMMENT,
+    pureCollapse: /^collapsed \d+ sibling methods$/,
+  },
+  php: {
+    name: 'functions.php',
+    text: FUNCTIONS_PHP,
+    focus: ['handle_request'],
+    signature: 'function handle_request(string $path): string {',
+    doc: PHP_DOC_COMMENT,
+    pureCollapse: /^collapsed \d+ sibling functions$/,
+  },
+  kotlin: {
+    name: 'functions.kt',
+    text: FUNCTIONS_KT,
+    focus: ['handleRequest'],
+    signature: 'fun handleRequest(path: String): String = "handled:" + renderResponse(path)',
+    doc: KOTLIN_DOC_COMMENT,
+    pureCollapse: /^collapsed \d+ sibling functions$/,
+  },
+  swift: {
+    name: 'functions.swift',
+    text: FUNCTIONS_SWIFT,
+    focus: ['handleRequest'],
+    signature: 'func handleRequest(_ path: String) -> String {',
+    doc: SWIFT_DOC_COMMENT,
+    pureCollapse: /^collapsed \d+ sibling functions$/,
+  },
+  bash: {
+    name: 'functions.sh',
+    text: FUNCTIONS_SH,
+    focus: ['handle_request'],
+    signature: 'handle_request() {',
+    doc: BASH_DOC_COMMENT,
+    pureCollapse: /^collapsed \d+ sibling functions$/,
+  },
+};
