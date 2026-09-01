@@ -197,6 +197,9 @@ describe('Law 3 — reversible against the persistent store, across a restart', 
       expect(reopened.has(elision.hash)).toBe(true);
     }
   });
+});
+
+/**
  * Law 3 does not care which planner made the plan, so the equation is asserted over
  * structural output too — real TypeScript and TSX with multi-byte characters, and,
  * deliberately, the lexical CASES above parsed *as* TypeScript: a parse full of ERROR
