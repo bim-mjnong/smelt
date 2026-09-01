@@ -1,11 +1,16 @@
 # smelt — palette and marks
 
 Every colour and every mark in this repo comes from one place: a **forge**. Charcoal
-ground, iron mass, an ember mouth, a white-hot core. The Norse reading is _material_,
-not typographic — there are no runic glyphs anywhere in these files, and there will not
-be: sowilo (ᛋ) is doubled in the SS insignia and the valknut has been adopted by
-white-supremacist groups. A shape built from material and geometry also ages better
-than a glyph.
+ground, iron mass, a molten pour, a white-hot core. The mark is **the pour**: a tilted
+crucible, a stream that tapers as it falls, and a small dense ingot stamped with
+smelt's own marker delimiters, `<<` `>>` — the glyph the model actually sees in a
+smelted prompt. Big in, small out, nothing lost.
+
+The Norse reading is _material_, not typographic — there are no runic glyphs anywhere
+in these files, and there will not be: sowilo (ᛋ) is doubled in the SS insignia and the
+valknut has been adopted by white-supremacist groups. The ingot's stamp is not a rune;
+it is the library's own wire marker. A shape built from material and geometry also ages
+better than a glyph.
 
 ## Palette
 
@@ -17,7 +22,7 @@ than a glyph.
 | `iron-dark`     | `#2A2E34` | The unlit bottom of iron. Gradient stop, hairline rules.                        |
 | `iron-light`    | `#6E7783` | Keylines around iron, wordmark letters, muted text on either ground.            |
 | `slag`          | `#9AA1AC` | Secondary prose on dark.                                                        |
-| `ember`         | `#E4602F` | **The accent.** One accent, used as heat: the mouth, the flue, the bloom.       |
+| `ember`         | `#E4602F` | **The accent.** One accent, used as heat: the melt, the stream, the seam.       |
 | `forge`         | `#F5893A` | Ember's lit edge. Gradient stop and hover state only — never a fill on its own. |
 | `white-hot`     | `#FFF1D9` | The hottest 5% of any composition. Highlights, the core of the mouth.           |
 | `ash`           | `#EFEBE5` | Type on charcoal; light-mode ground.                                            |
@@ -54,7 +59,7 @@ canonical artefact for that one.
 
 The mark's geometry is duplicated in `smelt-mark.svg`, `smelt-wordmark.svg`,
 `smelt-icon.svg` and `smelt-social.svg`, because each has to stand alone as a single
-file. Change the furnace and you change four files. That is the trade for
+file. Change the pour and you change four files. That is the trade for
 self-containment; the alternative is a build step for four static images.
 
 ## Regenerating the PNGs
