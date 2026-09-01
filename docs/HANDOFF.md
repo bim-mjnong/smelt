@@ -714,3 +714,40 @@ than from trust.
 model, and re-running on a newer model is a **new row, not an edit**. See Decision 1 —
 the 30% shift between Claude tokenizer generations would otherwise silently rewrite
 history.
+
+---
+
+## `smelt init` and `smelt.config.json` (KOT-202)
+
+The CLI has a setup wizard and a defaults file. Both are **CLI-only surfaces**: the
+programmatic API never reads a config file — `createSmelter()` takes explicit
+arguments, and a library whose behaviour depends on where it was invoked from would be
+an invisible input.
+
+**`smelt init`** walks through five choices — default byte budget, store (memory or a
+persistent directory plus path), default planner strategy, a measure-hook stub, a
+reranker stub — one question at a time. Every step accepts `back`. A re-run over an
+existing config shows the current values and edits one choice at a time. **Nothing is
+written until a final confirm** that lists exactly what will be written, and an
+existing file is **never overwritten without an explicit per-file yes** — enforced by
+`test/guards/init-wizard.test.ts`, with mutation `init-overwrite-without-consent`
+proving the guard goes red. The wizard is a pure function over an input/output pair
+(`runInit` in `src/cli/init.ts`), driven in-process by `test/init.test.ts`;
+`bin.ts` only wires the real stdio.
+
+**`smelt.config.json`** is versioned (`{"smeltConfig": 1, …}`) and found by walking up
+from the working directory, like `package.json`. It supplies **defaults only** —
+`defaultBudgetBytes`, `strategy`, `store` — and an explicit flag always wins. A
+malformed config is a usage error even when every flag was given: a config silently
+skipped would be a setting the user believed was in force. `test/cli-config.test.ts`
+pins the precedence and the strict parse.
+
+**The generated stubs** (`smelt.measure.ts`, `smelt.rerank.ts`) implement `Measure`
+and `RerankStage` against the real exported types — `test/init-stub-typecheck.test.ts`
+compiles the wizard's actual output with the real `tsc`. The reranker stub sketches
+the outbound HTTP call as a marked TODO **in the consumer's file**, reading the
+consumer's own env var; smelt's own import graph gains no HTTP client, and the
+templates are string literals the zero-network guard's string-stripper ignores. This
+does not reopen Decision 5: nothing under `examples/`, nothing in smelt's graph — the
+sketch only ever exists in a file the consumer asked the wizard to write, outside this
+repository.

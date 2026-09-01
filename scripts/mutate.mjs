@@ -55,6 +55,7 @@ const GUARDS = [
   'test/guards/structural.test.ts',
   'test/guards/bench-results.test.ts',
   'test/guards/repo-map.test.ts',
+  'test/guards/init-wizard.test.ts',
 ];
 
 /**
@@ -405,6 +406,12 @@ const MUTATIONS = [
     find: '    refsOut: refsOutByFile.get(def.path) ?? 0,',
     replace: '    refsOut: outWeight.get(def.path) ?? 0,',
     why: 'refsOut reported from the PageRank edge denominator, which grows once per definer file — a reference to a name two files define counts double, and every Law 2 explanation states a number nothing measured',
+    id: 'init-overwrite-without-consent',
+    guard: 'test/guards/init-wizard.test.ts',
+    file: 'cli/init.ts',
+    find: "      if (answer !== 'yes') {",
+    replace: '      if (false) {',
+    why: 'the per-file overwrite consent wired shut — `smelt init` would clobber a hand-written file after any answer, the helpful-looking break the never-overwrite rule exists to refuse',
   },
 ];
 
