@@ -139,22 +139,23 @@ safe-to-fail check is for.
 
 The six guards today, and what each one would let through if it stopped working:
 
-| Guard                              | If it silently stopped working                                                 |
-| ---------------------------------- | ------------------------------------------------------------------------------ |
-| `guards/no-network.test.ts`        | source leaving the machine — including from the CLI, a second front door       |
-| `guards/reversibility.test.ts`     | `reconstruct()` returning almost-right text                                    |
-| `guards/expansion-counter.test.ts` | the expansion rate pinned at a flattering zero                                 |
-| `guards/marker-format.test.ts`     | the marker changing shape in everyone's prompts, with no error anywhere        |
-| `guards/third-party.test.ts`       | a bundled grammar being redistributed with no licence notice                   |
-| `guards/cache-hygiene.test.ts`     | cache hygiene quietly rewriting prompts, or a hit-rate claim reappearing       |
-| Guard                              | If it silently stopped working                                                 |
-| ---------------------------------- | ------------------------------------------------------------------------------ |
-| `guards/no-network.test.ts`        | source leaving the machine — including from the CLI, a second front door       |
-| `guards/reversibility.test.ts`     | `reconstruct()` returning almost-right text                                    |
-| `guards/expansion-counter.test.ts` | the expansion rate pinned at a flattering zero                                 |
-| `guards/marker-format.test.ts`     | the marker changing shape in everyone's prompts, with no error anywhere        |
-| `guards/third-party.test.ts`       | a bundled grammar being redistributed with no licence notice                   |
-| `guards/structural.test.ts`        | structural markers that mislabel, cut, or approximate what the parse tree says |
+| Guard                              | If it silently stopped working                                                                                                        |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `guards/no-network.test.ts`        | source leaving the machine — including from the CLI, a second front door                                                              |
+| `guards/reversibility.test.ts`     | `reconstruct()` returning almost-right text                                                                                           |
+| `guards/expansion-counter.test.ts` | the expansion rate pinned at a flattering zero                                                                                        |
+| `guards/marker-format.test.ts`     | the marker changing shape in everyone's prompts, with no error anywhere                                                               |
+| `guards/third-party.test.ts`       | a bundled grammar being redistributed with no licence notice                                                                          |
+| `guards/cache-hygiene.test.ts`     | cache hygiene quietly rewriting prompts, or a hit-rate claim reappearing                                                              |
+| Guard                              | If it silently stopped working                                                                                                        |
+| ---------------------------------- | ------------------------------------------------------------------------------                                                        |
+| `guards/no-network.test.ts`        | source leaving the machine — including from the CLI, a second front door                                                              |
+| `guards/reversibility.test.ts`     | `reconstruct()` returning almost-right text                                                                                           |
+| `guards/expansion-counter.test.ts` | the expansion rate pinned at a flattering zero                                                                                        |
+| `guards/marker-format.test.ts`     | the marker changing shape in everyone's prompts, with no error anywhere                                                               |
+| `guards/third-party.test.ts`       | a bundled grammar being redistributed with no licence notice                                                                          |
+| `guards/structural.test.ts`        | structural markers that mislabel, cut, or approximate what the parse tree says                                                        |
+| `guards/repo-map.test.ts`          | a repo map that overruns its budget, reorders on rank ties, serves stale tags after an edit, or silently trusts a corrupt cache entry |
 
 ## Two promises, not one
 

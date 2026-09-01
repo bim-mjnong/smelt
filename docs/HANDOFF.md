@@ -181,7 +181,9 @@ a failed grammar load throws `GrammarUnavailableError`, because output labelled
 ### Not built at all
 
 - No benchmark, so no number smelt owns. **Slice 3.**
-- No cross-file reasoning: smelt sees one blob at a time. **Slice 7.**
+- Cross-file reasoning now exists as the repo map (**Slice 7**, shipped): a ranked,
+  budgeted, explainable symbol map of a whole tree, modelled on Aider's repo-map.
+  `smelt()` itself still sees one blob at a time.
 
 ---
 
@@ -372,18 +374,35 @@ Anthropic's docs and the date they were verified. Guarded by
 - [x] Warnings only. No automatic rewriting of anybody's prompt — an optimizer that silently edits a prefix to help a cache is exactly the class of magic this library refuses. `detectCacheBreakers()` names each silent breaker (system-prompt timestamps and UUIDs, unsorted JSON keys, a tool set that varies between calls) with the `ElisionReason`-style rule id + explanation pair; the guard asserts on frozen inputs that nothing is ever mutated or "fixed".
 - [x] No claim about cache hit rates anywhere. See Law 4; this is the specific claim that was wrong in the original pitch. The guard scans every source file for the phrase and a mutation proves the scan can go red.
 
-### Slice 7 — the repo-map planner (cross-file)
+### Slice 7 — the repo-map planner (cross-file) — **SHIPPED**
 
 smelt sees one blob. Aider's repo-map is the proven prior art for the other shape: whole
 repository, tree-sitter tags, PageRank over the reference graph, a token budget, and a
 cache.
 
+**Shipped as** `src/repomap/` (`buildRepoMap()`, exported from the entrypoint), and
+**modelled on Aider's repo-map, credited as such** — the design is Paul Gauthier's
+([aider.chat/docs/repomap.html](https://aider.chat/docs/repomap.html), `aider/repomap.py`
+in [Aider-AI/aider](https://github.com/Aider-AI/aider)), not this project's; the module
+doc comment says so. What smelt adds is its own house rules: local files only (the walk
+never follows a symlink, skips binary files, honors a caller-supplied ignore list),
+deterministic ranking (fixed damping and iteration count, sorted walks, a total
+tie-break by rank → path → name → line — no `Math.random`, no `Date`), and Law 2 applied
+to _inclusion_: every symbol in the map carries a rule id and a sentence naming its
+definition site and the measured reference counts that ranked it. The tags cache is
+plain JSON keyed by content hash — Aider persists through SQLite, but this repo ships
+zero new runtime dependencies — and it lives **only** in a directory the caller
+explicitly hands in; a corrupt entry is deleted and reported as a warning in the result,
+never trusted. Guarded by `test/guards/repo-map.test.ts`, with four mutations proving
+the budget, the tie-break, cache invalidation and the corrupt-entry discard can each go
+red.
+
 **Acceptance criteria**
 
-- [ ] Reads a repo, emits a ranked symbol map inside a byte budget.
-- [ ] Ranking is deterministic and explainable — every included symbol can say why it ranked.
-- [ ] Cached on disk, invalidated by content hash, no network.
-- [ ] Credits Aider's repo-map explicitly, in the code and the README.
+- [x] Reads a repo, emits a ranked symbol map inside a byte budget. The budget is respected by construction — symbols are appended in rank order until the next line would not fit — and `outputBytes` is measured off the rendered text.
+- [x] Ranking is deterministic and explainable — every included symbol can say why it ranked. Two runs are byte-identical (asserted, with and without a warm cache), and each entry's `reason` states the definition site, references in (and from how many files), and its file's references out.
+- [x] Cached on disk, invalidated by content hash, no network. The key hashes format version + language + file content, so an edit is a miss by construction; the module is reachable from the entrypoint and classified by the zero-network guard.
+- [x] Credits Aider's repo-map explicitly, in the code and this handoff. (The README is the founder's surface; its prior-art section is the natural home for the same credit when it is next edited.)
 
 ---
 
