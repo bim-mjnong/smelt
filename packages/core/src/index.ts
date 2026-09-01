@@ -36,7 +36,7 @@ export {
 export { clearGrammarCache, grammarPath, loadGrammar, WASM_BY_LANGUAGE } from './plan/grammar.ts';
 export { LEXICAL_PLANNER_ID, LexicalPlanner, planLexical } from './plan/lexical.ts';
 export type { LexicalPlannerOptions } from './plan/lexical.ts';
-export { STRUCTURAL_PLANNER_ID, StructuralPlanner } from './plan/structural.ts';
+export { planStructural, STRUCTURAL_PLANNER_ID, StructuralPlanner } from './plan/structural.ts';
 export type { StructuralPlannerOptions } from './plan/structural.ts';
 export { createRetrieveTool, RETRIEVE_TOOL_NAME } from './retrieve.ts';
 export { unconfiguredDistillStage, unconfiguredRerankStage } from './stages.ts';
@@ -71,7 +71,11 @@ export type {
   PromptTool,
 } from './cache/prefix.ts';
 
-/** Which planner a smelter uses. `'structural'` throws in v1 — see {@link StructuralPlanner}. */
+/**
+ * Which planner a smelter uses. `'structural'` parses TypeScript and TSX with a
+ * bundled grammar and throws {@link GrammarUnavailableError} for anything else —
+ * never a silent lexical fallback. See {@link StructuralPlanner}.
+ */
 export type Strategy = 'lexical' | 'structural';
 
 export interface SmelterConfig {

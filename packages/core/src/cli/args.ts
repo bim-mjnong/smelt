@@ -161,7 +161,8 @@ OPTIONS
   --focus <term>       What you were looking for. Repeatable. Matching regions and
                        their context survive; the runs between them collapse.
   --language <id>      Override detection. One of: ${[...SUPPORTED_LANGUAGES, 'unknown'].join(', ')}.
-  --strategy <id>      lexical (default) or structural. structural throws: not built.
+  --strategy <id>      lexical (default) or structural. structural parses typescript
+                       and tsx; any other language is refused, never approximated.
   --json               Print a JSON envelope on stdout instead of the smelted text:
                        { format, result, elided }. \`result\` is the SmeltResult
                        verbatim; \`elided\` carries the bytes, so the envelope can be

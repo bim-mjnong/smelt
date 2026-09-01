@@ -104,6 +104,7 @@ $ pnpm mutate
   PASS  test/guards/marker-format.test.ts
   PASS  test/guards/third-party.test.ts
   PASS  test/guards/cache-hygiene.test.ts
+  PASS  test/guards/structural.test.ts
 
 === mutations: every guard must go red ===
 
@@ -112,7 +113,7 @@ $ pnpm mutate
            guard:    test/guards/no-network.test.ts
            red on:   AssertionError: Law 1 violation: smelt v1 makes zero network calls: expected [ Array(1) ] to deeply equal []
   …
-=== 14/14 mutations caught across 6 guards ===
+=== 21/21 mutations caught across 8 guards ===
 ```
 
 **Adding a guard? The convention is three steps:**
@@ -138,14 +139,22 @@ safe-to-fail check is for.
 
 The six guards today, and what each one would let through if it stopped working:
 
-| Guard                              | If it silently stopped working                                           |
-| ---------------------------------- | ------------------------------------------------------------------------ |
-| `guards/no-network.test.ts`        | source leaving the machine — including from the CLI, a second front door |
-| `guards/reversibility.test.ts`     | `reconstruct()` returning almost-right text                              |
-| `guards/expansion-counter.test.ts` | the expansion rate pinned at a flattering zero                           |
-| `guards/marker-format.test.ts`     | the marker changing shape in everyone's prompts, with no error anywhere  |
-| `guards/third-party.test.ts`       | a bundled grammar being redistributed with no licence notice             |
-| `guards/cache-hygiene.test.ts`     | cache hygiene quietly rewriting prompts, or a hit-rate claim reappearing |
+| Guard                              | If it silently stopped working                                                 |
+| ---------------------------------- | ------------------------------------------------------------------------------ |
+| `guards/no-network.test.ts`        | source leaving the machine — including from the CLI, a second front door       |
+| `guards/reversibility.test.ts`     | `reconstruct()` returning almost-right text                                    |
+| `guards/expansion-counter.test.ts` | the expansion rate pinned at a flattering zero                                 |
+| `guards/marker-format.test.ts`     | the marker changing shape in everyone's prompts, with no error anywhere        |
+| `guards/third-party.test.ts`       | a bundled grammar being redistributed with no licence notice                   |
+| `guards/cache-hygiene.test.ts`     | cache hygiene quietly rewriting prompts, or a hit-rate claim reappearing       |
+| Guard                              | If it silently stopped working                                                 |
+| ---------------------------------- | ------------------------------------------------------------------------------ |
+| `guards/no-network.test.ts`        | source leaving the machine — including from the CLI, a second front door       |
+| `guards/reversibility.test.ts`     | `reconstruct()` returning almost-right text                                    |
+| `guards/expansion-counter.test.ts` | the expansion rate pinned at a flattering zero                                 |
+| `guards/marker-format.test.ts`     | the marker changing shape in everyone's prompts, with no error anywhere        |
+| `guards/third-party.test.ts`       | a bundled grammar being redistributed with no licence notice                   |
+| `guards/structural.test.ts`        | structural markers that mislabel, cut, or approximate what the parse tree says |
 
 ## Two promises, not one
 

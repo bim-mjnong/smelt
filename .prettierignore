@@ -6,3 +6,5 @@ assets/*.svg
 
 # generated — scripts/generate-third-party.mjs owns this file
 packages/core/THIRD-PARTY.md
+.claude/
+.remember/

@@ -8,8 +8,9 @@
 code. It says what smelt is, why each of its four laws exists, exactly what is scaffolded
 versus what is yours to build, and the order to build it in.
 
-**Status:** the spine is real and green, and the CLI (Slice 1) ships. The structural
-planner — the thing smelt is actually for — is still a stub that throws. Nothing has been
+**Status:** the spine is real and green, the CLI (Slice 1) ships, and the structural
+planner (Slice 2) is real for TypeScript and TSX — `--strategy structural` parses with a
+bundled grammar and collapses siblings by name. Nothing has been
 published to npm; publishing is a founder action. The eight questions this document used
 to end with are answered, in "Decisions the founder has made" below.
 
@@ -149,10 +150,14 @@ Everything below exists, is typechecked, linted, and covered. `pnpm verify` is g
 
 ### Stubs that throw (by design — read `CONTRIBUTING.md` § "A stub throws")
 
-| File                                   | Why it throws                                                                                                                                                                                          |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `packages/core/src/plan/structural.ts` | The planner smelt is actually for. Throws rather than silently falling back to lexical, because output labelled `structural/v1` that is really line windows is undetectable from outside. **Slice 2.** |
-| `packages/core/src/stages.ts`          | `unconfiguredRerankStage` and `unconfiguredDistillStage`. Both name the interface you were meant to implement. Out of v1 — see below.                                                                  |
+| File                          | Why it throws                                                                                                                         |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core/src/stages.ts` | `unconfiguredRerankStage` and `unconfiguredDistillStage`. Both name the interface you were meant to implement. Out of v1 — see below. |
+
+`packages/core/src/plan/structural.ts` is no longer a stub: **Slice 2 shipped it**, for
+TypeScript and TSX. It still refuses rather than falling back — an unmapped language or
+a failed grammar load throws `GrammarUnavailableError`, because output labelled
+`structural/v1` that is really line windows is undetectable from outside.
 
 ### The honesty machinery
 
@@ -166,7 +171,7 @@ Everything below exists, is typechecked, linted, and covered. `pnpm verify` is g
 | `packages/core/test/guards/persistent-store.test.ts`  | Law 3 across a process boundary. A damaged blob is refused as `StoreCorruptionError`, never returned; the retrieval counters survive a restart; "we hold damaged bytes" stays distinct from "never existed".                                      |
 | `packages/core/test/guards/cache-hygiene.test.ts`     | Slice 6's promise: cache-prefix hygiene detects and warns, never rewrites — inputs stay unmutated, no export returns a "fixed" prompt, and no cache-hit-rate figure exists anywhere in `src`.                                                     |
 | `packages/core/test/guards/_source.ts`                | Shared source-walking helpers: `guardSrcRoot()`, `guardRoot()`, and the string/comment stripper that stops `net/policy.ts` reporting its own word list.                                                                                           |
-| `scripts/mutate.mjs`                                  | **The meta-guard.** Sixteen mutations across the seven guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                                 |
+| `scripts/mutate.mjs`                                  | **The meta-guard.** Twenty-one mutations across the eight guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                              |
 | `scripts/bundle-grammars.mjs`                         | Copies the grammars `WASM_BY_LANGUAGE` names into the package, so they ship. Reads the built map rather than keeping a second list.                                                                                                               |
 | `scripts/generate-third-party.mjs`                    | Generates `THIRD-PARTY.md`. The grammar ↔ provenance mapping is a partition: an unattributed grammar throws.                                                                                                                                      |
 | `scripts/check-fresh-clone.sh`                        | Installs and verifies from `git archive` output — tracked files only.                                                                                                                                                                             |
@@ -174,8 +179,8 @@ Everything below exists, is typechecked, linted, and covered. `pnpm verify` is g
 
 ### Not built at all
 
-- No structural planning, so smelt cannot yet say "collapsed 3 sibling functions" about
-  real code. **Slice 2 — the reason the project exists.**
+- No structural planning beyond TypeScript and TSX — the machinery generalises in
+  **Slice 4**.
 - No benchmark, so no number smelt owns. **Slice 3.**
 - No cross-file reasoning: smelt sees one blob at a time. **Slice 7.**
 
@@ -232,7 +237,7 @@ in 7,297 B → out 985 B   (-86.5%, 3 elisions)
 cannot name a function, and a plugin loader would be a dependency and an eval surface.
 The report prints a measured line when the _library_ was given one.
 
-### Slice 2 — the structural planner, TypeScript and TSX only
+### Slice 2 — the structural planner, TypeScript and TSX only — **SHIPPED**
 
 The reason smelt exists. Scope it to two grammars; the machinery generalises in Slice 4.
 
@@ -242,13 +247,13 @@ signature, doc comment, body — and collapse its _siblings_ into one marker nam
 
 **Acceptance criteria**
 
-- [ ] `collapsed 3 sibling functions` — the explanation names the _kind_ and the _count_, from the parse tree, not a line count.
-- [ ] A kept declaration keeps its signature line and attached doc comment, always. A fixture asserts this on a file where the doc comment is 40 lines long.
-- [ ] Ranges never split a multi-byte character and never cross a node boundary. The reversibility guard already covers the first; add a fixture for the second.
-- [ ] Grammar load failure throws `GrammarUnavailableError`. It does **not** fall back to lexical. A caller who wants the fallback asks for it.
-- [ ] Deterministic: same file, same focus, byte-identical plan. Asserted, not assumed.
-- [ ] A snapshot test per fixture, so a plan change shows up as a reviewable diff.
-- [ ] `pnpm mutate` gains a mutation for whatever new guarantee this slice claims.
+- [x] `collapsed 3 sibling functions` — the explanation names the _kind_ and the _count_, from the parse tree, not a line count.
+- [x] A kept declaration keeps its signature line and attached doc comment, always. A fixture asserts this on a file where the doc comment is 40 lines long.
+- [x] Ranges never split a multi-byte character and never cross a node boundary. The reversibility guard already covers the first; add a fixture for the second.
+- [x] Grammar load failure throws `GrammarUnavailableError`. It does **not** fall back to lexical. A caller who wants the fallback asks for it.
+- [x] Deterministic: same file, same focus, byte-identical plan. Asserted, not assumed.
+- [x] A snapshot test per fixture, so a plan change shows up as a reviewable diff.
+- [x] `pnpm mutate` gains a mutation for whatever new guarantee this slice claims.
 
 ### Slice 3 — the measurement harness
 
@@ -360,8 +365,8 @@ pnpm mutate
 ```
 
 It copies `packages/core/src` to a scratch tree, applies one deliberate break, points the
-guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Sixteen
-mutations across seven guards; a survivor is reported as a hole in the guard, not in the
+guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Twenty-one
+mutations across eight guards; a survivor is reported as a hole in the guard, not in the
 mutation.
 
 Not every guard guards source code, so there is a second mutation kind: an `artifact`

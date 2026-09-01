@@ -12,15 +12,15 @@ Attribution is required rather than courteous, because the parsers are **shipped
 
 ## Runtime dependencies
 
-### web-tree-sitter 0.27.0 — MIT
+### web-tree-sitter 0.25.10 — MIT
 
 - Repository: https://github.com/tree-sitter/tree-sitter
-- Declared range: `^0.27.0`
+- Declared range: `~0.25.10`
 
 ```text
 The MIT License (MIT)
 
-Copyright (c) 2018 Max Brunsfeld
+Copyright (c) 2018-2024 Max Brunsfeld
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -100,7 +100,7 @@ Every grammar above is MIT. The body is reproduced once, quoted from the install
 ```text
 The MIT License (MIT)
 
-Copyright (c) 2018 Max Brunsfeld
+Copyright (c) 2018-2024 Max Brunsfeld
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

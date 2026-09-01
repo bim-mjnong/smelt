@@ -336,9 +336,11 @@ describe('the exit code never lies about the budget', () => {
   });
 
   it('distinguishes a refusal from a usage error and from over budget', async () => {
+    // A log on stdin has no detectable language, and structural refuses to guess —
+    // never a silent lexical fallback. From the shell that is a refusal exit.
     const { code, stderr } = await run(['--budget', '4000', '--strategy', 'structural'], corpus());
     expect(code).toBe(EXIT.refused);
-    expect(stderr).toMatch(/NotImplementedError/);
+    expect(stderr).toMatch(/GrammarUnavailableError/);
     expect(
       new Set([EXIT.ok, EXIT.overBudget, EXIT.usage, EXIT.refused, EXIT.unexpected]).size,
     ).toBe(5);
