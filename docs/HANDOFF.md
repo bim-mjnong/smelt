@@ -175,7 +175,6 @@ Everything below exists, is typechecked, linted, and covered. `pnpm verify` is g
 - No structural planning, so smelt cannot yet say "collapsed 3 sibling functions" about
   real code. **Slice 2 — the reason the project exists.**
 - No benchmark, so no number smelt owns. **Slice 3.**
-- No persistent store, so elisions die with the process. **Slice 5.**
 - No cross-file reasoning: smelt sees one blob at a time. **Slice 7.**
 
 ---
@@ -286,16 +285,21 @@ Same machinery, three more node-kind sets.
 - [ ] `SUPPORTED_LANGUAGES` and `WASM_BY_LANGUAGE` stay total — adding an id without a grammar is already a compile error; keep it that way.
 - [ ] Bench numbers from Slice 3 re-run and committed, per language.
 
-### Slice 5 — a persistent elision store
+### Slice 5 — a persistent elision store — **SHIPPED**
 
-Elisions currently die with the process. A long-lived agent session outlives the process.
+Elisions used to die with the process. A long-lived agent session outlives the process.
+
+**Shipped as** `DirectoryElisionStore` (`src/store-dir.ts`): a second `ElisionStore` over
+a content-addressed directory, `node:fs` only — SQLite would have been either a new
+runtime dependency (`better-sqlite3`) or `node:sqlite`, which is not stable across the
+supported engine range. The storage layout is documented on the class.
 
 **Acceptance criteria**
 
-- [ ] A second `ElisionStore` implementation over SQLite or a content-addressed directory. The interface does not change.
-- [ ] Still no eviction. If a size cap is genuinely required, retrieval of an evicted hash must throw a _distinct_ error that says "evicted", never `UnknownHashError` — the model must be able to tell "never existed" from "we lost it".
-- [ ] Counters survive a restart, or the docs state plainly that they do not.
-- [ ] Concurrent writers do not corrupt the store. Test it with two processes, not two promises.
+- [x] A second `ElisionStore` implementation over SQLite or a content-addressed directory. The interface does not change. The reversibility and expansion-counter guards run against both stores.
+- [x] Still no eviction — no cap at all, so no "evicted" error exists to need. If a size cap is genuinely required, retrieval of an evicted hash must throw a _distinct_ error that says "evicted", never `UnknownHashError` — the model must be able to tell "never existed" from "we lost it". (The class doc restates this for whoever adds a cap.) The same distinction already exists for damage: a blob whose bytes no longer hash to their name throws `StoreCorruptionError`, never `UnknownHashError`, and reads verify bytes against the hash so a torn write can never be handed back as a faithful retrieval.
+- [x] Counters survive a restart: every retrieval appends one fsynced line to an append-only journal, and `stats()` is a fold over it, so `expansionRate` stays meaningful across a session.
+- [x] Concurrent writers do not corrupt the store. Tested with two processes, not two promises — `test/store-dir.test.ts` spawns two real `node` subprocesses against one directory. Writes are write-temp → fsync → `link(2)` (atomic, no-clobber), and `pnpm mutate` proves the verify-on-read and counter-persistence guards can go red.
 
 ### Slice 6 — cache-prefix hygiene
 

@@ -7,8 +7,9 @@ import type { ElisionStore, RetrieveStats } from './types.ts';
  *
  * In-process is the right default because it is the only one with no failure modes to
  * explain. A consumer that needs elisions to survive a process restart (a long-lived
- * agent session, say) implements {@link ElisionStore} over SQLite or a directory of
- * files — the interface is four methods wide for exactly that reason.
+ * agent session, say) hands `createSmelter()` a {@link DirectoryElisionStore} — or
+ * implements {@link ElisionStore} over storage of its own; the interface is five
+ * methods wide for exactly that reason.
  *
  * There is no `clear()` and no LRU. A store that can forget turns Law 3 into
  * "reversible, usually", and a `retrieve()` that fails after an eviction is
