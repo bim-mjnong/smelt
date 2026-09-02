@@ -41,7 +41,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # format:check, lint, typecheck, build, test, mutate — one verdict.
+      # format:check, lint, build, typecheck, test, mutate — one verdict. (Build before
+      # typecheck: @smeltjs/mcp typechecks against the core's built declarations.)
       - run: pnpm verify
 
   fresh-clone:
@@ -92,6 +93,13 @@ jobs:
           cd packages/core
           pnpm pack --out "$RUNNER_TEMP/smeltjs-core.tgz"
 
+      # After core: @smeltjs/mcp's prepack builds against the core's declarations,
+      # which the core's own prepack just emitted.
+      - name: pack the mcp tarball
+        run: |
+          cd packages/mcp
+          pnpm pack --out "$RUNNER_TEMP/smeltjs-mcp.tgz"
+
       - name: the tarball carries its licence and grammars
         run: |
           tar -tzf "$RUNNER_TEMP/smeltjs-core.tgz" > "$RUNNER_TEMP/tarball-files.txt"
@@ -100,12 +108,22 @@ jobs:
           grep -q 'package/grammars/tree-sitter-typescript.wasm' "$RUNNER_TEMP/tarball-files.txt" || {
             echo 'FAIL: bundled grammars are not in the tarball'; exit 1; }
 
-      - name: install the tarball into a scratch project
+      - name: the mcp tarball carries its licence and its bin
+        run: |
+          tar -tzf "$RUNNER_TEMP/smeltjs-mcp.tgz" > "$RUNNER_TEMP/mcp-tarball-files.txt"
+          grep -qx 'package/LICENSE' "$RUNNER_TEMP/mcp-tarball-files.txt" || {
+            echo 'FAIL: LICENSE is not in the mcp tarball'; exit 1; }
+          grep -qx 'package/dist/bin.js' "$RUNNER_TEMP/mcp-tarball-files.txt" || {
+            echo 'FAIL: the mcp bin is not in the tarball'; exit 1; }
+
+      - name: install the tarballs into a scratch project
         run: |
           mkdir -p "$RUNNER_TEMP/consumer"
           cd "$RUNNER_TEMP/consumer"
           npm init -y > /dev/null
-          npm install "$RUNNER_TEMP/smeltjs-core.tgz"
+          # Both at once: the mcp tarball's @smeltjs/core dependency resolves to the
+          # local core tarball, not the registry — the pair under test is this commit's.
+          npm install "$RUNNER_TEMP/smeltjs-core.tgz" "$RUNNER_TEMP/smeltjs-mcp.tgz"
 
       - name: the installed bin runs — version, a real smelt, and a slow pipe
         run: |
@@ -140,3 +158,57 @@ jobs:
           console.log('require(esm) ok');
           EOF
           node require-check.cjs
+
+      # The installed mcp server, driven the way a harness drives it: spawn the bin,
+      # initialize over stdio, list the tools, and require a protocol-clean stdout.
+      - name: the installed mcp server answers an initialize handshake over stdio
+        run: |
+          cd "$RUNNER_TEMP/consumer"
+          cat > mcp-handshake.cjs <<'EOF'
+          'use strict';
+          const assert = require('node:assert');
+          const { spawn } = require('node:child_process');
+          const child = spawn('./node_modules/.bin/smelt-mcp', [], { stdio: ['pipe', 'pipe', 'pipe'] });
+          let stdout = '';
+          let stderr = '';
+          const timer = setTimeout(() => {
+            child.kill();
+            console.error(`timed out\nstdout:\n${stdout}\nstderr:\n${stderr}`);
+            process.exit(1);
+          }, 15000);
+          const parsed = () =>
+            stdout
+              .split('\n')
+              .filter((line) => line.trim() !== '')
+              .flatMap((line) => {
+                try { return [JSON.parse(line)]; } catch { return []; }
+              });
+          child.stdout.on('data', (chunk) => {
+            stdout += chunk;
+            if (parsed().some((message) => message.id === 2)) child.stdin.end();
+          });
+          child.stderr.on('data', (chunk) => { stderr += chunk; });
+          child.on('close', (code) => {
+            clearTimeout(timer);
+            assert.strictEqual(code, 0, `exit ${code}\nstderr:\n${stderr}`);
+            const lines = stdout.split('\n').filter((line) => line.trim() !== '');
+            const messages = lines.map((line) => JSON.parse(line)); // a non-JSON stdout line throws here
+            for (const message of messages) assert.strictEqual(message.jsonrpc, '2.0');
+            const init = messages.find((message) => message.id === 1);
+            assert.strictEqual(init.result.serverInfo.name, 'smelt-mcp');
+            assert.ok(init.result.instructions.includes('smelt_retrieve'));
+            const tools = messages
+              .find((message) => message.id === 2)
+              .result.tools.map((tool) => tool.name)
+              .sort();
+            assert.deepStrictEqual(tools, ['repo_map', 'smelt_file', 'smelt_retrieve', 'smelt_stats']);
+            console.log(`mcp handshake ok: ${tools.join(', ')}`);
+          });
+          const frames = [
+            { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'ci', version: '0.0.0' } } },
+            { jsonrpc: '2.0', method: 'notifications/initialized' },
+            { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+          ];
+          for (const frame of frames) child.stdin.write(`${JSON.stringify(frame)}\n`);
+          EOF
+          node mcp-handshake.cjs
