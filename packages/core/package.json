@@ -35,14 +35,19 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./package.json": "./package.json"
   },
   "bin": {
     "smelt": "dist/cli/bin.js"
   },
+  "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node ../../scripts/bundle-grammars.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
