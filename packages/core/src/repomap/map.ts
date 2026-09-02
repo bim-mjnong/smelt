@@ -76,7 +76,9 @@ export interface RepoMapOptions {
   readonly budgetBytes: number;
   /**
    * Paths to skip, replacing {@link DEFAULT_REPO_IGNORE}. An entry containing `/` is
-   * matched as a root-relative path prefix; a bare name matches any path segment.
+   * matched as a root-relative path prefix — a trailing slash counts, so `build/`
+   * means the root-level `build` tree, never every `build` segment anywhere; a bare
+   * name matches any path segment.
    */
   readonly ignore?: readonly string[];
   /**
@@ -310,7 +312,11 @@ function isIgnored(rel: string, ignore: readonly string[]): boolean {
   for (const entry of ignore) {
     const cleaned = entry.replace(/\/+$/, '');
     if (cleaned === '') continue;
-    if (cleaned.includes('/')) {
+    // Prefix mode is decided on the entry AS WRITTEN, before the trailing slash is
+    // trimmed: `build/` contains a `/` and so is the documented root-relative prefix
+    // (the root-level `build` tree), not a bare name that would match a `build`
+    // segment at any depth.
+    if (entry.includes('/')) {
       if (rel === cleaned || rel.startsWith(`${cleaned}/`)) return true;
     } else if (rel.split('/').includes(cleaned)) {
       return true;

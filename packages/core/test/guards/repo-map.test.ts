@@ -15,6 +15,7 @@ import {
   REPO_MAP_UNREFERENCED_RULE,
 } from '@guard/repomap/map';
 import { SmeltError } from '@guard/errors';
+import { extractTags } from '@guard/repomap/tags';
 
 /**
  * REPO-MAP GUARD — the guarantees Slice 7 claims.
@@ -269,5 +270,93 @@ describe('Slice 7 — the repo map keeps its claims', () => {
     expect(useDup!.refsOut).toBe(2);
     expect(useDup!.reason.explanation).toContain('makes 2 references out');
     expect(map.text).toContain('useDup [1 in from 1 file, 2 out]');
+  });
+
+  it('never reports a bodiless C/C++ specifier as a definition (Law 2 — the receipt must be true)', async () => {
+    // `struct point p;` parses as a struct_specifier exactly like the bodied
+    // definition does. Reporting it as a definition mints a false `defined at`
+    // receipt, AND poisons defNameStarts so the usage no longer counts as a
+    // reference — the true definition's cross-file rank silently evaporates.
+    // Mutation: `pnpm mutate` removes the body requirement, and this must go red.
+    const tags = await extractTags(
+      [
+        'struct point {',
+        '  int x;',
+        '  int y;',
+        '};',
+        '',
+        'enum color {',
+        '  RED,',
+        '  BLUE,',
+        '};',
+        '',
+        'struct point origin(void);',
+        '',
+        'enum color pick(struct point p);',
+        '',
+      ].join('\n'),
+      'c',
+    );
+
+    // Exactly the 2 real definitions — the usage sites must not add fake ones.
+    expect(tags.defs.map((def) => `${def.kind} ${def.name}`)).toEqual([
+      'struct point',
+      'enum color',
+    ]);
+    // And the usage sites now count as references, so the true definitions regain
+    // their cross-file rank: `point` is mentioned twice below its definition
+    // (`origin`'s return type and `pick`'s parameter), `color` once.
+    expect(tags.refs).toContainEqual({ name: 'point', count: 2 });
+    expect(tags.refs).toContainEqual({ name: 'color', count: 1 });
+  });
+
+  it('regains cross-file references for a C definition mentioned in another file', async () => {
+    // The audit's shape end to end: the header defines `struct point`; the consumer
+    // file only *mentions* the type. Before the body check, the consumer's mention
+    // was itself reported as a definition (with a fake receipt) and its name node
+    // swallowed the reference — so the real definition ranked as unreferenced.
+    const root = scratch('smelt-repomap-cspec-');
+    writeFileSync(join(root, 'point.h'), 'struct point {\n  int x;\n  int y;\n};\n');
+    writeFileSync(
+      join(root, 'use.c'),
+      'struct point make_origin(void);\n\nstruct point make_origin(void) {\n' +
+        '  struct point p;\n  p.x = 0;\n  p.y = 0;\n  return p;\n}\n',
+    );
+
+    const map = await buildRepoMap({ root, budgetBytes: BUDGET });
+    const pointDefs = map.entries.filter((entry) => entry.name === 'point');
+    expect(pointDefs, 'the bodiless mentions in use.c minted extra definitions').toHaveLength(1);
+    expect(pointDefs[0]!.path).toBe('point.h');
+    expect(pointDefs[0]!.reason.rule).toBe(REPO_MAP_RANKED_RULE);
+    expect(pointDefs[0]!.refsIn, 'the usage sites no longer count as references').toBeGreaterThan(
+      0,
+    );
+    expect(pointDefs[0]!.refsInFiles).toBe(1);
+  });
+
+  it('treats a trailing-slash ignore entry as the documented root-relative prefix', async () => {
+    // `build/` contains a `/`, so the doc promises prefix matching: the root-level
+    // build tree is skipped, and a nested `deep/build` — a different path entirely —
+    // is not. Stripping the slash first used to demote `build/` to a bare name that
+    // matched every `build` segment at any depth.
+    const root = scratch('smelt-repomap-slash-');
+    mkdirSync(join(root, 'build'), { recursive: true });
+    mkdirSync(join(root, 'deep', 'build'), { recursive: true });
+    writeFileSync(
+      join(root, 'build', 'top.ts'),
+      'export function topLevelArtifact(): number {\n  return 1;\n}\n',
+    );
+    writeFileSync(
+      join(root, 'deep', 'build', 'nested.ts'),
+      'export function nestedKeeper(): number {\n  return 2;\n}\n',
+    );
+
+    const map = await buildRepoMap({ root, budgetBytes: BUDGET, ignore: ['build/'] });
+    const names = map.entries.map((entry) => entry.name);
+    expect(names, 'the root-level build/ tree was not ignored').not.toContain('topLevelArtifact');
+    expect(
+      names,
+      'a trailing-slash entry leaked into bare-name mode and ate deep/build too',
+    ).toContain('nestedKeeper');
   });
 });
