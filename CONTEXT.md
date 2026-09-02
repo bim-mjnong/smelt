@@ -91,3 +91,14 @@ codebase-design glossary.
   claims are asserted by _counting calls_ — a symlink is statted once and never read
   (refused on `isSymlink`, not on the accident that an `lstat` of a link is neither
   file nor directory), an ignored path is never statted at all.
+- **guard-kit**: the guards' shared machine — `packages/guard-kit`, test-only,
+  `private: true`, never published and never more than a devDependency. It owns the
+  import-graph **walker** (`walkImportGraph`, `assertNoNetwork`) that both packages'
+  Law 1 guards run on, carrying the four vacuity defences and the reasoning for each,
+  plus the source helpers (`guardSrcRoot`, `guardRoot`, `allSourceFiles`, `readSource`,
+  `stripStringsAndComments`). The seam is `classify(edge): Classification` — one small
+  function per package holding only that package's **ruling** (the core partitions
+  against `net/policy.ts`; the mcp package adds a stdio-only SDK subpath allowlist).
+  Each package's `test/guards/_source.ts` stays as its anchor: only `packageRoot()` and
+  `repoRoot()` are package-local, and `SMELT_GUARD_SRC` / `SMELT_GUARD_ROOT` keep
+  exactly the semantics `scripts/mutate.mjs` sets them with.

@@ -74,3 +74,56 @@ describe('the packaged LICENSE', () => {
     ).toBe(true);
   });
 });
+
+/**
+ * The guards' shared machine (`packages/guard-kit`) is test-only. "Test-only" is not a
+ * comment — it is three checkable facts, and all three are load-bearing: the package is
+ * `private` so npm refuses to publish it at all, it carries no `publishConfig` that
+ * could quietly re-enable that, and it enters no published package as anything but a
+ * devDependency, which npm never installs for a consumer. A guard helper that reached a
+ * consumer's machine would be a dependency nobody asked for, on a library whose whole
+ * point is shipping nothing it did not have to.
+ */
+describe('@smelt/guard-kit is workspace-internal and unpublishable', () => {
+  interface GuardKitManifest {
+    readonly name?: string;
+    readonly private?: boolean;
+    readonly publishConfig?: unknown;
+  }
+  interface Dependents {
+    readonly files?: readonly string[];
+    readonly dependencies?: Record<string, string>;
+    readonly peerDependencies?: Record<string, string>;
+    readonly devDependencies?: Record<string, string>;
+  }
+  const KIT = '@smelt/guard-kit';
+  const kit = JSON.parse(
+    readFileSync(join(repoRoot(), 'packages/guard-kit/package.json'), 'utf8'),
+  ) as GuardKitManifest;
+
+  it('is private, with no publishConfig to undo it', () => {
+    expect(kit.name).toBe(KIT);
+    expect(kit.private, 'guard-kit must stay private: true — it is test scaffolding').toBe(true);
+    expect(
+      kit.publishConfig,
+      'a publishConfig on a private package is an accident waiting to happen',
+    ).toBeUndefined();
+  });
+
+  it('enters no published package except as a devDependency', () => {
+    for (const name of ['core', 'mcp']) {
+      const published = JSON.parse(
+        readFileSync(join(repoRoot(), 'packages', name, 'package.json'), 'utf8'),
+      ) as Dependents;
+      expect(Object.keys(published.dependencies ?? {}), name).not.toContain(KIT);
+      expect(Object.keys(published.peerDependencies ?? {}), name).not.toContain(KIT);
+      expect(
+        Object.keys(published.devDependencies ?? {}),
+        `${name} uses guard-kit, and only from devDependencies`,
+      ).toContain(KIT);
+      // The other half of "it never enters the tarball": the only files importing it
+      // live under `test/`, and `files` packs `dist` — never the tests.
+      expect(published.files ?? [], `${name} must not pack its tests`).not.toContain('test');
+    }
+  });
+});

@@ -1,0 +1,22 @@
+{
+  "name": "@smelt/guard-kit",
+  "version": "0.0.0",
+  "description": "Test-only, workspace-internal: the import-graph walker the Law 1 guards share. Never published.",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}

@@ -53,7 +53,10 @@ and hands tree-sitter a `Uint8Array` — removing the capability rather than doc
 — and why `assertLocalResource()` rejects any non-`file:` scheme before that.
 
 Enforced by `test/guards/no-network.test.ts`, which walks the real import graph and
-classifies _every_ edge. See "How to prove a guard can fail" below.
+classifies _every_ edge. The walk is one machine (`packages/guard-kit`, test-only and
+never published); the ruling on what an edge may be is one small `classify()` per
+package, so both packages defend Law 1 with the same defences and their own verdict.
+See "How to prove a guard can fail" below.
 
 ### Law 2 — every elision is explainable
 

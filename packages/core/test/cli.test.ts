@@ -383,12 +383,14 @@ describe('--help and --version', () => {
     expect(stdout).toBe('9.9.9-test\n');
   });
 
-  it('the shipped bin reads its version from the manifest, not from a second copy', () => {
+  it('advertises the bin path npm will actually publish', () => {
+    // The version claim itself is behavioural, not textual: `test/cli-bin.test.ts`
+    // spawns the built binary and compares `smelt --version` against this manifest's
+    // version. Grepping bin.ts for the spelling of its `new URL(...)` would pin an
+    // implementation detail while proving nothing about what the binary prints.
     const manifest = JSON.parse(
       readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
     ) as { version: string; bin: Record<string, string> };
-    const bin = readFileSync(new URL('../src/cli/bin.ts', import.meta.url), 'utf8');
-    expect(bin).toContain("new URL('../../package.json', import.meta.url)");
     // No `./` prefix: npm 11's publish validation treats a `./`-prefixed bin value as
     // invalid and silently REMOVES the bin entry from the published manifest.
     expect(manifest.bin['smelt']).toBe('dist/cli/bin.js');
