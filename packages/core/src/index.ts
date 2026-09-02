@@ -117,6 +117,8 @@ export {
   runInit,
 } from './cli/init.ts';
 export type { InitIo } from './cli/init.ts';
+export { retrieveStats } from './stats.ts';
+export type { RawRetrieveCounters } from './stats.ts';
 
 /**
  * Which planner a smelter uses. `'structural'` parses every language named in

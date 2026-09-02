@@ -22,6 +22,8 @@ import {
   UnknownHashError,
 } from './errors.ts';
 import { contentHash } from './hash.ts';
+import { retrieveStats } from './stats.ts';
+import type { RawRetrieveCounters } from './stats.ts';
 import type { ElisionStore, RetrieveStats } from './types.ts';
 
 /**
@@ -204,7 +206,12 @@ export class DirectoryElisionStore implements ElisionStore {
     return this.#readBlob(hash) !== undefined;
   }
 
-  stats(): RetrieveStats {
+  /**
+   * The five directly-observed counts, every one read off the disk — a scan of
+   * `blobs/` plus a fold over `retrievals.log`. See {@link RawRetrieveCounters}; the
+   * derived half of the stats comes from the shared `retrieveStats()`, never here.
+   */
+  rawCounters(): RawRetrieveCounters {
     let elisionsStored = 0;
     let bytesStored = 0;
     for (const entry of readdirSync(this.#blobsDir)) {
@@ -223,17 +230,12 @@ export class DirectoryElisionStore implements ElisionStore {
       if (match[1] === 'miss') misses += 1;
       else if (match[1] === 'hit') hits.add(JSON.parse(match[2]!) as string);
     }
-    const uniqueRetrieved = hits.size;
 
-    return {
-      elisionsStored,
-      bytesStored,
-      retrieveCalls,
-      uniqueRetrieved,
-      misses,
-      expansionRate: elisionsStored === 0 ? 0 : uniqueRetrieved / elisionsStored,
-      allElisionsRetrieved: elisionsStored > 0 && uniqueRetrieved === elisionsStored,
-    };
+    return { elisionsStored, bytesStored, retrieveCalls, uniqueRetrieved: hits.size, misses };
+  }
+
+  stats(): RetrieveStats {
+    return retrieveStats(this.rawCounters());
   }
 
   /** The blob's exact content, or `undefined` when no such blob is stored. */

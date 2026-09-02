@@ -6,7 +6,7 @@
  * ships with at least one *mutation*: a specific, minimal break in the source that the
  * guard must catch. This script copies `packages/core/src` to a scratch directory,
  * applies one mutation, points the guard at the copy via `SMELT_GUARD_SRC`, and
- * asserts the guard goes **red**. Fifty-six mutations across twelve guards; a mutation the
+ * asserts the guard goes **red**. Fifty-seven mutations across twelve guards; a mutation the
  * guard survives is reported as a failure of the *guard*, not of the mutation.
  *
  * It also runs every guard against the pristine tree first, because a guard that fails
@@ -127,9 +127,9 @@ const MUTATIONS = [
   {
     id: 'degenerate-outcome-never-fires',
     guard: 'test/guards/expansion-counter.test.ts',
-    file: 'store.ts',
-    find: '      allElisionsRetrieved: elisionsStored > 0 && uniqueRetrieved === elisionsStored,',
-    replace: '      allElisionsRetrieved: false,',
+    file: 'stats.ts',
+    find: '    allElisionsRetrieved: raw.elisionsStored > 0 && raw.uniqueRetrieved === raw.elisionsStored,',
+    replace: '    allElisionsRetrieved: false,',
     why: 'the one degenerate outcome smelt names, wired to a constant that can never fire',
   },
   {
@@ -559,6 +559,14 @@ const MUTATIONS = [
       '  }\n',
     replace: '',
     why: "the C/C++ body requirement dropped — `struct point p;` earns a `defined at` receipt it never had, and its name node poisons defNameStarts so the true definition's cross-file references silently vanish from the map",
+  },
+  {
+    id: 'retrieve-stats-shared-derivation-broken',
+    guard: 'test/guards/expansion-counter.test.ts',
+    file: 'stats.ts',
+    find: '    expansionRate: raw.elisionsStored === 0 ? 0 : raw.uniqueRetrieved / raw.elisionsStored,',
+    replace: '    expansionRate: 0,',
+    why: 'the one shared derivation of the honest signal wired flat — every store now reports a flattering zero at once, and no per-store copy of the arithmetic exists to disagree',
   },
 ];
 

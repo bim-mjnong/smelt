@@ -1,5 +1,7 @@
 import { HashCollisionError, UnknownHashError } from './errors.ts';
 import { contentHash } from './hash.ts';
+import { retrieveStats } from './stats.ts';
+import type { RawRetrieveCounters } from './stats.ts';
 import type { ElisionStore, RetrieveStats } from './types.ts';
 
 /**
@@ -68,17 +70,18 @@ export class MemoryElisionStore implements ElisionStore {
     return this.#blobs.has(hash);
   }
 
-  stats(): RetrieveStats {
-    const elisionsStored = this.#blobs.size;
-    const uniqueRetrieved = this.#retrievedHashes.size;
+  /** The five directly-observed counts. See {@link RawRetrieveCounters} — no derivation here. */
+  rawCounters(): RawRetrieveCounters {
     return {
-      elisionsStored,
+      elisionsStored: this.#blobs.size,
       bytesStored: this.#bytesStored,
       retrieveCalls: this.#retrieveCalls,
-      uniqueRetrieved,
+      uniqueRetrieved: this.#retrievedHashes.size,
       misses: this.#misses,
-      expansionRate: elisionsStored === 0 ? 0 : uniqueRetrieved / elisionsStored,
-      allElisionsRetrieved: elisionsStored > 0 && uniqueRetrieved === elisionsStored,
     };
+  }
+
+  stats(): RetrieveStats {
+    return retrieveStats(this.rawCounters());
   }
 }
