@@ -265,7 +265,7 @@ tree-sitter wasm heap, which scales with input (~200 MB on a 558 KB file). All m
 transient: the CLI exits, nothing stays resident.
 
 Reduction observed (same machine, same commit): `src/plan/structural.ts` 22,462 B →
-3,680 B (−83.6%, 2 elisions, structural); `docs/HANDOFF.md` records −86.5% lexical on
+3,680 B (−83.6%, 2 elisions, structural); `docs/ARCHITECTURE.md` records −86.5% lexical on
 `plan/lexical.ts` (7,297 B → 985 B).
 
 **Sane per-tool-call hook budget:** the always-on guard (every Read/Bash) should stay
@@ -285,7 +285,7 @@ two amendments.
 - Below ~8 KB, redirecting is a net loss: a deny costs a full model round trip
   (seconds + tokens for re-issue), and elisions on small files trend unprofitable —
   the lexical planner's own profitability check exists because a ~100 B marker can
-  cost more than the lines it replaces (`docs/HANDOFF.md`, Slice 1/lexical notes).
+  cost more than the lines it replaces (`docs/ARCHITECTURE.md`, the lexical planner notes).
 - At and above 8 KB, measured smelt runs cost 80–220 ms and removed 80%+ on real
   source files (measured above), and the read would otherwise be resent to the model
   with the transcript on subsequent turns — recurring cost vs a one-time ~200 ms.
@@ -307,7 +307,7 @@ two amendments.
 2. **PreToolUse Read deny at 8 KB, stat-only bash guard** — strong; costs one model
    round trip per deny, so the reason must be maximally steering (exact smelt command
    incl. `--focus` hint; deny reasons are shown to the model, §1). ~25 ms per Read.
-   This is the KOT-212 "size-guard deny" leg — threshold validated, amendments in §5.
+   This is the hooks preset's "size-guard deny" leg — threshold validated, amendments in §5.
 3. **PostToolUse on Bash: measure actual output; nudge via `additionalContext`, or
    replace via `updatedToolOutput`** — the only honest treatment of grep-shaped
    commands (size unknowable pre-run). Replacement requires the elided bytes in a
@@ -325,7 +325,7 @@ two amendments.
    explain the _why_ and the marker/retrieve contract; execpolicy is Codex's
    belt-and-braces under its hook layer.
 
-### Concrete KOT-212 preset shape (validated against all of the above)
+### Concrete hooks-preset shape (validated against all of the above)
 
 - **SessionStart** (`startup|resume|clear|compact` matcher): `smelt map . --budget
 4000 --cache .smelt-tags` → `additionalContext`. Measured 70–190 ms — fine for a
@@ -355,5 +355,5 @@ _Sources of record: <https://code.claude.com/docs/en/hooks>,
 <https://modelcontextprotocol.io/specification/2026-07-28>,
 <https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools>, the
 GitHub repos cited inline, and this repository (`packages/core/src/plan/grammar.ts`,
-`docs/HANDOFF.md`). All measured numbers: this file's header machine context,
+`docs/ARCHITECTURE.md`). All measured numbers: this file's header machine context,
 2026-09-02._

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * The measurement harness — HANDOFF Slice 3. This is the program that earns smelt
+ * The measurement harness. This is the program that earns smelt
  * the right to state a number (Law 4: claim no number that has not been measured).
  *
- * Three tiers, per HANDOFF Decision 8:
+ * Three tiers, per `docs/ARCHITECTURE.md` § Decision 8:
  *
  *   tier 1  bytes + elision counts per case. Deterministic, offline, no key, and
  *           reproducible by a stranger from a fresh clone: `pnpm build && pnpm bench`.
@@ -56,7 +56,7 @@ Measured by \`bench/run.mjs\` on the committed corpus (\`bench/corpus/\`,
 corpus commit, under which tier — and, for token and retrieval rows, on which model,
 because those numbers are model-specific. Rows are **append-only**: a re-run, or a
 run on a newer model, adds rows and never edits one — tokenizers shift between
-model generations (HANDOFF Decision 8), and an edit would rewrite history.
+model generations (\`docs/ARCHITECTURE.md\` § Decision 8), and an edit would rewrite history.
 
 Units mean exactly what they say: \`bytes\` is UTF-8 bytes of the input and the
 smelted output; \`tokens\` is Anthropic's \`/v1/messages/count_tokens\` for the text

@@ -18,7 +18,7 @@ export const unconfiguredRerankStage: RerankStage = {
   ): Promise<readonly RerankedCandidate[]> {
     throw new NotImplementedError(
       'reranking',
-      'docs/HANDOFF.md § "Explicitly out of v1" — implement `RerankStage` in your own ' +
+      'docs/ARCHITECTURE.md § "Explicitly out of v1" — implement `RerankStage` in your own ' +
         'code, with your own key, so the network call is visible in your source',
     );
   },
@@ -38,7 +38,7 @@ export const unconfiguredDistillStage: DistillStage = {
   distill(_text: string, _budgetBytes: number): Promise<string> {
     throw new NotImplementedError(
       'learned distillation',
-      'docs/HANDOFF.md § "Explicitly out of v1"',
+      'docs/ARCHITECTURE.md § "Explicitly out of v1"',
     );
   },
 };

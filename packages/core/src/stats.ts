@@ -13,7 +13,8 @@ export type RawRetrieveCounters = Omit<RetrieveStats, 'expansionRate' | 'allElis
  * The one derivation of the honesty arithmetic, shared by every store.
  *
  * `expansionRate` is the number this project exists to keep honest, and
- * `allElisionsRetrieved` is the one degenerate outcome it names (HANDOFF Decision 4).
+ * `allElisionsRetrieved` is the one degenerate outcome it names (`docs/ARCHITECTURE.md`
+ * § Decision 4).
  * When each store derived them privately, the two copies could drift — and a store
  * whose arithmetic drifted flattering-ward would be the exact silent failure Law 3's
  * counters exist to refuse. So the seam between a store and its stats is narrowed to

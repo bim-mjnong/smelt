@@ -5,8 +5,8 @@
  * `ANTHROPIC_API_KEY` is present, so a tier-1 run never even loads a file that can
  * reach the wire. It is part of the measurement harness, not of smelt: nothing under
  * `src/` imports it, it ships in no tarball, and Law 1's guard walks `src/` only —
- * the model calls here are the harness's own, made explicitly, exactly as HANDOFF
- * Slice 3 requires.
+ * the model calls here are the harness's own, made explicitly, exactly as the
+ * harness's contract requires.
  *
  * `count_tokens` is free (rate-limited, not billed), which is what makes tier 2
  * affordable to anyone with a key. The count reported is of the text as a single

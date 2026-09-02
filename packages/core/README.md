@@ -3,7 +3,7 @@
 Structure-aware, reversible context optimization for coding agents. Zero network calls.
 
 This is the library package. The project README, the four laws and their reasoning, the
-build plan and the consumer contract all live in the repository root:
+architecture and the consumer contract all live in the repository root:
 **https://github.com/smeltjs/smelt**
 
 ```ts
@@ -45,11 +45,11 @@ The parsers ship inside this tarball — no native build step, no post-install d
 That makes smelt a redistributor, so [`THIRD-PARTY.md`](./THIRD-PARTY.md) carries the
 licences, generated from package metadata rather than written by hand.
 
-**0.x.** The full v1 slice plan has shipped: structural planning (tree-sitter, with
+**0.x.** In the box: structural planning (tree-sitter, with
 signatures and doc comments always kept), the lexical planner, a persistent
 content-addressed store, cache-prefix hygiene (detect, never rewrite), a repo-map
 planner modelled on Aider's, the `smelt init` wizard, and a committed measurement
 harness. An unsupported language under `strategy: 'structural'` is refused, never
-approximated. See [`docs/HANDOFF.md`](https://github.com/smeltjs/smelt/blob/main/docs/HANDOFF.md).
+approximated. See [`docs/ARCHITECTURE.md`](https://github.com/smeltjs/smelt/blob/main/docs/ARCHITECTURE.md).
 
 Apache-2.0.

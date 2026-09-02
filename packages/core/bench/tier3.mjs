@@ -3,8 +3,9 @@
  *
  * This module is the paid network path. `run.mjs` loads it dynamically and only when
  * the caller passed `--tier3` *and* `ANTHROPIC_API_KEY` is present — it is never run
- * incidentally, because every call here costs money. Per HANDOFF Decision 8 the
- * founder runs it once and commits the retrieval log (`bench/tier3-log/<case>.json`),
+ * incidentally, because every call here costs money. Per `docs/ARCHITECTURE.md`
+ * § Decision 8 it is run once and the retrieval log committed
+ * (`bench/tier3-log/<case>.json`),
  * so the rate is verifiable from a committed file rather than from trust.
  *
  * The measurement: the model is handed the smelted text, the case's task, and the

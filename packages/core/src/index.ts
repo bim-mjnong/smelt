@@ -164,7 +164,7 @@ export interface SmelterConfig {
   readonly marker?: MarkerBuilder;
   /**
    * Your own counter, so results carry a number in your unit as well as in bytes.
-   * The budget stays in bytes — see {@link Measure} and `docs/HANDOFF.md` § "Decision 1".
+   * The budget stays in bytes — see {@link Measure} and `docs/ARCHITECTURE.md` § "Decision 1".
    */
   readonly measure?: Measure;
   readonly lexical?: LexicalPlannerOptions;

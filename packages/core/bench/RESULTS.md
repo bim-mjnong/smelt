@@ -5,7 +5,7 @@ Measured by `bench/run.mjs` on the committed corpus (`bench/corpus/`,
 corpus commit, under which tier — and, for token and retrieval rows, on which model,
 because those numbers are model-specific. Rows are **append-only**: a re-run, or a
 run on a newer model, adds rows and never edits one — tokenizers shift between
-model generations (HANDOFF Decision 8), and an edit would rewrite history.
+model generations (`docs/ARCHITECTURE.md` § Decision 8), and an edit would rewrite history.
 
 Units mean exactly what they say: `bytes` is UTF-8 bytes of the input and the
 smelted output; `tokens` is Anthropic's `/v1/messages/count_tokens` for the text

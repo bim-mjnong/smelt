@@ -17,7 +17,7 @@ export function Nav() {
         </span>
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
           <a
-            href={`${GITHUB}/blob/main/docs/HANDOFF.md`}
+            href={`${GITHUB}/blob/main/docs/ARCHITECTURE.md`}
             className="rounded-[6px] px-2.5 py-1.5 text-sm text-slag transition-colors duration-150 hover:text-ash"
           >
             Docs

@@ -8,7 +8,7 @@ import { allSourceFiles, guardSrcRoot, readSource } from './_source.ts';
 const { detectCacheBreakers, findPrefixDivergence } = cachePrefix;
 
 /**
- * CACHE-HYGIENE GUARD — Slice 6's promise: detect and warn, NEVER rewrite.
+ * CACHE-HYGIENE GUARD — the promise: detect and warn, NEVER rewrite.
  *
  * Provider prompt caches match the prefix byte for byte, so the tempting "fix" is
  * to reorder or rewrite the caller's prompt into a cache-friendlier shape. That fix
@@ -88,7 +88,7 @@ describe('cache-prefix hygiene: detect and warn, never rewrite', () => {
       expect(
         readSource(file),
         `${file} mentions a cache hit rate. No such figure has been measured, and a ` +
-          `cached read's price is not a frequency — see docs/HANDOFF.md § Law 4.`,
+          `cached read's price is not a frequency — see docs/ARCHITECTURE.md § Law 4.`,
       ).not.toMatch(/hit[\s-]*rate/i);
     }
   });
