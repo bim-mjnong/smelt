@@ -1,0 +1,60 @@
+name: site
+
+# Builds site/ and deploys it to GitHub Pages (https://smeltjs.github.io/smelt/).
+#
+# Deliberately keyless: the build needs ZERO React Bits registry access. The
+# REACTBITS_LICENSE_KEY exists only on a developer machine, and only for INSTALLING
+# new registry items into the source tree; building renders committed sources plus
+# packages/core/bench/RESULTS.md (parsed at build time — Law 4 lives in
+# site/scripts/bench-data.mjs). No secret is read anywhere in this workflow.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'packages/core/bench/RESULTS.md'
+      - '.github/workflows/site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @smeltjs/site build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

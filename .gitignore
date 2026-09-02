@@ -16,3 +16,10 @@ packages/core/bench/corpus/structural.ts
 # shipped in the npm tarball via the "grammars" entry in packages/core/package.json
 packages/core/grammars/
 .claude/
+
+# site — secrets and licensed Agent Kit reference material (read-only use, never committed)
+site/.env.local
+site/.env*.local
+site/prompts/
+site/recipes/
+site/src/generated/

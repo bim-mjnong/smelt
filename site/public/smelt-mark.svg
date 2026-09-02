@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="smelt">
+  <title>smelt</title>
+  <!--
+    The smelt mark, v3: the lava block.
+
+    An isometric voxel cube — molten top, charcoal stone sides, ember cracks running
+    down. Voxel-flat on purpose: chunky parallelogram tiles on the iso grid, no
+    gradients on the faces, so it reads at 16 px and sits comfortably next to any
+    blocky-game aesthetic without copying anyone's texture. Original geometry.
+
+    Palette rules hold: ember is the only accent, white-hot is scarce (the hottest
+    tiles on the top face and nothing else). No runes — see assets/PALETTE.md.
+
+    Iso grid: top face (32,6)-(56,18)-(32,30)-(8,18); side faces drop 26 units. Tiles
+    snap to half-face steps so the texture stays voxel-true.
+  -->
+
+  <!-- soft ground shadow so the block sits rather than floats -->
+  <polygon points="12,52 32,62 52,52 32,42" fill="#0E0F12" opacity="0.45" />
+
+  <!-- left face: charcoal stone -->
+  <polygon points="8,18 32,30 32,56 8,44" fill="#1B1D22" />
+  <!-- right face: darker charcoal -->
+  <polygon points="32,30 56,18 56,44 32,56" fill="#131417" />
+
+  <!-- stone texture: iron voxel chips on the side faces -->
+  <g fill="#2A2E34">
+    <polygon points="12,24 18,27 18,33 12,30" />
+    <polygon points="22,33 28,36 28,42 22,39" />
+    <polygon points="10,36 14,38 14,44 10,42" />
+    <polygon points="36,34 42,31 42,37 36,40" />
+    <polygon points="46,27 52,24 52,30 46,33" />
+    <polygon points="38,44 44,41 44,47 38,50" />
+  </g>
+
+  <!-- ember cracks: chunky voxel steps running down from the melt -->
+  <g fill="#E4602F">
+    <polygon points="14,21 18,23 18,29 14,27" />
+    <polygon points="18,29 21,30.5 21,36.5 18,35" />
+    <polygon points="26,27 29,28.5 29,38.5 26,37" />
+    <polygon points="29,38.5 31,39.5 31,45.5 29,44.5" />
+    <polygon points="50,21 46,23 46,29 50,27" />
+    <polygon points="46,29 43,30.5 43,38.5 46,37" />
+    <polygon points="37,32.5 39,31.5 39,41.5 37,42.5" />
+  </g>
+  <!-- the hottest crack pixel on each side, sparing -->
+  <g fill="#F5893A">
+    <polygon points="18,25 21,26.5 21,30.5 18,29" />
+    <polygon points="46,25 43,26.5 43,30.5 46,29" />
+  </g>
+
+  <!-- top face: the melt -->
+  <polygon points="32,6 56,18 32,30 8,18" fill="#E4602F" />
+
+  <!-- molten texture: forge tiles on the iso grid -->
+  <g fill="#F5893A">
+    <polygon points="32,6 40,10 32,14 24,10" />
+    <polygon points="44,12 50,15 44,18 38,15" />
+    <polygon points="20,14 26,17 20,20 14,17" />
+    <polygon points="32,18 38,21 32,24 26,21" />
+    <polygon points="42,20 46,22 42,24 38,22" />
+    <polygon points="22,22 26,24 22,26 18,24" />
+  </g>
+  <!-- white-hot: the scarce core tiles -->
+  <g fill="#FFF1D9">
+    <polygon points="32,10 36,12 32,14 28,12" />
+    <polygon points="26,17 30,19 26,21 22,19" />
+    <polygon points="40,16 43,17.5 40,19 37,17.5" />
+  </g>
+
+  <!-- crisp top rim so the melt reads as contained -->
+  <polygon points="32,6 56,18 32,30 8,18" fill="none" stroke="#2A2E34" stroke-width="1.5" stroke-linejoin="miter" />
+  <!-- vertical edges -->
+  <polyline points="8,18 8,44 32,56 56,44 56,18" fill="none" stroke="#2A2E34" stroke-width="1.5" stroke-linejoin="miter" />
+  <polyline points="32,30 32,56" fill="none" stroke="#2A2E34" stroke-width="1.5" />
+</svg>
