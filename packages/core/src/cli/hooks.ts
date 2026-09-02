@@ -29,7 +29,7 @@ import {
 import { DEFAULT_SUGGESTION_BUDGET_BYTES, DEFAULT_THRESHOLD_BYTES } from '../hooks/guard-core.ts';
 import type { EnforcementMode } from '../hooks/guard-core.ts';
 
-import { CLI_NAME } from './args.ts';
+import { CLI_NAME } from './shell.ts';
 import { CONFIG_FILE_NAME, CONFIG_VERSION, findConfigFile, parseConfig } from './config.ts';
 import type { SmeltConfig, SmeltConfigHooks } from './config.ts';
 

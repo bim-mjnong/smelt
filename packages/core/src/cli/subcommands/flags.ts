@@ -1,0 +1,216 @@
+import { SUPPORTED_LANGUAGES } from '../../detect.ts';
+import { CliUsageError } from '../../errors.ts';
+import { HARNESS_IDS } from '../../harness/registry.ts';
+import { STRATEGIES } from '../../plan/planners.ts';
+import { STRUCTURAL_LANGUAGES } from '../../plan/structural.ts';
+import { CLI_NAME } from '../shell.ts';
+
+/**
+ * Every flag the CLI accepts, once.
+ *
+ * The table is the companion the {@link Subcommand} registry needs: a verb declares
+ * the flags it owns as `FlagName[]`, so the type of that list — and therefore whether
+ * a verb can claim a flag that does not exist — comes from here. It carries three
+ * things that used to be written in three places:
+ *
+ *   1. **How `node:util.parseArgs` reads the flag.** The option table used to be a
+ *      literal inside `parseSmeltArgs`.
+ *   2. **The name.** `FlagName` is `keyof typeof CLI_FLAGS`, so an eleventh flag is
+ *      spelled once and every verb's ownership list typechecks against it.
+ *   3. **Its OPTIONS entry in `--help`.** Including the `map only.` / `hooks only.`
+ *      prefix, which is *not* stored here: it is generated from the registry's
+ *      ownership (see `renderOptions` in `cli/usage.ts`), because "which verb owns
+ *      this flag" is a fact the registry already holds and prose that restates it is
+ *      prose that can go stale.
+ *
+ * Key order is meaningful: it is the order the OPTIONS block renders and the order a
+ * refusal lists flags in, so keep it stable and append new flags where they read best.
+ */
+export const CLI_FLAGS = {
+  budget: { type: 'string' },
+  focus: { type: 'string', multiple: true },
+  language: { type: 'string' },
+  strategy: { type: 'string' },
+  ignore: { type: 'string', multiple: true },
+  cache: { type: 'string' },
+  harness: { type: 'string' },
+  json: { type: 'boolean' },
+  reconstruct: { type: 'boolean' },
+  help: { type: 'boolean', short: 'h' },
+  version: { type: 'boolean' },
+} as const;
+
+/** Every flag name, as a type. A verb cannot claim a flag that is not in the table. */
+export type FlagName = keyof typeof CLI_FLAGS;
+
+/**
+ * The flags answered *before* any verb, so no verb owns them and no verb may refuse
+ * them: `smelt map --help` prints the help, exactly as it always has. Every other flag
+ * belongs to at least one verb — `test/guards/subcommand-registry.test.ts` pins that.
+ */
+export const GLOBAL_FLAGS = ['help', 'version'] as const satisfies readonly FlagName[];
+
+/** A flag a verb can own — everything but the two global ones. */
+export type VerbFlag = Exclude<FlagName, (typeof GLOBAL_FLAGS)[number]>;
+
+/** Every ownable flag, in table order: the list a refusal checks a verb against. */
+export const VERB_FLAGS: readonly VerbFlag[] = Object.keys(CLI_FLAGS).filter(
+  (name): name is VerbFlag => !(GLOBAL_FLAGS as readonly string[]).includes(name),
+);
+
+/** What one flag's parsed value looks like, derived from how `parseArgs` was told to read it. */
+type FlagValue<F> = F extends { readonly type: 'boolean' }
+  ? boolean
+  : F extends { readonly multiple: true }
+    ? readonly string[]
+    : string;
+
+/**
+ * The parsed flags, as every `Subcommand.parse` sees them: one optional field per
+ * flag, typed by the table above. Absent means the user did not type it — which is
+ * the only thing a refusal needs to know, and the only thing a verb may act on.
+ */
+export type FlagValues = { readonly [K in FlagName]?: FlagValue<(typeof CLI_FLAGS)[K]> };
+
+/** How one flag appears in the OPTIONS block of `--help`. */
+export interface FlagHelp {
+  /** The left column, e.g. `--budget <bytes>` or `-h, --help`. */
+  readonly label: string;
+  /**
+   * The description, already wrapped to the OPTIONS column — a function because three
+   * entries render a registry (`SUPPORTED_LANGUAGES`, `STRATEGIES` +
+   * `STRUCTURAL_LANGUAGES`, `HARNESS_IDS`) rather than a hand-typed list. The
+   * ownership prefix is not here; it is generated.
+   */
+  body(): readonly string[];
+}
+
+/**
+ * A comma-separated list under an OPTIONS entry's hanging indent, wrapped where the
+ * hand-typed version wrapped. `--strategy` and `--language` render their registries on
+ * one line because they fit; the harness ids do not, and a list long enough to wrap is
+ * exactly the list nobody keeps in sync by hand.
+ */
+export function optionList(items: readonly string[], width: number): readonly string[] {
+  const lines: string[] = [];
+  let line = '';
+  items.forEach((item, index) => {
+    const word = index === items.length - 1 ? `${item}.` : `${item},`;
+    const candidate = line === '' ? word : `${line} ${word}`;
+    if (line !== '' && candidate.length > width) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  });
+  lines.push(line);
+  return lines;
+}
+
+/** The width an OPTIONS description wraps within, once its 23-column indent is removed. */
+const OPTION_BODY_WIDTH = 65;
+
+/**
+ * The OPTIONS entry for every flag. `Record<FlagName, FlagHelp>` on purpose: a flag
+ * added to {@link CLI_FLAGS} without a help entry is a compile error, so the help text
+ * cannot fall behind what the parser accepts.
+ */
+export const FLAG_HELP: Readonly<Record<FlagName, FlagHelp>> = {
+  budget: {
+    label: '--budget <bytes>',
+    body: () => [
+      'Required, unless smelt.config.json sets defaultBudgetBytes.',
+      'Soft ceiling for the output, in UTF-8 bytes (for map: a hard',
+      'ceiling, met by construction). No built-in default: a budget',
+      `${CLI_NAME} invented would decide for you.`,
+    ],
+  },
+  focus: {
+    label: '--focus <term>',
+    body: () => [
+      'What you were looking for. Repeatable. Matching regions and',
+      'their context survive; the runs between them collapse. For',
+      'map: symbols matching a term (by name or path) are promoted',
+      'to the front of the fill order, ranks unchanged.',
+    ],
+  },
+  language: {
+    label: '--language <id>',
+    body: () => [`Override detection. One of: ${[...SUPPORTED_LANGUAGES, 'unknown'].join(', ')}.`],
+  },
+  strategy: {
+    label: '--strategy <id>',
+    body: () => [
+      `${STRATEGIES.join(' or ')}. Defaults to lexical, unless`,
+      'smelt.config.json says otherwise. structural parses',
+      `${STRUCTURAL_LANGUAGES.join(', ')};`,
+      'any other language is refused, never approximated.',
+    ],
+  },
+  ignore: {
+    label: '--ignore <entry>',
+    body: () => [
+      'Repeatable. Replaces the default ignore list',
+      '(.git, node_modules): a bare name matches any path segment,',
+      'an entry containing / is a root-relative prefix.',
+    ],
+  },
+  cache: {
+    label: '--cache <dir>',
+    body: () => [
+      'Directory for the tags cache, keyed by content',
+      'hash. Only when given does the map write to disk at all.',
+    ],
+  },
+  harness: {
+    label: '--harness <id>',
+    body: () => [
+      'Skip harness detection and target one id:',
+      ...optionList(HARNESS_IDS, OPTION_BODY_WIDTH),
+    ],
+  },
+  json: {
+    label: '--json',
+    body: () => [
+      'Print a JSON envelope on stdout instead of the text:',
+      '{ format, result, elided } for a smelt run — `result` is',
+      'the SmeltResult verbatim, `elided` carries the bytes, so',
+      'the envelope can be reconstructed; feed it back with',
+      '--reconstruct. For map: { format, map }, the RepoMap',
+      'structure verbatim.',
+    ],
+  },
+  reconstruct: {
+    label: '--reconstruct',
+    body: () => [
+      'Read a --json envelope and print the original text, byte for',
+      'byte. This is Law 3 you can run from a shell.',
+    ],
+  },
+  help: { label: '-h, --help', body: () => ['This text.'] },
+  version: { label: '--version', body: () => ['The package version.'] },
+};
+
+/**
+ * `--budget` has no built-in default, for the same reason `smelt()` has none: a budget
+ * smelt invented would be smelt deciding how much of the caller's context to throw
+ * away, silently, at a number nobody chose. A *missing* flag is not an error here,
+ * though — `smelt.config.json` may carry a `defaultBudgetBytes` the user chose
+ * explicitly, and the verb's `resolve` errors only when neither exists. A malformed
+ * value is always an error.
+ *
+ * It lives with the flag rather than with a verb because two verbs own `--budget`, and
+ * the two of them agreeing on what "4kb" means is not something to leave to chance.
+ */
+export function parseBudget(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  if (!/^\d+$/.test(raw)) {
+    throw new CliUsageError(`${CLI_NAME}: --budget must be a whole number of bytes, got "${raw}".`);
+  }
+  const value = Number(raw);
+  if (value <= 0) {
+    throw new CliUsageError(`${CLI_NAME}: --budget must be greater than zero, got "${raw}".`);
+  }
+  return value;
+}

@@ -727,7 +727,7 @@ export const MUTATIONS: GuardMutation[] = [
   },
   {
     id: 'smelter-pricing-ignores-custom-marker',
-    file: 'index.ts',
+    file: 'smelter.ts',
     find: '        pricing: markerPricing(language, config.marker),',
     replace: '        pricing: markerPricing(language),',
     why: "createSmelter pricing built without config.marker — the planner prices the ~105-byte default while applyPlan renders the caller's far larger marker, so cuts the real marker outweighs get planned and the shipped custom-builder path grows its output with no error anywhere",
