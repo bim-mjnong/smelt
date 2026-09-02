@@ -2,6 +2,7 @@ import { Parser } from 'web-tree-sitter';
 import type { Node } from 'web-tree-sitter';
 
 import { GrammarUnavailableError } from '../errors.ts';
+import { profileFor } from '../lang/registry.ts';
 import { loadGrammar } from '../plan/grammar.ts';
 import type { LanguageId } from '../types.ts';
 
@@ -12,8 +13,9 @@ import type { LanguageId } from '../types.ts';
  * Modelled on Aider's repo-map tags (https://aider.chat/docs/repomap.html): a *def* is
  * a named declaration read off the parse tree, a *ref* is an identifier occurrence.
  * Aider extracts both with per-language `.scm` query files; here the same facts come
- * from a manual tree walk over per-language node-kind tables, so no query assets are
- * added. The design is Aider's, not this project's.
+ * from a manual tree walk over each language's `repomap` profile section
+ * (`src/lang/`), so no query assets are added. The design is Aider's, not this
+ * project's.
  *
  * Honest scope, stated rather than implied: refs count `identifier`/`type_identifier`
  * nodes only, so a member access like `config.load()` contributes `config`, not
@@ -42,114 +44,6 @@ export interface FileTags {
   /** Sorted by name, so the extraction is deterministic end to end. */
   readonly refs: readonly ReferenceTag[];
 }
-
-/**
- * Declaration node type → human kind word, per language. A node type absent from its
- * language's table is simply not a definition — no guessing.
- */
-const TS_DEF_KINDS: Readonly<Record<string, string>> = {
-  function_declaration: 'function',
-  generator_function_declaration: 'function',
-  function_signature: 'function',
-  class_declaration: 'class',
-  abstract_class_declaration: 'class',
-  interface_declaration: 'interface',
-  type_alias_declaration: 'type alias',
-  enum_declaration: 'enum',
-  method_definition: 'method',
-  variable_declarator: 'variable',
-};
-
-const DEF_KINDS: Readonly<Record<LanguageId, Readonly<Record<string, string>>>> = {
-  typescript: TS_DEF_KINDS,
-  tsx: TS_DEF_KINDS,
-  javascript: TS_DEF_KINDS,
-  rust: {
-    function_item: 'function',
-    struct_item: 'struct',
-    enum_item: 'enum',
-    trait_item: 'trait',
-    mod_item: 'module',
-    const_item: 'constant',
-    static_item: 'static',
-    type_item: 'type alias',
-    union_item: 'union',
-  },
-  python: {
-    function_definition: 'function',
-    class_definition: 'class',
-  },
-  go: {
-    function_declaration: 'function',
-    method_declaration: 'method',
-    type_spec: 'type',
-  },
-  // The slice-4b tables below list only node kinds whose `name` field is an
-  // *identifier* node, because that is what the extraction walk reads — a kind whose
-  // name is spelled differently (php's `name` nodes, ruby's `constant` class names,
-  // bash's `word` function names, kotlin's field-less declarations) is *omitted*, not
-  // guessed at. An omitted kind means fewer symbols on the map, never wrong ones.
-  java: {
-    class_declaration: 'class',
-    interface_declaration: 'interface',
-    enum_declaration: 'enum',
-    record_declaration: 'record',
-    annotation_type_declaration: 'annotation type',
-    method_declaration: 'method',
-  },
-  c: {
-    struct_specifier: 'struct',
-    union_specifier: 'union',
-    enum_specifier: 'enum',
-  },
-  cpp: {
-    class_specifier: 'class',
-    struct_specifier: 'struct',
-    union_specifier: 'union',
-    enum_specifier: 'enum',
-    namespace_definition: 'namespace',
-  },
-  c_sharp: {
-    class_declaration: 'class',
-    interface_declaration: 'interface',
-    struct_declaration: 'struct',
-    enum_declaration: 'enum',
-    record_declaration: 'record',
-    delegate_declaration: 'delegate',
-    method_declaration: 'method',
-  },
-  ruby: {
-    method: 'method',
-    singleton_method: 'method',
-  },
-  php: {},
-  kotlin: {},
-  swift: {
-    class_declaration: 'type',
-    protocol_declaration: 'protocol',
-    function_declaration: 'function',
-  },
-  bash: {},
-};
-
-/** Node types counted as references, per language. */
-const REF_TYPES: Readonly<Record<LanguageId, readonly string[]>> = {
-  typescript: ['identifier', 'type_identifier'],
-  tsx: ['identifier', 'type_identifier'],
-  javascript: ['identifier', 'type_identifier'],
-  rust: ['identifier', 'type_identifier'],
-  python: ['identifier'],
-  go: ['identifier', 'type_identifier'],
-  java: ['identifier', 'type_identifier'],
-  c: ['identifier', 'type_identifier'],
-  cpp: ['identifier', 'type_identifier'],
-  c_sharp: ['identifier'],
-  ruby: ['identifier', 'constant'],
-  php: ['name', 'variable_name'],
-  kotlin: ['simple_identifier', 'type_identifier'],
-  swift: ['simple_identifier', 'type_identifier'],
-  bash: ['variable_name'],
-};
 
 /**
  * C/C++ specifier node types that name a *usage site* as readily as a definition:
@@ -193,8 +87,11 @@ function isDefinitionSite(node: Node): boolean {
  */
 export async function extractTags(text: string, language: LanguageId): Promise<FileTags> {
   const grammar = await loadGrammar(language);
-  const defKinds = DEF_KINDS[language];
-  const refTypes = REF_TYPES[language];
+  // The per-language facts live on the language's profile (`src/lang/`). A profile
+  // without a repomap section contributes nothing — no symbols, never wrong ones.
+  const repomap = profileFor(language).repomap;
+  const defKinds = repomap?.defKinds ?? {};
+  const refTypes = repomap?.refTypes ?? [];
 
   const parser = new Parser();
   let tree = null;

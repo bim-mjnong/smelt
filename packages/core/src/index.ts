@@ -119,6 +119,13 @@ export {
 export type { InitIo } from './cli/init.ts';
 export { retrieveStats } from './stats.ts';
 export type { RawRetrieveCounters } from './stats.ts';
+export {
+  LANGUAGE_PROFILES,
+  profileFor,
+  profileForPath,
+  structuralLanguages,
+} from './lang/registry.ts';
+export type { LanguageProfile, LanguageStructure, RepoMapFacts } from './lang/profile.ts';
 
 /**
  * Which planner a smelter uses. `'structural'` parses every language named in

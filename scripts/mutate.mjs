@@ -306,23 +306,23 @@ const MUTATIONS = [
   {
     id: 'structural-new-language-dropped',
     guard: 'test/guards/structural.test.ts',
-    file: 'plan/structural.ts',
-    find: "  'python',\n  'go',\n  'java',",
-    replace: "  'python',\n  'java',",
-    why: 'a Slice 4 language quietly dropped from the planner — go callers would be refused while the docs still claim it',
+    file: 'lang/registry.ts',
+    find: '  python,\n  go,\n  java,',
+    replace: '  python,\n  java,',
+    why: 'a Slice 4 language quietly dropped from the profile registry — go callers would be refused while the docs still claim it',
   },
   {
     id: 'structural-language-claimed-without-tests',
     guard: 'test/guards/structural-totality.test.ts',
-    file: 'plan/structural.ts',
-    find: "  'bash',\n] as const;",
-    replace: "  'bash',\n  'lua',\n] as const;",
-    why: 'a language claimed by the planner with no fixture, no snapshot and no doc-comment case — exactly the untested-language ship the totality guard exists to refuse',
+    file: 'lang/registry.ts',
+    find: '  swift,\n  bash,\n};',
+    replace: "  swift,\n  bash,\n  lua: { ...bash, id: 'lua', extensions: ['lua'] },\n};",
+    why: 'a language claimed by a registry profile with no fixture, no snapshot and no doc-comment case — exactly the untested-language ship the totality guard exists to refuse',
   },
   {
     id: 'structural-bash-shebang-collapsed',
     guard: 'test/guards/structural.test.ts',
-    file: 'plan/structural.ts',
+    file: 'lang/bash.ts',
     find:
       "    // comment node, so it is pinned the way go's build tag is — never collapsed.\n" +
       '    pinnedCommentPattern: /^#!/,',
@@ -332,39 +332,40 @@ const MUTATIONS = [
   {
     id: 'ruby-survivor-marker-not-a-comment',
     guard: 'test/guards/structural.test.ts',
-    file: 'apply.ts',
-    find: "  ruby: '# ',\n",
+    file: 'lang/ruby.ts',
+    find: "  markerLeader: '# ',\n",
     replace: '',
     why: 'the ruby marker landing as a bare `<<smelt/v1 …>>` line — ruby reads `<<` as a heredoc operator, so the marker swallows every kept declaration after it into a string and the survivor stops being ruby at all',
   },
   {
     id: 'structural-rust-function-mislabelled',
     guard: 'test/guards/structural.test.ts',
-    file: 'plan/structural.ts',
-    find: "      function_item: 'function',",
-    replace: "      function_item: 'declaration',",
+    file: 'lang/rust.ts',
+    find: "    kindLabels: {\n      function_item: 'function',",
+    replace: "    kindLabels: {\n      function_item: 'declaration',",
     why: "rust's node kinds unmapped in the marker — `collapsed 2 sibling declarations` where the tree says functions, Law 2 decayed to a vaguer truth",
   },
   {
     id: 'structural-go-method-mislabelled',
     guard: 'test/guards/structural.test.ts',
-    file: 'plan/structural.ts',
-    find: "      method_declaration: 'method',",
-    replace: "      method_declaration: 'declaration',",
+    file: 'lang/go.ts',
+    find: "    kindLabels: {\n      function_declaration: 'function',\n      method_declaration: 'method',",
+    replace:
+      "    kindLabels: {\n      function_declaration: 'function',\n      method_declaration: 'declaration',",
     why: "go's method kind erased from the marker — a mixed collapse that can no longer say what it mixed",
   },
   {
     id: 'python-survivor-marker-not-a-comment',
     guard: 'test/guards/structural.test.ts',
-    file: 'apply.ts',
-    find: "  python: '# ',",
+    file: 'lang/python.ts',
+    find: "  markerLeader: '# ',\n",
     replace: '',
     why: 'the python marker landing as a bare `<<smelt/v1 …>>` line — significant indentation lets the ERROR node swallow the neighbouring definitions, so the survivor stops being python at all',
   },
   {
     id: 'structural-rust-attribute-detached',
     guard: 'test/guards/structural.test.ts',
-    file: 'plan/structural.ts',
+    file: 'lang/rust.ts',
     find: "    attributeTypes: new Set(['attribute_item']),",
     replace: '    attributeTypes: new Set(),',
     why: 'rust outer attributes treated as their own units again — a kept declaration loses its `#[inline]`, and the doc comment above it, to the sibling collapse',
@@ -380,7 +381,7 @@ const MUTATIONS = [
   {
     id: 'structural-go-buildtag-collapsed',
     guard: 'test/guards/structural.test.ts',
-    file: 'plan/structural.ts',
+    file: 'lang/go.ts',
     find: '    pinnedCommentPattern: /^\\/\\/(go:build|\\s*\\+build)\\s/,',
     replace: '',
     why: 'the build-tag pin removed — `//go:build linux` collapses into the head run and the survivor silently loses its build constraint',
@@ -388,7 +389,7 @@ const MUTATIONS = [
   {
     id: 'structural-python-shebang-collapsed',
     guard: 'test/guards/structural.test.ts',
-    file: 'plan/structural.ts',
+    file: 'lang/python.ts',
     find:
       '    // interpreter runs the file — pinned the way the bash and ruby shebangs are.\n' +
       '    pinnedCommentPattern: /^#!/,',
@@ -398,7 +399,7 @@ const MUTATIONS = [
   {
     id: 'structural-ts-shebang-collapsed',
     guard: 'test/guards/structural.test.ts',
-    file: 'plan/structural.ts',
+    file: 'lang/typescript.ts',
     find:
       "  // law as javascript's: collapsing it changes which interpreter runs the file.\n" +
       "  pinnedTypes: new Set(['hash_bang_line']),",
@@ -410,7 +411,7 @@ const MUTATIONS = [
   {
     id: 'structural-kotlin-shebang-collapsed',
     guard: 'test/guards/structural.test.ts',
-    file: 'plan/structural.ts',
+    file: 'lang/kotlin.ts',
     find:
       '    // `#!/usr/bin/env kotlin` parses as a shebang_line node; same law as the rest.\n' +
       "    pinnedTypes: new Set(['shebang_line']),",
@@ -422,7 +423,7 @@ const MUTATIONS = [
   {
     id: 'structural-pragma-once-collapsed',
     guard: 'test/guards/structural.test.ts',
-    file: 'plan/structural.ts',
+    file: 'lang/c.ts',
     find:
       '    // the file *means*, so only it is pinned — the `//go:build` law again.\n' +
       '    pinnedPatternsByType: { preproc_call: /^#\\s*pragma\\s+once\\b/ },',
@@ -432,7 +433,7 @@ const MUTATIONS = [
   {
     id: 'structural-kotlin-import-doc-swallowed',
     guard: 'test/guards/structural.test.ts',
-    file: 'plan/structural.ts',
+    file: 'lang/kotlin.ts',
     find: "    trailingCommentSplitTypes: new Set(['import_list']),",
     replace: '    trailingCommentSplitTypes: new Set(),',
     why: 'the import_list trailing-comment split disabled — tree-sitter-kotlin extends import_list over the KDoc that follows it, so the first documented declaration after the imports loses its doc comment to the import collapse',
@@ -440,7 +441,7 @@ const MUTATIONS = [
   {
     id: 'structural-ruby-heredoc-split-from-opener',
     guard: 'test/guards/structural.test.ts',
-    file: 'plan/structural.ts',
+    file: 'lang/ruby.ts',
     find: "    ridesBackwardTypes: new Set(['heredoc_body']),",
     replace: '    ridesBackwardTypes: new Set(),',
     why: 'the heredoc body detached from its opener — a focus matching the opener keeps it while the body collapses, leaving an unterminated heredoc that swallows every kept declaration after it, with no ERROR node for an ERROR-only reparse to see',
@@ -448,16 +449,16 @@ const MUTATIONS = [
   {
     id: 'kotlin-survivor-marker-not-a-comment',
     guard: 'test/guards/structural.test.ts',
-    file: 'apply.ts',
-    find: "  kotlin: '// ',\n",
+    file: 'lang/kotlin.ts',
+    find: "  markerLeader: '// ',\n",
     replace: '',
     why: 'the kotlin marker landing as a bare `<<smelt/v1 …>>` line — the reparse scatters ERROR nodes across the kept declarations, exactly the non-local breakage the leader exists to prevent',
   },
   {
     id: 'php-survivor-marker-not-a-comment',
     guard: 'test/guards/structural.test.ts',
-    file: 'apply.ts',
-    find: "  php: '// ',\n",
+    file: 'lang/php.ts',
+    find: "  markerLeader: '// ',\n",
     replace: '',
     why: "the php marker landing bare — php reads the marker's own `<<` as an operator and re-types the kept function into an expression operand, so the kept declaration is no longer a declaration in the survivor",
   },
