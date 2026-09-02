@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyPlan, markerForLanguage } from '../src/apply.ts';
+import { applyPlan, markerForLanguage, markerPricing } from '../src/apply.ts';
 import { LEXICAL_PLANNER_ID, planLexical } from '../src/plan/lexical.ts';
 import { MemoryElisionStore } from '../src/store.ts';
 
@@ -10,7 +10,13 @@ const lines = (count: number, prefix = 'noise'): string =>
 describe('the lexical planner', () => {
   it('keeps the focus match and a window of context around it', () => {
     const text = `${lines(80)}\nthe NEEDLE is here\n${lines(80, 'after')}`;
-    const plan = planLexical({ text, language: 'unknown', budgetBytes: 600, focus: ['needle'] });
+    const plan = planLexical({
+      text,
+      language: 'unknown',
+      pricing: markerPricing('unknown'),
+      budgetBytes: 600,
+      focus: ['needle'],
+    });
 
     expect(plan.planner).toBe(LEXICAL_PLANNER_ID);
     expect(plan.elisions.length).toBe(2);
@@ -25,12 +31,23 @@ describe('the lexical planner', () => {
   it('is case-insensitive by default and exact when asked', () => {
     const text = `${lines(60)}\nSHOUTING match\n${lines(60, 'tail')}`;
     expect(
-      planLexical({ text, language: 'unknown', budgetBytes: 500, focus: ['shouting'] }).elisions
-        .length,
+      planLexical({
+        text,
+        language: 'unknown',
+        pricing: markerPricing('unknown'),
+        budgetBytes: 500,
+        focus: ['shouting'],
+      }).elisions.length,
     ).toBe(2);
     expect(
       planLexical(
-        { text, language: 'unknown', budgetBytes: 500, focus: ['shouting'] },
+        {
+          text,
+          language: 'unknown',
+          pricing: markerPricing('unknown'),
+          budgetBytes: 500,
+          focus: ['shouting'],
+        },
         { caseSensitive: true },
       ).elisions.length,
     ).toBe(1);
@@ -38,7 +55,12 @@ describe('the lexical planner', () => {
 
   it('falls back to head and tail when there is nothing to focus on', () => {
     const text = lines(400);
-    const plan = planLexical({ text, language: 'unknown', budgetBytes: 2_000 });
+    const plan = planLexical({
+      text,
+      language: 'unknown',
+      pricing: markerPricing('unknown'),
+      budgetBytes: 2_000,
+    });
     expect(plan.elisions.length).toBe(1);
     expect(plan.elisions[0]!.reason.rule).toBe('head-tail');
     expect(plan.elisions[0]!.reason.explanation).toMatch(/^collapsed \d+ lines from the middle$/);
@@ -53,10 +75,17 @@ describe('the lexical planner', () => {
     const generous = planLexical({
       text,
       language: 'unknown',
+      pricing: markerPricing('unknown'),
       budgetBytes: 100_000,
       focus: ['needle'],
     });
-    const tight = planLexical({ text, language: 'unknown', budgetBytes: 200, focus: ['needle'] });
+    const tight = planLexical({
+      text,
+      language: 'unknown',
+      pricing: markerPricing('unknown'),
+      budgetBytes: 200,
+      focus: ['needle'],
+    });
 
     expect(removed(tight.elisions)).toBeGreaterThan(removed(generous.elisions));
     // 200 bytes is not achievable without dropping the match. It keeps the match.
@@ -68,6 +97,7 @@ describe('the lexical planner', () => {
     const plan = planLexical({
       text,
       language: 'unknown',
+      pricing: markerPricing('unknown'),
       budgetBytes: 10,
       focus: ['needle'],
     });
@@ -76,12 +106,25 @@ describe('the lexical planner', () => {
 
   it('is deterministic', () => {
     const text = `${lines(200)}\nNEEDLE\n${lines(200, 'z')}`;
-    const input = { text, language: 'unknown' as const, budgetBytes: 900, focus: ['needle'] };
+    const input = {
+      text,
+      language: 'unknown' as const,
+      pricing: markerPricing('unknown'),
+      budgetBytes: 900,
+      focus: ['needle'],
+    };
     expect(JSON.stringify(planLexical(input))).toBe(JSON.stringify(planLexical(input)));
   });
 
   it('handles an empty input without inventing an elision', () => {
-    expect(planLexical({ text: '', language: 'unknown', budgetBytes: 10 }).elisions).toEqual([]);
+    expect(
+      planLexical({
+        text: '',
+        language: 'unknown',
+        pricing: markerPricing('unknown'),
+        budgetBytes: 10,
+      }).elisions,
+    ).toEqual([]);
   });
 
   it('ignores empty focus terms rather than matching everything', () => {
@@ -89,6 +132,7 @@ describe('the lexical planner', () => {
     const withEmpty = planLexical({
       text,
       language: 'unknown',
+      pricing: markerPricing('unknown'),
       budgetBytes: 2_000,
       focus: ['', ''],
     });
@@ -102,7 +146,13 @@ describe('the lexical planner', () => {
     for (const language of ['unknown', 'python'] as const) {
       const build = markerForLanguage(language);
       const text = `${lines(40)}\nthe NEEDLE is here\n${lines(40, 'after')}`;
-      const plan = planLexical({ text, language, budgetBytes: 300, focus: ['needle'] });
+      const plan = planLexical({
+        text,
+        language,
+        pricing: markerPricing(language),
+        budgetBytes: 300,
+        focus: ['needle'],
+      });
       expect(plan.elisions.length).toBeGreaterThan(0);
       for (const elision of plan.elisions) {
         const cut = elision.range.end - elision.range.start;
@@ -127,7 +177,12 @@ describe('the lexical planner', () => {
     // returned a plan that came back OVER the budget once real markers landed. An
     // honest predictor steps down a rung and fits.
     const text = `${lines(120)}\nthe NEEDLE is here\n${lines(120, 'after')}`;
-    const input = { text, language: 'unknown' as const, focus: ['needle'] };
+    const input = {
+      text,
+      language: 'unknown' as const,
+      pricing: markerPricing('unknown'),
+      focus: ['needle'],
+    };
 
     const widest = planLexical({ ...input, budgetBytes: 1_000_000 });
     expect(widest.elisions.length).toBeGreaterThan(0);

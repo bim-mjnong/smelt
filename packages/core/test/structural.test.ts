@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyPlan } from '../src/apply.ts';
+import { applyPlan, markerPricing } from '../src/apply.ts';
 import { GrammarUnavailableError } from '../src/errors.ts';
 import { createSmelter } from '../src/index.ts';
 import {
@@ -47,6 +47,7 @@ function inputFor(fixture: (typeof FIXTURES)[number]): PlanInput {
     language: fixture.language,
     budgetBytes: 600,
     focus: fixture.focus,
+    pricing: markerPricing(fixture.language),
   };
 }
 

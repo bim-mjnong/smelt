@@ -1,4 +1,4 @@
-import { applyPlan, markerForLanguage, reconstruct } from './apply.ts';
+import { applyPlan, markerForLanguage, markerPricing, reconstruct } from './apply.ts';
 import type { ApplyOptions, MarkerBuilder, MarkerInfo } from './apply.ts';
 import { detectLanguage } from './detect.ts';
 import { SmeltError } from './errors.ts';
@@ -20,7 +20,13 @@ import type {
 } from './types.ts';
 
 export type { ApplyOptions, MarkerBuilder, MarkerInfo };
-export { applyPlan, defaultMarker, MARKER_FORMAT_VERSION, reconstruct } from './apply.ts';
+export {
+  applyPlan,
+  defaultMarker,
+  MARKER_FORMAT_VERSION,
+  markerPricing,
+  reconstruct,
+} from './apply.ts';
 export { detectLanguage, SUPPORTED_LANGUAGES } from './detect.ts';
 export * from './errors.ts';
 export { contentHash, HASH_LENGTH } from './hash.ts';
@@ -232,6 +238,12 @@ export function createSmelter(config: SmelterConfig = {}): Smelter {
         text,
         language,
         budgetBytes,
+        // The MarkerPricing seam, constructed centrally — here, and nowhere else in
+        // the shipped pipeline — from the exact builder the applyPlan call below will
+        // use: a caller-supplied `config.marker` prices with its own rendering (a
+        // longer custom marker makes small cuts unprofitable, and the planner must
+        // see that), otherwise the language's leader-wrapped default.
+        pricing: markerPricing(language, config.marker),
         ...(options.focus === undefined ? {} : { focus: options.focus }),
       };
       const plan = await planner.plan(input);

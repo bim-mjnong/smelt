@@ -53,7 +53,36 @@ export interface ElisionPlan {
   readonly elisions: readonly PlannedElision[];
 }
 
-/** What the caller hands a planner. */
+/**
+ * The seam through which a planner asks what a marker will cost, in UTF-8 bytes.
+ *
+ * Marker cost is `apply.ts`'s fact — the applier renders the marker, so only the
+ * applier knows its price. Planners need that price for two decisions (profitability:
+ * a marker that costs more than it removes grows the output; and budget prediction:
+ * which ladder rung actually fits), and before this seam each planner rebuilt the
+ * marker machinery privately to measure it — correct, but an inversion. Now
+ * `markerPricing()` in `apply.ts` builds the one adapter from the exact builder
+ * `applyPlan` will use, and planners ask it. They never guess, and they never render
+ * a marker of their own.
+ *
+ * The price is exact, not an estimate: the cost of the marker this elision would
+ * earn, comment leader and all, with a stand-in hash of the real hash's length —
+ * marker cost depends on the hash's *length*, never its value.
+ */
+export interface MarkerPricing {
+  /** The exact UTF-8 byte cost of the marker an elision with this reason and size would earn. */
+  costBytes(reason: ElisionReason, elidedBytes: number): number;
+}
+
+/**
+ * What the caller hands a planner.
+ *
+ * Constructed centrally: `createSmelter` (and through it, the CLI) builds the one
+ * `PlanInput` per call, including its {@link MarkerPricing} — a caller invoking
+ * `planLexical`/`planStructural` directly builds `pricing` with `markerPricing()`
+ * from `apply.ts`. A JS caller who omits it gets {@link MissingMarkerPricingError}
+ * at plan time, not a guessed cost.
+ */
 export interface PlanInput {
   readonly text: string;
   readonly language: DetectedLanguage;
@@ -64,6 +93,12 @@ export interface PlanInput {
    * Planners keep matching regions and collapse around them.
    */
   readonly focus?: readonly string[];
+  /**
+   * What a marker costs. Required: a planner that guesses marker cost can plan an
+   * elision that grows the output. See {@link MarkerPricing}; built by
+   * `markerPricing()` in `apply.ts` from the exact builder `applyPlan` will use.
+   */
+  readonly pricing: MarkerPricing;
 }
 
 /**

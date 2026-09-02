@@ -1,12 +1,17 @@
 import { Parser } from 'web-tree-sitter';
 import type { Node, Tree } from 'web-tree-sitter';
 
-import { markerForLanguage } from '../apply.ts';
-import { GrammarUnavailableError } from '../errors.ts';
-import { HASH_LENGTH } from '../hash.ts';
+import { GrammarUnavailableError, MissingMarkerPricingError } from '../errors.ts';
 import type { LanguageStructure } from '../lang/profile.ts';
 import { profileFor, structuralLanguages } from '../lang/registry.ts';
-import type { ElisionPlan, LanguageId, PlanInput, PlannedElision, Planner } from '../types.ts';
+import type {
+  ElisionPlan,
+  LanguageId,
+  MarkerPricing,
+  PlanInput,
+  PlannedElision,
+  Planner,
+} from '../types.ts';
 
 import { loadGrammar } from './grammar.ts';
 
@@ -34,16 +39,9 @@ export type StructuralLanguage = LanguageId;
 
 /**
  * Every elision this planner produces carries this rule id, and the profitability
- * check below renders the marker that rule would earn — so the two must not drift.
+ * check below prices the marker that rule would earn — so the two must not drift.
  */
 const SIBLING_COLLAPSE_RULE = 'sibling-collapse';
-
-/**
- * A stand-in hash of the real length, so the profitability check can render the
- * marker a cut would earn before the cut exists. Marker cost depends on the hash's
- * *length*, never its value.
- */
-const PLACEHOLDER_HASH = '0'.repeat(HASH_LENGTH);
 
 export interface StructuralPlannerOptions {
   /**
@@ -133,6 +131,11 @@ export async function planStructural(
   options: StructuralPlannerOptions = {},
 ): Promise<ElisionPlan> {
   const language = assertStructuralLanguage(input.language);
+  // The runtime backstop for JS callers: TypeScript makes `pricing` required, but a
+  // JS caller can omit it, and the honest answer is a named refusal rather than the
+  // planner quietly pricing markers itself — the inversion the seam removed.
+  const pricing: MarkerPricing | undefined = input.pricing;
+  if (pricing === undefined) throw new MissingMarkerPricingError(STRUCTURAL_PLANNER_ID);
   const grammar = await loadGrammar(language);
 
   const parser = new Parser();
@@ -184,7 +187,7 @@ function planFromTree(
   // `structure` section — that is the definition of a structural language — so the
   // assertion states a fact the seam already proved.
   const structure = profile.structure!;
-  const buildMarker = markerForLanguage(language);
+  const pricing = input.pricing;
   // The marker lands as a line comment in every structural language (the profile's
   // markerLeader), and a line comment comments out everything to the end of its
   // line — so a collapse is only legal where nothing kept follows on the marker's
@@ -218,20 +221,13 @@ function planFromTree(
     const end = toByte.get(group[group.length - 1]!.end)!;
     const cutBytes = end - start;
     const explanation = explain(group);
-    // Profitability, measured rather than estimated: render the exact marker this cut
-    // would earn — the explanation's length varies with kind diversity and the
-    // language's marker may carry a comment leader (see markerForLanguage), so a fixed
-    // estimate can pass a cut whose marker is bigger than what it removes, and a
-    // marker that costs more than it removes grows the output.
-    const markerBytes = Buffer.byteLength(
-      buildMarker({
-        hash: PLACEHOLDER_HASH,
-        bytes: cutBytes,
-        rule: SIBLING_COLLAPSE_RULE,
-        explanation,
-      }),
-      'utf8',
-    );
+    // Profitability, priced rather than estimated: ask the MarkerPricing seam for the
+    // exact cost of the marker this cut would earn — the explanation's length varies
+    // with kind diversity, and the pricing carries the language's comment leader (or a
+    // caller's custom builder), so a fixed estimate can pass a cut whose marker is
+    // bigger than what it removes, and a marker that costs more than it removes grows
+    // the output.
+    const markerBytes = pricing.costBytes({ rule: SIBLING_COLLAPSE_RULE, explanation }, cutBytes);
     if (cutBytes <= markerBytes) return;
     elisions.push({
       range: { start, end },
