@@ -10,7 +10,7 @@ import {
   unlinkSync,
   writeSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import process from 'node:process';
 
@@ -99,6 +99,22 @@ export interface DirectoryElisionStoreOptions {
  * hash must throw a distinct "evicted" error — never {@link UnknownHashError} — so the
  * model can tell "we lost it" from "never existed". Today there is no such error because
  * there is no such cap.
+ *
+ * ## Two deliberate choices around the edges
+ *
+ * - **The root is resolved to an absolute path at construction.** Every later path is
+ *   joined from that, so a `process.chdir()` after construction cannot silently
+ *   re-target the store — the bytes a relative-rooted store put before a chdir would
+ *   otherwise be unreachable after it, which reads exactly like data loss.
+ * - **A failed journal append never withholds intact bytes.** `retrieve()`'s order of
+ *   business is: read, verify, count, return. When the *count* cannot be written (a
+ *   read-only journal, a full disk), the bytes are still returned — they are verified
+ *   and the caller asked for them; refusing would turn a bookkeeping failure into
+ *   Law 3 breaking. The failure is surfaced distinctly instead: a
+ *   `process.emitWarning` with name `SmeltCounterWriteFailure`, so "your retrieval
+ *   worked" and "your counters just went quiet" stay two separate facts. The same
+ *   applies to the `miss`/`corrupt` journal lines: the store's own error for the
+ *   lookup still wins over the journal's I/O error.
  */
 export class DirectoryElisionStore implements ElisionStore {
   readonly #blobsDir: string;
@@ -108,10 +124,13 @@ export class DirectoryElisionStore implements ElisionStore {
 
   constructor(root: string, options: DirectoryElisionStoreOptions = {}) {
     this.#hash = options.hash ?? contentHash;
-    this.#blobsDir = join(root, 'blobs');
-    this.#tmpDir = join(root, 'tmp');
-    this.#logPath = join(root, 'retrievals.log');
-    const markerPath = join(root, 'format.json');
+    // Resolve NOW, against the working directory the caller constructed with — a
+    // later chdir must never re-point an already-constructed store. See the class doc.
+    const absoluteRoot = resolve(root);
+    this.#blobsDir = join(absoluteRoot, 'blobs');
+    this.#tmpDir = join(absoluteRoot, 'tmp');
+    this.#logPath = join(absoluteRoot, 'retrievals.log');
+    const markerPath = join(absoluteRoot, 'format.json');
     // Validate before mutating: a directory carrying a marker this code does not
     // understand is refused with the directory exactly as it was found — no blobs/,
     // no tmp/, no staged temp file created inside someone else's layout.
@@ -170,14 +189,14 @@ export class DirectoryElisionStore implements ElisionStore {
   retrieve(hash: string): string {
     const content = this.#readBlob(hash);
     if (content === undefined) {
-      this.#appendLog('miss', hash);
+      this.#appendLogCounting('miss', hash);
       throw new UnknownHashError(hash);
     }
     if (this.#hash(content) !== hash) {
-      this.#appendLog('corrupt', hash);
+      this.#appendLogCounting('corrupt', hash);
       throw new StoreCorruptionError(hash);
     }
-    this.#appendLog('hit', hash);
+    this.#appendLogCounting('hit', hash);
     return content;
   }
 
@@ -245,6 +264,26 @@ export class DirectoryElisionStore implements ElisionStore {
       closeSync(fd);
     }
     return tmpPath;
+  }
+
+  /**
+   * A journal append on the `retrieve()` path — counting, not custody. A failure here
+   * must never decide whether the caller gets its verified bytes (or its true error),
+   * so it is caught and surfaced as a distinct `process.emitWarning` — see the class
+   * doc, and the read-only-journal case in `test/store-dir.test.ts`.
+   */
+  #appendLogCounting(kind: 'hit' | 'miss' | 'corrupt', hash: string): void {
+    try {
+      this.#appendLog(kind, hash);
+    } catch (error) {
+      process.emitWarning(
+        `smelt: could not journal a "${kind}" for hash "${hash}" in ${this.#logPath} ` +
+          `(${error instanceof Error ? error.message : String(error)}). The retrieval ` +
+          `itself is unaffected, but this count is lost — retrieveCalls and ` +
+          `expansionRate now UNDER-report until the journal is writable again.`,
+        'SmeltCounterWriteFailure',
+      );
+    }
   }
 
   /**
