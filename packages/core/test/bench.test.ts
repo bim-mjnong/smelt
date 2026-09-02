@@ -81,7 +81,7 @@ describe('the corpus and its manifest', () => {
     expect(problems).toEqual([]);
   });
 
-  it('covers the shapes Slice 3 requires: a large TS file, TSX, a grep, a stack trace, a build log', () => {
+  it('covers the shapes the harness requires: a large TS file, TSX, a grep, a stack trace, a build log', () => {
     const files = manifest().cases.map((benchCase) => benchCase.file);
     expect(files.some((file) => file.endsWith('.ts'))).toBe(true);
     expect(files.some((file) => file.endsWith('.tsx'))).toBe(true);

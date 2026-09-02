@@ -15,7 +15,7 @@ import type { SmeltConfig, SmeltConfigHooks } from './config.ts';
 /**
  * `smelt hooks install` / `smelt hooks remove` — the multi-harness guard preset.
  *
- * The design (KOT-212, founder rulings 2026-09-02): one zero-dependency guard core
+ * The design: one zero-dependency guard core
  * (`src/hooks/guard-core.ts`), thin per-harness shims mapping each harness's native
  * hook schema onto it, and this installer, which writes the harness config that wires
  * a shim in — plus an instruction-file snippet as belt and braces, because the
@@ -360,7 +360,7 @@ const MANAGED_EVENTS = ['PreToolUse', 'Stop', 'SessionStart', 'BeforeTool', 'pre
  * Merge our hook entries into a JSON settings file, preserving everything foreign
  * **byte-faithfully**: the merged `hooks` value is spliced into the original text, so
  * unknown top-level keys, string escapes, number spellings, indentation and key order
- * outside the `hooks` property ride through verbatim (founder ruling: an installer
+ * outside the `hooks` property ride through verbatim (an installer
  * that reformats somebody's settings file has edited what it was never asked to).
  * Inside `hooks`, unmanaged events and other people's entries under managed events
  * are preserved; our previous entries are replaced (that is what makes a re-run edit
@@ -638,7 +638,7 @@ function opencodePluginSource(cwd: string): string {
   return `// smelt:hooks v1 — opencode plugin shim. EXPERIMENTAL tier: mapped from the
 // capability matrix (docs/research/2026-09-02-harness-capability-matrix.md, opencode
 // row; https://opencode.ai/docs/plugins/). This template's deny/pass/window paths
-// were exercised directly against the built guard core (KOT-212 verification,
+// were exercised directly against the built guard core (verified
 // 2026-09-02), but a live opencode session has not been smoke-tested — that needs
 // provider credentials. Caveat carried from the matrix: MCP tools can bypass plugin
 // hooks (sst/opencode#2319) — this guard sees built-in tools only.

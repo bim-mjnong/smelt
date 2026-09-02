@@ -10,7 +10,7 @@ import { unconfiguredDistillStage, unconfiguredRerankStage } from '../src/stages
  * is indistinguishable from a correct implementation with nothing to say. A caller
  * would ship it, and find out months later that the stage never ran.
  *
- * The structural planner used to live here; it is real now (Slice 2), and its refusals
+ * The structural planner used to live here; it is real now, and its refusals
  * — a language it has not mapped, a grammar that will not load — are guarded in
  * `test/guards/structural.test.ts` instead. The stage stubs in `src/stages.ts` remain
  * stubs by design.

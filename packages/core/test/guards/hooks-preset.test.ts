@@ -13,7 +13,7 @@ import { runHooks } from '@guard/cli/hooks';
 import type { GuardMutation } from './_mutations.ts';
 
 /**
- * HOOKS-PRESET GUARD — the two promises the harness preset makes (KOT-212).
+ * HOOKS-PRESET GUARD — the two promises the harness preset makes.
  *
  *  1. **The size threshold is wired to the config, not to a constant.** A guard whose
  *     `hooks.thresholdBytes` silently does nothing is a setting the user believed was

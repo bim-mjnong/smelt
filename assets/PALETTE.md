@@ -36,9 +36,9 @@ Two rules keep this from drifting:
 2. **White-hot is scarce.** It reads as heat because there is very little of it. Give it
    a large area and the whole thing turns into a candle.
 
-Deliberately **not** RepoSkein's teal-and-amber (`#2DD4BF` / `#F2B84B`) — these are
-sibling projects, and a reader should be able to tell two tabs apart at a glance. Ember
-is red-orange; amber is yellow-orange. They do not collide.
+Ember is red-orange on purpose — deliberately apart from the teal-and-amber palettes
+common in neighbouring dev tools, so a reader can tell two tabs apart at a glance.
+Amber is yellow-orange; they do not collide.
 
 ## Files
 

@@ -5,7 +5,7 @@
  * smelt bundles tree-sitter grammar `.wasm` blobs inside its npm tarball — that is what
  * makes "zero native compilation, works offline" true — and bundling is
  * **redistribution**, so attribution is required rather than polite. Downstream this is
- * not academic: KLØDD ships in two app stores and needs this text for its own licence
+ * not academic: an app that bundles smelt needs this text for its own licence
  * screen.
  *
  * The document is **generated, never hand-written**, because a hand-written notice file

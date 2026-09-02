@@ -18,7 +18,7 @@ import type { CliIo } from '../src/cli/run.ts';
 import type { SmeltResult } from '../src/types.ts';
 
 /**
- * Slice 1's acceptance criteria, as tests.
+ * The CLI's acceptance criteria, as tests.
  *
  * `runCli` returns an exit code instead of calling `process.exit`, so the whole CLI runs
  * in-process here. The one thing this file cannot prove is that the *built binary*

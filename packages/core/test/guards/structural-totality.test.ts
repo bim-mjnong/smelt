@@ -15,7 +15,7 @@ import { packageRoot } from './_source.ts';
 /**
  * STRUCTURAL TOTALITY GUARD — a language cannot be claimed without tests.
  *
- * Slice 4b made adding a language cheap, and the LanguageProfile registry made it
+ * Bundled grammars made adding a language cheap, and the LanguageProfile registry made it
  * cheaper still: one profile file in `src/lang/` with a `structure` section, and the
  * extension map, grammar map and claimed-language list all follow. That is exactly
  * when the tests stop
@@ -49,7 +49,7 @@ describe('structural totality — every claimed language has a fixture, a snapsh
   // measured against the committed tests, with no second list to fall behind.
   const claimed = structuralLanguages();
 
-  it('claims at least the fifteen slice-4b languages, or the guard is vacuous', () => {
+  it('claims at least the fifteen shipped languages, or the guard is vacuous', () => {
     expect(claimed.length).toBeGreaterThanOrEqual(15);
   });
 

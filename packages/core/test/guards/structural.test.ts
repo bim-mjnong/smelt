@@ -32,7 +32,7 @@ import {
 import type { GuardMutation } from './_mutations.ts';
 
 /**
- * STRUCTURAL-PLANNER GUARD — the guarantees Slice 2 claims.
+ * STRUCTURAL-PLANNER GUARD — the guarantees the structural planner claims.
  *
  * Six properties, each of which could quietly rot into something that still *looks*
  * structural from the outside:
@@ -76,7 +76,7 @@ async function structuralPlan(
   return planStructural(inputFor(text, focus, language));
 }
 
-describe('Slice 2 — the structural planner keeps its claims', () => {
+describe('the structural planner keeps its claims', () => {
   it('explains every elision with a kind and a count, never a line count', async () => {
     const plans = [
       await structuralPlan(FUNCTIONS_TS, ['handleRequest']),
@@ -168,8 +168,8 @@ describe('Slice 2 — the structural planner keeps its claims', () => {
     // The other half of "no silent fallback": the language is mapped, but the grammar
     // itself will not load — a corrupted or missing wasm in the field. The failure must
     // surface as the loader's own error, never as line-window output labelled
-    // structural/v1, which is undetectable from the outside. Slice 4 extended the
-    // check to a new language: the rule holds per grammar, not just for the two the
+    // structural/v1, which is undetectable from the outside. The check runs against
+    // more than one language: the rule holds per grammar, not just for the two the
     // planner started with.
     vi.resetModules();
     vi.doMock('@guard/plan/grammar', () => ({
@@ -299,7 +299,7 @@ describe('Slice 2 — the structural planner keeps its claims', () => {
 });
 
 /**
- * SLICE 4 AND 4B — the same claims, thirteen more languages.
+ * THIRTEEN MORE LANGUAGES — the same claims beyond the first two grammars.
  *
  * Every language in `FIXTURE_BY_LANGUAGE` is planned by the same machinery as
  * TypeScript and TSX: the marker names kind and count from the parse tree, a kept
@@ -350,7 +350,7 @@ async function parseIssues(
   return issues;
 }
 
-describe('Slices 4 and 4b — every claimed language keeps the same claims', () => {
+describe('every claimed language keeps the same claims', () => {
   const CASES = Object.entries(FIXTURE_BY_LANGUAGE).map(([language, fixture]) => ({
     language: language as PlanInput['language'],
     ...fixture,
@@ -794,7 +794,7 @@ export const MUTATIONS: GuardMutation[] = [
     file: 'lang/registry.ts',
     find: '  python,\n  go,\n  java,',
     replace: '  python,\n  java,',
-    why: 'a Slice 4 language quietly dropped from the profile registry — go callers would be refused while the docs still claim it',
+    why: 'a structural language quietly dropped from the profile registry — go callers would be refused while the docs still claim it',
   },
   {
     id: 'structural-bash-shebang-collapsed',

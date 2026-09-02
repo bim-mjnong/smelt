@@ -12,7 +12,7 @@
     "or if any entry names a grammar that is not bundled — the mapping is total, so a",
     "new grammar cannot ship unattributed.",
     "",
-    "Verified 2026-09-01 (slice 4) and 2026-09-02 (slice 4b) against the npm registry",
+    "Verified 2026-09-01 and 2026-09-02 against the npm registry",
     "(license field) and each repository's LICENSE file (copyright line). Re-verify",
     "when tree-sitter-wasms is upgraded."
   ],

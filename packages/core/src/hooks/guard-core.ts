@@ -6,7 +6,7 @@ import process from 'node:process';
 /**
  * The guard core — one zero-dependency node script, shared by every harness shim.
  *
- * Contract (KOT-212): stdin carries one JSON request
+ * Contract: stdin carries one JSON request
  * `{ tool, input: { path?, command?, offsetLimited? } }`, stdout answers with one
  * JSON decision `{ action: "allow" | "deny", reason?, suggestion? }`, and the exit
  * code is always 0 — the decision lives in the JSON, and each shim translates it

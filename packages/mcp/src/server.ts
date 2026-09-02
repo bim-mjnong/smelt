@@ -29,7 +29,7 @@ import type { ResolvedMcpStore } from './store.ts';
 /**
  * The smelt MCP server: the same library the `smelt` CLI fronts, as four stdio tools.
  *
- * The tool surface is deliberately minimal (founder ruling, KOT-211): `smelt_file`,
+ * The tool surface is deliberately minimal: `smelt_file`,
  * `smelt_retrieve`, `repo_map`, `smelt_stats` — the smallest set that covers cut,
  * un-cut, orient, and audit. Everything else the library offers stays a library
  * concern; a tool a model never needed is context every call pays for.
