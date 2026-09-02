@@ -152,11 +152,29 @@ const REF_TYPES: Readonly<Record<LanguageId, readonly string[]>> = {
 };
 
 /**
+ * C/C++ specifier node types that name a *usage site* as readily as a definition:
+ * `struct point p;` parses as a `struct_specifier` with a `name` and no `body`, same
+ * as the `struct point { … };` that actually defines it. Only the bodied form is a
+ * definition. Without this check a mere mention earns a `defined at` receipt, *and*
+ * its name node lands in `defNameStarts` — so the real definition's cross-file
+ * references silently vanish from the map.
+ */
+const BODY_REQUIRED_TYPES: ReadonlySet<string> = new Set([
+  'struct_specifier',
+  'union_specifier',
+  'enum_specifier',
+  'class_specifier',
+]);
+
+/**
  * A local `const x = …` inside a function body is not a map-worthy symbol. A
  * `variable_declarator` counts as a definition only at module top level — directly
  * under the program node, or under an `export` statement that is.
  */
 function isDefinitionSite(node: Node): boolean {
+  if (BODY_REQUIRED_TYPES.has(node.type) && node.childForFieldName('body') === null) {
+    return false; // a bodiless specifier is a usage or forward declaration, not a definition
+  }
   if (node.type !== 'variable_declarator') return true;
   const container = node.parent?.parent;
   if (container === null || container === undefined) return false;

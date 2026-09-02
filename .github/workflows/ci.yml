@@ -64,3 +64,79 @@ jobs:
       # generated file, a stray local grammar, an untracked config. Someone cloning this
       # repo gets exactly what this job gets.
       - run: bash scripts/check-fresh-clone.sh
+
+  packed-tarball:
+    # The in-process suite cannot see the class of bug that lives in the process and
+    # package boundary: a manifest whose exports map breaks require(esm), a bin that
+    # dies with EAGAIN on a slow pipe, a tarball missing its LICENSE. So this job does
+    # what a real consumer does — packs the tarball, installs it into a scratch
+    # project, and drives the INSTALLED artifacts.
+    name: packed tarball (install + run what ships)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: pack the tarball
+        run: |
+          cd packages/core
+          pnpm pack --out "$RUNNER_TEMP/smeltjs-core.tgz"
+
+      - name: the tarball carries its licence and grammars
+        run: |
+          tar -tzf "$RUNNER_TEMP/smeltjs-core.tgz" > "$RUNNER_TEMP/tarball-files.txt"
+          grep -qx 'package/LICENSE' "$RUNNER_TEMP/tarball-files.txt" || {
+            echo 'FAIL: LICENSE is not in the tarball'; exit 1; }
+          grep -q 'package/grammars/tree-sitter-typescript.wasm' "$RUNNER_TEMP/tarball-files.txt" || {
+            echo 'FAIL: bundled grammars are not in the tarball'; exit 1; }
+
+      - name: install the tarball into a scratch project
+        run: |
+          mkdir -p "$RUNNER_TEMP/consumer"
+          cd "$RUNNER_TEMP/consumer"
+          npm init -y > /dev/null
+          npm install "$RUNNER_TEMP/smeltjs-core.tgz"
+
+      - name: the installed bin runs — version, a real smelt, and a slow pipe
+        run: |
+          cd "$RUNNER_TEMP/consumer"
+          ./node_modules/.bin/smelt --version
+          seq 1 300 | sed 's/^/log line /' > input.txt
+          # A real smelt of a real file.
+          ./node_modules/.bin/smelt input.txt --budget 2000 > smelted.txt
+          grep -q '<<smelt/v1:' smelted.txt
+          # The audit's exact killer: a producer slower than node startup. With fd 0
+          # accidentally non-blocking this exits 4 with EAGAIN.
+          (sleep 1; cat input.txt) | ./node_modules/.bin/smelt --budget 2000 > piped.txt
+          grep -q '<<smelt/v1:' piped.txt
+
+      - name: the --json envelope reconstructs byte-for-byte through a slow pipe
+        run: |
+          cd "$RUNNER_TEMP/consumer"
+          (sleep 1; cat input.txt) | ./node_modules/.bin/smelt --budget 2000 --json > envelope.json
+          (sleep 1; cat envelope.json) | ./node_modules/.bin/smelt --reconstruct > roundtrip.txt
+          cmp input.txt roundtrip.txt
+
+      - name: the installed package loads from CommonJS via require(esm)
+        run: |
+          cd "$RUNNER_TEMP/consumer"
+          cat > require-check.cjs <<'EOF'
+          'use strict';
+          const assert = require('node:assert');
+          const { createSmelter } = require('@smeltjs/core');
+          assert.strictEqual(typeof createSmelter, 'function');
+          const smelter = createSmelter({ defaultBudgetBytes: 4000 });
+          assert.strictEqual(typeof smelter.smelt, 'function');
+          console.log('require(esm) ok');
+          EOF
+          node require-check.cjs

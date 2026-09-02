@@ -23,7 +23,7 @@ everything else has been replaced by a single line saying what went, how big it 
 hash to get it back:
 
 ```
-<<smelt/v1: collapsed 3 sibling functions (2,224B) — retrieve("84998967370f38bc")>>
+<<smelt/v1: collapsed 3 sibling functions (2224B) — retrieve("84998967370f38bc")>>
 ```
 
 The removed bytes are kept locally, content-addressed. The model gets a `smelt_retrieve`
@@ -169,7 +169,7 @@ Three things that look like bugs and are not:
   as such. Every included symbol can say why it ranked.
 - **The honesty machinery** — twelve guard suites that walk the real import graph, assert
   byte-exact reversibility, pin the wire format, and re-derive the attribution file; plus
-  a mutation runner (`pnpm mutate`) that breaks the source on purpose — 52 deliberate
+  a mutation runner (`pnpm mutate`) that breaks the source on purpose — 56 deliberate
   breaks, each watched going red — and fails if a guard does not notice. Every guarantee
   in this README has a guard.
 
@@ -276,6 +276,11 @@ is in [`docs/HANDOFF.md`](docs/HANDOFF.md#the-four-laws-and-why-each-one-is-load
 - **Node** `^20.19 || >=22.12`
 - **pnpm** 10.15, for development only
 - Nothing else. No database, no Docker, no compiler, no API key.
+
+`@smeltjs/core` is an **ESM package**. From ESM, `import` it; from CommonJS, plain
+`require('@smeltjs/core')` works too — the supported Node range above is exactly the
+range where Node loads ES modules through `require()` without a flag, which is why the
+engines floor sits where it does.
 
 ## Prior art, credited honestly
 

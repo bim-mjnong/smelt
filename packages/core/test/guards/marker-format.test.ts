@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { defaultMarker, MARKER_FORMAT_VERSION } from '@guard/apply';
+import { createRetrieveTool } from '@guard/retrieve';
+import { MemoryElisionStore } from '@guard/store';
 
 /**
  * MARKER-FORMAT GUARD — the wire surface a *model* sees.
@@ -100,5 +102,29 @@ describe('the marker format is frozen, and versioned in band', () => {
     expect(marker).toContain(FIXTURE.explanation); // Law 2: what went
     expect(marker).toContain(`${String(FIXTURE.bytes)}B`); // how much
     expect(marker).toContain(FIXTURE.hash); // Law 3: how to get it back
+  });
+
+  it('shows the model an example marker in the tool description that matches the real format', () => {
+    // The retrieve tool's description is the one string a model reads to *recognize*
+    // markers. An example there whose shape drifted from the wire format — a
+    // `<<smelt: …>>` when real markers say `<<smelt/v1: …>>` — teaches the model to
+    // miss every marker it actually receives, silently. So the description must
+    // carry an example rendered by the real builder, version in band.
+    const { description } = createRetrieveTool(new MemoryElisionStore());
+    expect(description).toContain(`<<smelt/${MARKER_FORMAT_VERSION}: `);
+    const embedded = /<<smelt\/[^>]*>>/.exec(description)?.[0];
+    expect(embedded, 'the description carries no marker example at all').toBeDefined();
+    expect(
+      embedded,
+      'the example marker in the tool description does not match what defaultMarker ' +
+        'renders — the description would teach the model a shape it will never see',
+    ).toBe(
+      defaultMarker({
+        hash: 'a1b2c3d4e5f60718',
+        bytes: 412,
+        rule: 'sibling-collapse',
+        explanation: 'collapsed 3 sibling functions',
+      }),
+    );
   });
 });

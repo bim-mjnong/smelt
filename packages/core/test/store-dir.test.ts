@@ -1,11 +1,21 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { UnknownHashError } from '../src/errors.ts';
 import { contentHash } from '../src/hash.ts';
 import { DirectoryElisionStore } from '../src/store-dir.ts';
 
@@ -158,4 +168,74 @@ describe('DirectoryElisionStore under two real concurrent processes', () => {
       blobFiles.reduce((sum, file) => sum + statSync(join(blobsDir, file)).size, 0),
     );
   }, 60_000);
+});
+
+describe('the store root is pinned at construction', () => {
+  it('resolves a relative root immediately, so a later chdir cannot re-target the store', () => {
+    // A store constructed with `.smelt/store` and then a `process.chdir()` used to
+    // start reading and writing a DIFFERENT directory: bytes put before the chdir
+    // became unretrievable — indistinguishable from data loss — and new blobs landed
+    // in a second store nobody asked for.
+    const base = mkdtempSync(join(tmpdir(), 'smelt-chdir-base-'));
+    const elsewhere = mkdtempSync(join(tmpdir(), 'smelt-chdir-elsewhere-'));
+    roots.push(base, elsewhere);
+    const original = process.cwd();
+    try {
+      process.chdir(base);
+      const store = new DirectoryElisionStore('relative-store');
+      const hash = store.put('bytes that must stay findable');
+
+      process.chdir(elsewhere);
+      expect(store.retrieve(hash)).toBe('bytes that must stay findable');
+      const second = store.put('written after the chdir');
+      expect(readFileSync(join(base, 'relative-store', 'blobs', second), 'utf8')).toBe(
+        'written after the chdir',
+      );
+      expect(
+        existsSync(join(elsewhere, 'relative-store')),
+        'the chdir re-targeted the store to a second directory',
+      ).toBe(false);
+    } finally {
+      process.chdir(original);
+    }
+  });
+});
+
+describe('a failed journal append never withholds bytes', () => {
+  it('returns verified bytes when the journal is read-only, surfacing the counting failure as a warning', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'smelt-ro-journal-'));
+    roots.push(root);
+    const store = new DirectoryElisionStore(root);
+    const hash = store.put('intact, verified bytes');
+    store.retrieve(hash); // a writable journal first, so the file exists to chmod
+    const before = store.stats();
+    expect(before.retrieveCalls).toBe(1);
+
+    chmodSync(join(root, 'retrievals.log'), 0o444);
+    try {
+      // The load-bearing claim: intact, hash-verified bytes come back even though
+      // the count cannot be written. Refusing here would turn a bookkeeping failure
+      // into Law 3 breaking.
+      const warned = new Promise<Error>((resolve) => process.once('warning', resolve));
+      expect(store.retrieve(hash)).toBe('intact, verified bytes');
+      const warning = await warned;
+      expect(warning.name).toBe('SmeltCounterWriteFailure');
+      expect(warning.message).toContain('retrievals.log');
+      expect(warning.message).toContain('UNDER-report');
+
+      // The count is honestly lost, not faked: stats still read the journal.
+      expect(store.stats().retrieveCalls).toBe(before.retrieveCalls);
+
+      // And a miss still reports the store's own error, never the journal's EACCES.
+      const missWarned = new Promise<Error>((resolve) => process.once('warning', resolve));
+      expect(() => store.retrieve('deadbeefdeadbeef')).toThrow(UnknownHashError);
+      expect((await missWarned).name).toBe('SmeltCounterWriteFailure');
+    } finally {
+      chmodSync(join(root, 'retrievals.log'), 0o644);
+    }
+
+    // Journal writable again: counting resumes from where the journal left off.
+    store.retrieve(hash);
+    expect(store.stats().retrieveCalls).toBe(before.retrieveCalls + 1);
+  });
 });

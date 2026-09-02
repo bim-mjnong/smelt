@@ -6,6 +6,7 @@ import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CliUsageError } from '../src/errors.ts';
+import { STRUCTURAL_LANGUAGES } from '../src/plan/structural.ts';
 import { CONFIG_FILE_NAME, findConfigFile } from '../src/cli/config.ts';
 import type { SmeltConfig } from '../src/cli/config.ts';
 import { MEASURE_STUB_FILE, RERANK_STUB_FILE, runInit } from '../src/cli/init.ts';
@@ -68,6 +69,16 @@ describe('a fresh run', () => {
     expect(existsSync(join(dir, MEASURE_STUB_FILE))).toBe(false);
     expect(existsSync(join(dir, RERANK_STUB_FILE))).toBe(false);
     expect(output).toContain('wrote smelt.config.json');
+  });
+
+  it('describes the structural strategy with the real language list, derived, never hand-counted', async () => {
+    // The wizard copy once said "parses typescript and tsx" — stale by thirteen
+    // languages. Deriving both the count and the list from STRUCTURAL_LANGUAGES
+    // means this sentence cannot rot when the next grammar lands.
+    const { output } = await wizard(MINIMAL_ANSWERS);
+    expect(output).toContain(`parses ${String(STRUCTURAL_LANGUAGES.length)} languages`);
+    expect(output).toContain(STRUCTURAL_LANGUAGES.join(', '));
+    expect(output).not.toContain('typescript and tsx');
   });
 
   it('generates both stubs when asked, next to the config', async () => {

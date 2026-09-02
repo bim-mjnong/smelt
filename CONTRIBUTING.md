@@ -45,6 +45,13 @@ Two things in this repository are generated, and neither is ever hand-edited:
   editor's format-on-save, from any directory) is a no-op on it and can never make the
   committed copy disagree with the generator.
 
+One more file is a **committed copy, kept in sync by a test** rather than generated:
+`packages/core/LICENSE` is a byte-for-byte copy of the root `LICENSE`. npm only
+auto-includes a licence file that lives inside the package directory, so without the
+copy the published tarball ships no licence at all. Edit the root file, re-copy it
+(`cp LICENSE packages/core/LICENSE`), and `test/manifest.test.ts` fails if the two ever
+diverge.
+
 ### Trying the CLI
 
 ```sh

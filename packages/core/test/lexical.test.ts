@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import { applyPlan, markerForLanguage } from '../src/apply.ts';
 import { LEXICAL_PLANNER_ID, planLexical } from '../src/plan/lexical.ts';
+import { MemoryElisionStore } from '../src/store.ts';
 
 const lines = (count: number, prefix = 'noise'): string =>
   Array.from({ length: count }, (_, i) => `${prefix} ${String(i)} ....................`).join('\n');
@@ -91,6 +93,55 @@ describe('the lexical planner', () => {
       focus: ['', ''],
     });
     expect(withEmpty.elisions[0]!.reason.rule).toBe('head-tail');
+  });
+
+  it('measures marker cost from the real rendered marker, so no elision can grow the output', () => {
+    // Real markers run ~103–108 bytes (leader included); the old fixed estimate said
+    // 64. Every planned elision must remove strictly more bytes than the exact marker
+    // it earns — in a language with a comment leader too, where the marker is widest.
+    for (const language of ['unknown', 'python'] as const) {
+      const build = markerForLanguage(language);
+      const text = `${lines(40)}\nthe NEEDLE is here\n${lines(40, 'after')}`;
+      const plan = planLexical({ text, language, budgetBytes: 300, focus: ['needle'] });
+      expect(plan.elisions.length).toBeGreaterThan(0);
+      for (const elision of plan.elisions) {
+        const cut = elision.range.end - elision.range.start;
+        const marker = build({
+          hash: '0123456789abcdef',
+          bytes: cut,
+          rule: elision.reason.rule,
+          explanation: elision.reason.explanation,
+        });
+        expect(
+          Buffer.byteLength(marker, 'utf8'),
+          `a ${language} elision's marker costs as much as it removes`,
+        ).toBeLessThan(cut);
+      }
+    }
+  });
+
+  it('predicts output bytes from real markers, so a chosen rung actually fits its budget', () => {
+    // Derive the regression budget instead of hardcoding it: apply the widest-rung
+    // plan, then re-plan with a budget one byte under that output. The old 64-byte
+    // estimate under-counted every marker, judged the widest rung as fitting, and
+    // returned a plan that came back OVER the budget once real markers landed. An
+    // honest predictor steps down a rung and fits.
+    const text = `${lines(120)}\nthe NEEDLE is here\n${lines(120, 'after')}`;
+    const input = { text, language: 'unknown' as const, focus: ['needle'] };
+
+    const widest = planLexical({ ...input, budgetBytes: 1_000_000 });
+    expect(widest.elisions.length).toBeGreaterThan(0);
+    const widestOut = applyPlan(text, widest, new MemoryElisionStore()).outputBytes;
+
+    const budgetBytes = widestOut - 1;
+    const squeezed = planLexical({ ...input, budgetBytes });
+    const squeezedOut = applyPlan(text, squeezed, new MemoryElisionStore()).outputBytes;
+    expect(
+      squeezedOut,
+      'the planner chose a rung whose real output overruns the budget it claimed to fit',
+    ).toBeLessThanOrEqual(budgetBytes);
+    // And the squeeze still never cut the match itself.
+    expect(applied(text, squeezed.elisions)).toContain('the NEEDLE is here');
   });
 });
 

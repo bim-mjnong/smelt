@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createSmelter } from '../src/index.ts';
+import { STRUCTURAL_LANGUAGES } from '../src/plan/structural.ts';
 import {
   CLI_JSON_FORMAT,
   cliUsage,
@@ -354,6 +355,15 @@ describe('--help and --version', () => {
     expect(stdout).toBe(cliUsage());
     expect(stdout).toMatch(/--budget <bytes>\s+Required/);
     expect(stdout).toMatch(/EXIT CODES/);
+  });
+
+  it('derives the --strategy language list from STRUCTURAL_LANGUAGES, never a stale hand count', async () => {
+    // The help once hardcoded "typescript, tsx, rust, python and go" and claimed the
+    // rest were refused — false from the moment ten more grammars shipped. Deriving
+    // from the one source of truth means the claim cannot rot again.
+    const { stdout } = await run(['--help']);
+    expect(stdout).toContain(STRUCTURAL_LANGUAGES.join(', '));
+    expect(stdout).not.toMatch(/rust, python and go/);
   });
 
   it('prints the version it was handed, so it cannot drift from the manifest', async () => {

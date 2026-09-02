@@ -1,4 +1,4 @@
-import { OverlappingElisionError, RangeOutOfBoundsError } from './errors.ts';
+import { OverlappingElisionError, RangeOutOfBoundsError, UnknownHashError } from './errors.ts';
 import type {
   AppliedElision,
   ByteRange,
@@ -230,6 +230,14 @@ export function applyPlan(
  * expressed as an executable equation, and `test/guards/reversibility.test.ts` asserts
  * it on every input the suite knows about.
  *
+ * Reads through `peek`, **not** `retrieve`: `retrieveCalls` and the expansion rate
+ * exist to count *the model asking for hidden material back* — the honest signal this
+ * whole project sells. A caller reassembling the original (to diff it, to verify a
+ * round trip, to write it to disk) is not that, and counting it would inflate the one
+ * number that must never flatter. The guard in
+ * `test/guards/expansion-counter.test.ts` pins this: reconstruction leaves every
+ * counter exactly where it was.
+ *
  * @throws {UnknownHashError} if the store no longer holds an elision's bytes.
  */
 export function reconstruct(result: SmeltResult, store: ElisionStore): string {
@@ -240,8 +248,10 @@ export function reconstruct(result: SmeltResult, store: ElisionStore): string {
 
   for (const elision of ordered) {
     assertInBounds(elision.outputRange, output.length);
+    const content = store.peek(elision.hash);
+    if (content === undefined) throw new UnknownHashError(elision.hash);
     pieces.push(output.subarray(cursor, elision.outputRange.start));
-    pieces.push(Buffer.from(store.retrieve(elision.hash), 'utf8'));
+    pieces.push(Buffer.from(content, 'utf8'));
     cursor = elision.outputRange.end;
   }
   pieces.push(output.subarray(cursor));

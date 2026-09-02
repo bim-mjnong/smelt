@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 
 import { SUPPORTED_LANGUAGES } from '../detect.ts';
 import { CliUsageError } from '../errors.ts';
+import { STRUCTURAL_LANGUAGES } from '../plan/structural.ts';
 import type { DetectedLanguage } from '../types.ts';
 
 /** The command people type. Independent of the package name. */
@@ -186,9 +187,9 @@ OPTIONS
                        their context survive; the runs between them collapse.
   --language <id>      Override detection. One of: ${[...SUPPORTED_LANGUAGES, 'unknown'].join(', ')}.
   --strategy <id>      lexical or structural. Defaults to lexical, unless
-                       smelt.config.json says otherwise. structural parses typescript,
-                       tsx, rust, python and go; any other language is refused, never
-                       approximated.
+                       smelt.config.json says otherwise. structural parses
+                       ${STRUCTURAL_LANGUAGES.join(', ')};
+                       any other language is refused, never approximated.
   --json               Print a JSON envelope on stdout instead of the smelted text:
                        { format, result, elided }. \`result\` is the SmeltResult
                        verbatim; \`elided\` carries the bytes, so the envelope can be

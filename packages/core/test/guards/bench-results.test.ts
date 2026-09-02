@@ -3,7 +3,9 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { guardRoot, packageRoot, stripStringsAndComments } from './_source.ts';
+import { FORBIDDEN_NODE_MODULES, FORBIDDEN_PACKAGES } from '@guard/net/policy';
+
+import { guardRoot, importSpecifiers, packageRoot, stripStringsAndComments } from './_source.ts';
 
 /**
  * BENCH-RESULTS GUARD — Law 4, for the one place numbers are allowed to exist.
@@ -123,7 +125,8 @@ describe('bench honesty guard (Law 4 — the harness that states the numbers)', 
 
     for (const file of benchFiles) {
       if (ALLOWED.has(file)) continue;
-      const source = stripStringsAndComments(artifact(`bench/${file}`));
+      const raw = artifact(`bench/${file}`);
+      const source = stripStringsAndComments(raw);
       for (const shape of NETWORK_SHAPES) {
         expect(
           shape.test(source),
@@ -131,6 +134,20 @@ describe('bench honesty guard (Law 4 — the harness that states the numbers)', 
             'so that a tier-1 run is offline by construction',
         ).toBe(false);
       }
+      // The shape scan above runs on STRIPPED source, so a transport imported
+      // statically — `import 'node:https'` — is invisible to it: the specifier lives
+      // inside a string literal, which stripping blanks out. Scan the import/require
+      // specifiers of the RAW source too, against the same forbidden lists the
+      // src-tree walk uses.
+      const banned = importSpecifiers(raw).filter(
+        (specifier) =>
+          FORBIDDEN_NODE_MODULES.includes(specifier) || FORBIDDEN_PACKAGES.includes(specifier),
+      );
+      expect(
+        banned,
+        `bench/${file} imports a network transport — network access belongs only in ` +
+          'tier2.mjs/tier3.mjs, so that a tier-1 run is offline by construction',
+      ).toEqual([]);
     }
   });
 

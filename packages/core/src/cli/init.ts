@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
 import { CliUsageError } from '../errors.ts';
+import { STRUCTURAL_LANGUAGES } from '../plan/structural.ts';
 
 import { CLI_NAME } from './args.ts';
 import { CONFIG_FILE_NAME, CONFIG_VERSION, findConfigFile, parseConfig } from './config.ts';
@@ -274,7 +275,8 @@ async function stepStrategy(io: InitIo, ask: Asker, choices: WizardChoices): Pro
   io.output(
     `\nDefault planner strategy — used when a run omits --strategy:\n` +
       `  1. lexical     — line windows around your focus terms; works on any text\n` +
-      `  2. structural  — parses typescript and tsx with a bundled grammar and ` +
+      `  2. structural  — parses ${String(STRUCTURAL_LANGUAGES.length)} languages with ` +
+      `bundled grammars (${STRUCTURAL_LANGUAGES.join(', ')}) and ` +
       `collapses siblings by name; refuses other languages rather than approximating\n`,
   );
   for (;;) {
