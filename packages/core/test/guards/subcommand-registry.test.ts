@@ -189,6 +189,15 @@ describe('every verb refuses every flag it does not own — the whole cross prod
     expect(() => parseSmeltArgs(['--budget', '4000', '--harness', 'codex'])).toThrow(
       /--harness belongs to `smelt hooks`/,
     );
+    // And from a *named* verb, where the clause is not the refusing verb's own
+    // complement: `hooks` lacks --budget/--focus/--json too, but map does not own them
+    // alone, so the clause is map's exclusive pair and nothing else.
+    expect(() => parseSmeltArgs(['hooks', 'install', '--ignore', 'vendor'])).toThrow(
+      /--ignore and --cache belong to `smelt map`/,
+    );
+    expect(() => parseSmeltArgs(['stats', '--cache', '.smelt-tags'])).toThrow(
+      /--ignore and --cache belong to `smelt map`/,
+    );
     // A flag several verbs share has no single home, so none is invented.
     expect(ownersOf('json').length).toBeGreaterThan(1);
     let message = '';
@@ -198,6 +207,30 @@ describe('every verb refuses every flag it does not own — the whole cross prod
       message = (error as Error).message;
     }
     expect(message).not.toMatch(/--json belongs to/);
+  });
+
+  /**
+   * The clause the refusal ends its middle sentence with is an *assertion of
+   * ownership*, so it must be true for every verb, not only the default one — a clause
+   * naming a flag two verbs share would talk a user out of an invocation that works
+   * (`smelt file.ts --budget 4000` after being told --budget is map's). Crossed over
+   * every pair, because the wrong formula reads correctly from the default verb and
+   * only goes false from the others.
+   */
+  it.each(foreign)('`smelt %s --%s` attributes no flag it would be wrong about', (verb, flag) => {
+    const argv = [...SHIPPED[verb], ...FLAG_ARGV[flag]];
+    let message = '';
+    try {
+      parseSmeltArgs(argv);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    for (const [, clause] of message.matchAll(/((?:--[a-z]+(?:,| and)? )+)belongs? to /g)) {
+      for (const named of (clause ?? '').matchAll(/--([a-z]+)/g)) {
+        const name = named[1] as VerbFlag;
+        expect(ownersOf(name).length, `${argv.join(' ')}: --${name} is not one verb's`).toBe(1);
+      }
+    }
   });
 });
 
@@ -281,5 +314,12 @@ export const MUTATIONS: GuardMutation[] = [
     find: '  refuseForeignFlags(command, values);\n',
     replace: '',
     why: 'the one generated refusal removed from the parse — every verb now accepts every flag and silently ignores the ones it cannot act on, which is a setting the user believed was in force; the whole cross product must go red, not just one pair',
+  },
+  {
+    id: 'subcommand-redirect-claims-shared-flags',
+    file: 'cli/subcommands/registry.ts',
+    find: '      const elsewhere = owner.flags.filter((flag) => ownersOf(flag).length === 1);',
+    replace: '      const elsewhere = owner.flags.filter((flag) => ownersOf(flag).length >= 1);',
+    why: "the redirect clause widened from the owner's exclusively-owned flags to all of them — the refusal starts asserting that shared flags (--budget, --focus, --json) belong to one verb, contradicting the help's own `map only.` prefixes and talking a user out of an invocation that works, so the cross-product must catch a clause naming a flag with more than one owner",
   },
 ];

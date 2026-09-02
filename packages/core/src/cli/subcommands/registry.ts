@@ -145,7 +145,7 @@ export function ownersOf(flag: FlagName): readonly AnySubcommand[] {
  *
  *   1. **what this verb takes**, and what it got instead — the offending flag, named;
  *   2. **where the flag does belong**, when exactly one verb owns it, listed as that
- *      owner's flags this verb lacks (so `--ignore` here still reads "--ignore and
+ *      owner's *exclusively* owned flags (so `--ignore` here still reads "--ignore and
  *      --cache belong to `smelt map`", exactly as the hand-written message did);
  *   3. **why not here** — the verb's own `refusal` sentence, the half of the old
  *      messages worth keeping, and the only half a verb still writes.
@@ -165,11 +165,19 @@ export function refuseForeignFlags(command: AnySubcommand, values: FlagValues): 
       ? `${label(command)} takes no flags (got ${flagList(foreign)}).`
       : `${label(command)} takes only ${flagList(command.flags)} (got ${flagList(foreign)}).`;
 
-  throw new CliUsageError(`${CLI_NAME}: ${takes}${redirects(command, foreign)} ${command.refusal}`);
+  throw new CliUsageError(`${CLI_NAME}: ${takes}${redirects(foreign)} ${command.refusal}`);
 }
 
-/** ` --ignore and --cache belong to \`smelt map\`.` — one clause per single-owner verb. */
-function redirects(command: AnySubcommand, foreign: readonly VerbFlag[]): string {
+/**
+ * ` --ignore and --cache belong to \`smelt map\`.` — one clause per single-owner verb.
+ *
+ * A clause names only the flags its owner owns **alone**, never the ones it shares.
+ * `ownersOf(flag).length === 1` is the same test that decided the owner deserved a
+ * clause at all, applied to the whole clause: a shared flag (`--budget`, `--focus`,
+ * `--json`) has no single home, so naming it here would assert an ownership that the
+ * OPTIONS block — which prefixes `map only.` by the same rule — correctly denies.
+ */
+function redirects(foreign: readonly VerbFlag[]): string {
   const owners = SUBCOMMAND_LIST.filter((owner) =>
     foreign.some((flag) => {
       const claimants = ownersOf(flag);
@@ -178,7 +186,7 @@ function redirects(command: AnySubcommand, foreign: readonly VerbFlag[]): string
   );
   return owners
     .map((owner) => {
-      const elsewhere = owner.flags.filter((flag) => !command.flags.includes(flag));
+      const elsewhere = owner.flags.filter((flag) => ownersOf(flag).length === 1);
       const verb = elsewhere.length === 1 ? 'belongs' : 'belong';
       return ` ${flagList(elsewhere)} ${verb} to ${ownerLabel(owner)}.`;
     })
