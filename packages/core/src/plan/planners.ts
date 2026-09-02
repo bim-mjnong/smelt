@@ -1,0 +1,45 @@
+import type { Planner } from '../types.ts';
+
+import { LexicalPlanner } from './lexical.ts';
+import type { LexicalPlannerOptions } from './lexical.ts';
+import { StructuralPlanner } from './structural.ts';
+import type { StructuralPlannerOptions } from './structural.ts';
+
+/**
+ * The option bags a strategy factory may draw from — the same fields
+ * `SmelterConfig` carries, so the config object itself can be handed to a factory.
+ */
+export interface PlannerFactoryOptions {
+  readonly lexical?: LexicalPlannerOptions;
+  readonly structural?: StructuralPlannerOptions;
+}
+
+/**
+ * The one registry of planner strategies — string in, constructed {@link Planner} out.
+ *
+ * This object is the single place the strategy names live. `createSmelter` builds from
+ * it, `--strategy` and `smelt.config.json` validation accept exactly its keys, and the
+ * `--help` text renders its keys — so a strategy cannot exist in one of those faces and
+ * be missing from another. Before this registry the pair was restated in three places,
+ * which is how help text rots.
+ *
+ * `'structural'` parses every language named in {@link STRUCTURAL_LANGUAGES} with a
+ * bundled grammar and throws {@link GrammarUnavailableError} for anything else — never
+ * a silent lexical fallback. See {@link StructuralPlanner}.
+ */
+export const PLANNERS = {
+  lexical: (options: PlannerFactoryOptions): Planner => new LexicalPlanner(options.lexical ?? {}),
+  structural: (options: PlannerFactoryOptions): Planner =>
+    new StructuralPlanner(options.structural ?? {}),
+} as const satisfies Record<string, (options: PlannerFactoryOptions) => Planner>;
+
+/** Which planner a smelter uses, named by string. Exactly the keys of {@link PLANNERS}. */
+export type Strategy = keyof typeof PLANNERS;
+
+/** The registry's keys, in declaration order, for help text and error messages. */
+export const STRATEGIES = Object.keys(PLANNERS) as readonly Strategy[];
+
+/** The one membership test `--strategy` and config validation both use. */
+export function isStrategy(value: string): value is Strategy {
+  return Object.hasOwn(PLANNERS, value);
+}

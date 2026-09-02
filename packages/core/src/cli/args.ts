@@ -2,6 +2,8 @@ import { parseArgs } from 'node:util';
 
 import { SUPPORTED_LANGUAGES } from '../detect.ts';
 import { CliUsageError } from '../errors.ts';
+import { isStrategy, STRATEGIES } from '../plan/planners.ts';
+import type { Strategy } from '../plan/planners.ts';
 import { STRUCTURAL_LANGUAGES } from '../plan/structural.ts';
 import type { DetectedLanguage } from '../types.ts';
 
@@ -21,7 +23,7 @@ export interface SmeltInvocation {
   readonly focus: readonly string[];
   readonly language?: DetectedLanguage;
   /** `undefined` means the flag was not given — the config default may apply. */
-  readonly strategy?: 'lexical' | 'structural';
+  readonly strategy?: Strategy;
   readonly json: boolean;
 }
 
@@ -148,11 +150,12 @@ function language(raw: string): DetectedLanguage {
   return raw as DetectedLanguage;
 }
 
-function strategy(raw: string | undefined): 'lexical' | 'structural' | undefined {
+/** Membership in the {@link PLANNERS} registry is the whole validation. */
+function strategy(raw: string | undefined): Strategy | undefined {
   if (raw === undefined) return undefined;
-  if (raw !== 'lexical' && raw !== 'structural') {
+  if (!isStrategy(raw)) {
     throw new CliUsageError(
-      `${CLI_NAME}: unknown --strategy "${raw}". Known: lexical, structural.`,
+      `${CLI_NAME}: unknown --strategy "${raw}". Known: ${STRATEGIES.join(', ')}.`,
     );
   }
   return raw;
@@ -186,7 +189,7 @@ OPTIONS
   --focus <term>       What you were looking for. Repeatable. Matching regions and
                        their context survive; the runs between them collapse.
   --language <id>      Override detection. One of: ${[...SUPPORTED_LANGUAGES, 'unknown'].join(', ')}.
-  --strategy <id>      lexical or structural. Defaults to lexical, unless
+  --strategy <id>      ${STRATEGIES.join(' or ')}. Defaults to lexical, unless
                        smelt.config.json says otherwise. structural parses
                        ${STRUCTURAL_LANGUAGES.join(', ')};
                        any other language is refused, never approximated.
