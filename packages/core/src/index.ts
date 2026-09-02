@@ -103,13 +103,14 @@ export type { DirEntry, FileStat, RepoReader } from './repomap/reader.ts';
 export {
   CONFIG_FILE_NAME,
   CONFIG_VERSION,
+  configuredStore,
   findConfigFile,
   loadNearestConfig,
   parseConfig,
   renderConfig,
   resolveStorePath,
 } from './cli/config.ts';
-export type { LoadedConfig, SmeltConfig, SmeltConfigStore } from './cli/config.ts';
+export type { ConfiguredStore, LoadedConfig, SmeltConfig, SmeltConfigStore } from './cli/config.ts';
 export {
   MEASURE_STUB_FILE,
   measureStubSource,
@@ -134,6 +135,40 @@ export { CLI_MAP_JSON_FORMAT, formatMapReport, resolveMapRun } from './cli/run.t
 export type { CliInvocation, CliMapJsonEnvelope, MapInvocation } from './cli/run.ts';
 export type { MapReportInput } from './cli/report.ts';
 export type { ResolvedMapRun } from './cli/subcommands/map.ts';
+
+/**
+ * The operations seam — the four verbs and the laws their inputs must satisfy, below
+ * every front door. `@smeltjs/mcp` consumes these as an ordinary dependency, so the
+ * `smelt` CLI and the MCP tools run the same middle instead of two copies of it. See
+ * `src/ops/index.ts` for what belongs here and what stays in an adapter.
+ */
+export {
+  budgetFault,
+  budgetMalformed,
+  budgetRequired,
+  BUILT_IN_STRATEGY,
+  mapTree,
+  openStore,
+  readBlob,
+  readCounters,
+  readTree,
+  resolveStrategy,
+  retrieveBytes,
+  smeltBlob,
+} from './ops/index.ts';
+export type {
+  BudgetFault,
+  BudgetNaming,
+  MapTreeOp,
+  ReadCountersOp,
+  ResolvedStrategy,
+  RetrieveBytesOp,
+  Ruling,
+  SmeltBlobOp,
+  SmeltBlobOutcome,
+  StrategySource,
+  TreeNaming,
+} from './ops/index.ts';
 
 /**
  * Which planner a smelter uses, named by string. The names, their factories, and this
