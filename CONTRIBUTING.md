@@ -11,7 +11,7 @@ helpfully unless they know why they are there.
 ```sh
 git clone https://github.com/smeltjs/smelt.git && cd smelt
 pnpm install
-pnpm verify        # the whole gate: format, lint, typecheck, build, test, mutate
+pnpm verify        # the whole gate: format, lint, build, typecheck, test, mutate
 ```
 
 Node `^20.19 || >=22.12`, pnpm 10.15. No native compilation, no Docker, no services.
@@ -102,7 +102,9 @@ trailing newline, and one 20 kB line.
 
 Every guard ships with at least one **mutation**: a specific break in the source that the
 guard must catch, exported as `MUTATIONS` from the guard file itself — the break lives
-beside the assertions that must notice it. `pnpm mutate` copies `packages/core/src` to a
+beside the assertions that must notice it. `pnpm mutate` discovers guards in **every
+workspace package** with a `test/guards/` directory (`packages/core` and `packages/mcp`
+today), copies the owning package's `src` to a
 scratch tree, applies one mutation, points the guard at the copy via `SMELT_GUARD_SRC`,
 and asserts the guard goes **red**. A mutation the guard survives is reported as a hole
 in the _guard_.
@@ -112,25 +114,26 @@ $ pnpm mutate
 
 === pristine source: every guard must be green ===
 
-  PASS  test/guards/bench-results.test.ts
-  PASS  test/guards/cache-hygiene.test.ts
-  PASS  test/guards/expansion-counter.test.ts
-  PASS  test/guards/init-wizard.test.ts
-  PASS  test/guards/marker-format.test.ts
-  PASS  test/guards/no-network.test.ts
-  PASS  test/guards/persistent-store.test.ts
-  PASS  test/guards/planner-registry.test.ts
-  PASS  test/guards/repo-map.test.ts
-  PASS  test/guards/reversibility.test.ts
-  PASS  test/guards/structural.test.ts
-  PASS  test/guards/structural-totality.test.ts
-  PASS  test/guards/third-party.test.ts
+  PASS  core: test/guards/bench-results.test.ts
+  PASS  core: test/guards/cache-hygiene.test.ts
+  PASS  core: test/guards/expansion-counter.test.ts
+  PASS  core: test/guards/init-wizard.test.ts
+  PASS  core: test/guards/marker-format.test.ts
+  PASS  core: test/guards/no-network.test.ts
+  PASS  core: test/guards/persistent-store.test.ts
+  PASS  core: test/guards/planner-registry.test.ts
+  PASS  core: test/guards/repo-map.test.ts
+  PASS  core: test/guards/reversibility.test.ts
+  PASS  core: test/guards/structural.test.ts
+  PASS  core: test/guards/structural-totality.test.ts
+  PASS  core: test/guards/third-party.test.ts
+  PASS  mcp: test/guards/no-network.test.ts
 
 === mutations: every guard must go red ===
 
   CAUGHT  law1-node-https-import
            mutation: a network transport imported directly into the elision path
-           guard:    test/guards/no-network.test.ts
+           guard:    core: test/guards/no-network.test.ts
            red on:   AssertionError: Law 1 violation: smelt v1 makes zero network calls: expected [ Array(1) ] to deeply equal []
   …
 ```
@@ -142,9 +145,9 @@ here: the runner verifies any count the docs do state and fails on drift.
 **Adding a guard? The convention is three steps:**
 
 1. Import the library through `@guard/…` rather than a relative path, so the alias in
-   `packages/core/vitest.config.ts` can be redirected at a broken copy. If your guard
-   reads a _committed artefact_ rather than source, read it through `guardRoot()` from
-   `test/guards/_source.ts` so it can be redirected too.
+   the owning package's `vitest.config.ts` can be redirected at a broken copy. If your
+   guard reads a _committed artefact_ rather than source, read it through `guardRoot()`
+   from `test/guards/_source.ts` so it can be redirected too.
 2. Export the mutations **from the guard file itself**: `export const MUTATIONS:
 GuardMutation[] = […]` (the type lives in `test/guards/_mutations.ts`), each entry
    naming the exact source string to change and _why that break matters_ — beside the
