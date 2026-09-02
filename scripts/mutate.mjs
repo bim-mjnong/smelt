@@ -80,9 +80,31 @@ function die(message) {
 /**
  * Every guard file, discovered rather than listed — a new guard joins the pristine
  * check and the mutation run by existing. Files starting with `_` are shared
- * helpers (`_source.ts`, `_mutations.ts`), not guards.
+ * helpers (`_source.ts`, `_mutations.ts`), not guards — so a helper must never be a
+ * `.test.ts` file: vitest would execute it while this discovery skipped its
+ * mutations, a silent drop. The same goes for subdirectories: vitest's include is
+ * `test/**\/*.test.ts` (recursive), this discovery is one level deep on purpose, and
+ * the gap between the two must be a hard error rather than an invisible hole.
  */
-const GUARDS = readdirSync(guardsDir)
+const guardEntries = readdirSync(guardsDir, { withFileTypes: true });
+for (const entry of guardEntries) {
+  if (entry.isDirectory()) {
+    die(
+      `test/guards/${entry.name}/ is a subdirectory — vitest would run tests inside ` +
+        `it, but mutation discovery is deliberately flat, so its MUTATIONS would ` +
+        `silently never execute. Keep guards directly under test/guards/.`,
+    );
+  }
+  if (entry.name.startsWith('_') && entry.name.endsWith('.test.ts')) {
+    die(
+      `test/guards/${entry.name} is both underscore-prefixed (a helper, skipped by ` +
+        `discovery) and a .test.ts file (executed by vitest) — its MUTATIONS would ` +
+        `silently never run. Rename the helper without .test.ts, or drop the prefix.`,
+    );
+  }
+}
+const GUARDS = guardEntries
+  .map((entry) => entry.name)
   .filter((entry) => entry.endsWith('.test.ts') && !entry.startsWith('_'))
   .toSorted()
   .map((entry) => `test/guards/${entry}`);
