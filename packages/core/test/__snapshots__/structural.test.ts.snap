@@ -208,21 +208,21 @@ exports[`the structural planner > plans functions.kt (snapshot) 1`] = `
   "elisions": [
     {
       "range": {
-        "end": 193,
+        "end": 121,
         "start": 0,
       },
       "reason": {
-        "explanation": "collapsed 3 sibling nodes (1 package header, 1 import list, 1 function)",
+        "explanation": "collapsed 2 sibling nodes (1 package header, 1 import list)",
         "rule": "sibling-collapse",
       },
     },
     {
       "range": {
-        "end": 567,
-        "start": 319,
+        "end": 633,
+        "start": 247,
       },
       "reason": {
-        "explanation": "collapsed 2 sibling functions",
+        "explanation": "collapsed 3 sibling functions",
         "rule": "sibling-collapse",
       },
     },
@@ -266,8 +266,8 @@ exports[`the structural planner > plans functions.py (snapshot) 1`] = `
   "elisions": [
     {
       "range": {
-        "end": 449,
-        "start": 0,
+        "end": 472,
+        "start": 23,
       },
       "reason": {
         "explanation": "collapsed 5 sibling nodes (1 statement, 1 import statement, 2 functions, 1 class)",
@@ -276,8 +276,8 @@ exports[`the structural planner > plans functions.py (snapshot) 1`] = `
     },
     {
       "range": {
-        "end": 910,
-        "start": 709,
+        "end": 933,
+        "start": 732,
       },
       "reason": {
         "explanation": "collapsed 2 sibling functions",

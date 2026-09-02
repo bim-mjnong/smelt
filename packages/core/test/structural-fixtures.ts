@@ -243,13 +243,15 @@ export const PYTHON_DOCSTRING = `    """The function this file is really about.
     """`;
 
 /**
- * Python: statements, a decorated definition and a class above the target, two plain
- * functions below — so one collapse is the pure `collapsed 2 sibling functions` form
- * and another has mixed kinds to name. The survivor of this fixture must *reparse* as
- * Python; the fixture itself parses with zero ERROR nodes, and the guard asserts the
- * survivor introduces none.
+ * Python: a shebang (pinned — it parses as a plain comment, but it decides which
+ * interpreter runs the file), statements, a decorated definition and a class above the
+ * target, two plain functions below — so one collapse is the pure `collapsed 2 sibling
+ * functions` form and another has mixed kinds to name. The survivor of this fixture
+ * must *reparse* as Python; the fixture itself parses with zero ERROR nodes, and the
+ * guard asserts the survivor introduces none.
  */
-export const FUNCTIONS_PY = `"""Fixture module for the python structural tests."""
+export const FUNCTIONS_PY = `#!/usr/bin/env python3
+"""Fixture module for the python structural tests."""
 
 import json
 
@@ -585,19 +587,23 @@ function log_line(string $line): void {
 export const KOTLIN_DOC_COMMENT = `/** The function this file is really about. */`;
 
 /**
- * Kotlin: package header and import list above — kept apart from the first KDoc by a
- * blank line and a doc'd function, because tree-sitter-kotlin extends the import_list
- * node over a comment that directly follows it — then KDoc'd functions as siblings.
+ * Kotlin: package header and import list, then the KDoc'd target *directly after the
+ * imports* — the regression shape for the import_list bug: tree-sitter-kotlin extends
+ * the import_list node over a doc comment that follows it, so without the planner's
+ * trailing-comment split the target's KDoc would be collapsed with the imports. Three
+ * KDoc'd functions below give the pure same-kind collapse.
  */
 export const FUNCTIONS_KT = `package fixture.example
 
 import kotlin.collections.List
-
-/** Splits a raw config string into parts. A boring, collapsible sibling. */
-fun parseConfig(raw: String): List<String> = raw.split(",")
+import kotlin.text.StringBuilder
+import kotlin.sequences.Sequence
 
 ${KOTLIN_DOC_COMMENT}
 fun handleRequest(path: String): String = "handled:" + renderResponse(path)
+
+/** Splits a raw config string into parts. A boring, collapsible sibling. */
+fun parseConfig(raw: String): List<String> = raw.split(",")
 
 /** Renders one response body. A collapsible sibling below the target. */
 fun renderResponse(path: String): String = "{" + path + "}"
@@ -669,6 +675,127 @@ log_line() {
 }
 
 handle_request "$@"
+`;
+
+/* -------------------------------------------------------------------------- *
+ * Pin and survivor fixtures beyond the per-language canon: shebangs in the
+ * languages whose grammars give them their own node kind, c/c++'s
+ * `#pragma once`, ruby's split-heredoc shape, and php's mixed-HTML mode.
+ * -------------------------------------------------------------------------- */
+
+/** TypeScript with a shebang: `hash_bang_line` must pin, never collapse. */
+export const SHEBANG_TS = `#!/usr/bin/env -S npx tsx
+
+/** Loads the raw config from disk. A boring, collapsible sibling with padding. */
+function loadConfig(path: string): string {
+  return path;
+}
+
+/** The declaration the focus keeps. */
+export function runTarget(flag: string): string {
+  return flag;
+}
+`;
+
+/** Kotlin with a shebang: `shebang_line` must pin, never collapse. */
+export const SHEBANG_KT = `#!/usr/bin/env kotlin
+
+/** Splits a raw config string into parts. A boring, collapsible sibling. */
+fun parseConfig(raw: String): List<String> = raw.split(",")
+
+/** The declaration the focus keeps. */
+fun runTarget(flag: String): String = flag
+`;
+
+/** Swift with a shebang: `shebang_line` must pin, never collapse. */
+export const SHEBANG_SWIFT = `#!/usr/bin/env swift
+
+/// Splits a raw config string into parts. A boring, collapsible sibling.
+func parseConfig(_ raw: String) -> [String] {
+    return raw.components(separatedBy: ",")
+}
+
+/// The declaration the focus keeps.
+func runTarget(_ flag: String) -> String {
+    return flag
+}
+`;
+
+/**
+ * C/C++ preprocessor shapes: `#pragma once` parses as a preproc_call — it must pin
+ * (collapsing it changes header inclusion semantics), and the `#ifdef … #endif`
+ * region must be labelled a preprocessor conditional, never a "declaration" the
+ * parse tree does not contain.
+ */
+export const PRAGMA_C = `#pragma once
+
+#ifdef FIXTURE_TRACE
+static int trace_level = 1;
+#endif
+
+/* Copies one raw config line into place. A boring, collapsible sibling. */
+static int parse_config(const char *raw) {
+  return raw[0];
+}
+
+/* The declaration the focus keeps. */
+int run_target(const char *flag) {
+  return flag[0];
+}
+`;
+
+/**
+ * Ruby's split-heredoc shape: tree-sitter-ruby emits the heredoc body as a top-level
+ * *sibling* of the statement holding its opener. Opener and body must travel as one
+ * unit — a collapse keeping the opener while cutting the body leaves an unterminated
+ * heredoc that swallows every kept declaration after it, and the reparse cannot even
+ * see it (no ERROR node for a heredoc left open at EOF).
+ */
+export const RUBY_HEREDOC = `# frozen_string_literal: true
+
+QUERY_FOR_ACTIVE_USERS = <<~SQL
+  select id, name, last_seen_at from users
+  where active and last_seen_at > now() - interval '30 days'
+  order by last_seen_at desc
+SQL
+
+# The method this file is really about.
+def handle_request(path)
+  "handled:" + path
+end
+
+# Renders one response. A collapsible sibling below the target.
+def render_response(path)
+  path
+end
+
+# Writes one line to stderr. The most boring sibling of all.
+def log_line(line)
+  warn line
+end
+`;
+
+/**
+ * PHP in mixed-HTML mode: raw markup between `?>` and `<?php` parses as `text` and
+ * `text_interpolation` nodes. The marker must label them honestly — an html section
+ * is not a "declaration" — and a collapse across them must leave a survivor that
+ * still parses.
+ */
+export const PHP_MIXED_HTML = `<html><body>
+<?php
+/** Renders the page header. A boring, collapsible sibling. */
+function render_header(): string {
+    return '<h1>fixture</h1>';
+}
+?>
+<p>Static filler markup between the php islands, long enough to be worth cutting.</p>
+<?php
+/** The function this file is really about. */
+function render_target(): string {
+    return 'target';
+}
+?>
+</body></html>
 `;
 
 /**

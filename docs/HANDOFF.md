@@ -174,7 +174,7 @@ a failed grammar load throws `GrammarUnavailableError`, because output labelled
 | `packages/core/test/guards/persistent-store.test.ts`  | Law 3 across a process boundary. A damaged blob is refused as `StoreCorruptionError`, never returned; the retrieval counters survive a restart; "we hold damaged bytes" stays distinct from "never existed".                                      |
 | `packages/core/test/guards/cache-hygiene.test.ts`     | Slice 6's promise: cache-prefix hygiene detects and warns, never rewrites — inputs stay unmutated, no export returns a "fixed" prompt, and no cache-hit-rate figure exists anywhere in `src`.                                                     |
 | `packages/core/test/guards/_source.ts`                | Shared source-walking helpers: `guardSrcRoot()`, `guardRoot()`, and the string/comment stripper that stops `net/policy.ts` reporting its own word list.                                                                                           |
-| `scripts/mutate.mjs`                                  | **The meta-guard.** Forty-four mutations across the twelve guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                             |
+| `scripts/mutate.mjs`                                  | **The meta-guard.** Fifty-two mutations across the twelve guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                              |
 | `scripts/bundle-grammars.mjs`                         | Copies the grammars `WASM_BY_LANGUAGE` names into the package, so they ship. Reads the built map rather than keeping a second list.                                                                                                               |
 | `scripts/generate-third-party.mjs`                    | Generates `THIRD-PARTY.md`. The grammar ↔ provenance mapping is a partition: an unattributed grammar throws.                                                                                                                                      |
 | `scripts/check-fresh-clone.sh`                        | Installs and verifies from `git archive` output — tracked files only.                                                                                                                                                                             |
@@ -312,7 +312,10 @@ local. So for Python the marker lands wrapped in the language's line-comment lea
 (`# <<smelt/v1: … >>`, `markerForLanguage` in `src/apply.ts`). This does not move the
 frozen wire surface: the `<<smelt/v1: … >>` core is byte-identical and still versioned
 in band, and the leader is part of the substituted marker text, so `outputRange` covers
-it and reconstruction stays byte-exact. Brace-delimited languages keep the bare marker.
+it and reconstruction stays byte-exact. (This slice originally let brace-delimited
+languages keep the bare marker, on the claim that braces keep a parse error local; the
+slice-4b review measured that claim and found it false in every grammar — see 4b below.
+Every structural language now lands its marker behind its own line-comment leader.)
 
 Three follow-up decisions, found in review and each guarded by a mutation:
 
@@ -373,6 +376,43 @@ The decisions that were not just table entries:
   `FIXTURE_BY_LANGUAGE` — claiming a language without tests goes red, and a mutation
   proves it.
 
+Review of this slice found eight classes of hole, each now fixed and guarded by a
+mutation:
+
+- **Every language gets a line-comment marker leader.** The bare-marker rationale —
+  "brace-delimited languages keep their structure around an unparsable line" — was
+  measured and is false: reparsing every language's fixture survivor with its own
+  bundled grammar showed ERROR nodes spanning the kept declarations (php also reads
+  the marker's own `<<` as an operator and re-types the kept function into an
+  expression operand). `MARKER_LINE_COMMENT_LEADERS` now names every structural
+  language (`# ` or `// `), and the survivor-reparse guard runs for all fifteen
+  fixtures. Only `'unknown'` — lexical text with no syntax to break — keeps the bare
+  marker. Same wire surface as before: the leader wraps the frozen
+  `<<smelt/v1: … >>` core.
+- **The pin set was incomplete.** Python's shebang (a plain comment node),
+  typescript/tsx's `hash_bang_line`, kotlin/swift's `shebang_line`, and c/c++'s
+  `#pragma once` (a `preproc_call`, pinned by a per-type text pattern) are now
+  pinned like the rest — each collapse would have silently changed what the survivor
+  _is_.
+- **A ruby heredoc travels as one unit.** tree-sitter-ruby emits `heredoc_body` as a
+  top-level _sibling_ of the statement holding the opener, so a focus matching the
+  opener could keep it while the body collapsed — an unterminated heredoc that
+  swallows every kept declaration after it, and tree-sitter reports **no ERROR node**
+  for it at EOF, only a zero-width `heredoc_end`. The body now extends the preceding
+  unit (`ridesBackwardTypes`), and the survivor-reparse checker also flags zero-width
+  tokens, so this whole failure class is visible to the guard.
+- **Kotlin's import_list no longer swallows the next KDoc.** tree-sitter-kotlin
+  extends the import_list node over a doc comment that directly follows it — the doc
+  of the first documented declaration after the imports, which then collapsed with
+  the imports. The unit now ends at the import list's last non-comment token and the
+  trailing comment rides forward (`trailingCommentSplitTypes`); the kotlin fixture is
+  the regression shape, KDoc directly after the imports.
+- **Honest kinds for what the fallback used to call a "declaration".** C/C++
+  preprocessor nodes (`preproc_call`, `preproc_if`/`preproc_ifdef`) are labelled
+  `preprocessor directive`/`preprocessor conditional`; php's mixed-HTML `text` and
+  `text_interpolation` nodes are `html section`; ruby's top-level control-flow blocks
+  are `statement` — all counted as non-declarations by the mixed-heading rule.
+
 **Size, measured** (2026-09-02, `ls -l packages/core/grammars/` after `pnpm build`):
 the nine newly bundled grammars add **21,384,606 bytes ≈ 20.4 MiB** — cpp 4.4,
 kotlin 3.9, c_sharp 3.8, swift 3.0, ruby 2.0, bash 1.3, php 0.8, c 0.8, java 0.4 MiB
@@ -385,8 +425,8 @@ scoping this slice.
 
 - [x] Nine new grammars bundled: `WASM_BY_LANGUAGE`, `SUPPORTED_LANGUAGES` and the extension map extended; totality stays a compile-time property (`Record<LanguageId, …>` everywhere).
 - [x] `grammar-provenance.json` entries and regenerated `THIRD-PARTY.md` rows for every new grammar, licences verified against the npm registry and each repository's LICENSE file. The generator still throws on an unattributed grammar.
-- [x] Per-language node-kind sets with attached doc comments in each idiom, and language-appropriate pins (shebangs, `# frozen_string_literal:`, `<?php`).
-- [x] One fixture per language with a sibling collapse and a preserved doc comment; snapshot and determinism per fixture; survivor-reparse assertions for ruby and bash (the heredoc languages) alongside python's.
+- [x] Per-language node-kind sets with attached doc comments in each idiom, and language-appropriate pins (shebangs in every grammar shape, `# frozen_string_literal:`, `<?php`, `#pragma once`).
+- [x] One fixture per language with a sibling collapse and a preserved doc comment; snapshot and determinism per fixture; survivor-reparse assertions for **every** structural language, not just the heredoc ones.
 - [x] The totality guard, with a mutation proving it goes red when a language is claimed without tests.
 - [x] One tier-1 bench case through a new language (`java-classes`), so the harness proves the slice-4b path; full per-language corpus rows can follow.
 
@@ -480,7 +520,7 @@ pnpm mutate
 ```
 
 It copies `packages/core/src` to a scratch tree, applies one deliberate break, points the
-guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Forty-four
+guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Fifty-two
 mutations across twelve guards; a survivor is reported as a hole in the guard, not in the
 mutation.
 

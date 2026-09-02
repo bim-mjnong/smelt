@@ -20,6 +20,13 @@ const BY_EXTENSION: Readonly<Record<string, LanguageId>> = {
   go: 'go',
   java: 'java',
   c: 'c',
+  // `.h` maps to c — a deliberate call, pinned by detect.test.ts. A C++-only header
+  // parses under the C grammar into ERROR units, and the dominant real-world header
+  // shapes (an `#ifndef` guard, an `extern "C"` wrapper) parse as one top-level node,
+  // so the structural planner's top-level walk gets little granularity from a .h
+  // either way; c is the better default because plain-C headers are the common case
+  // an agent greps into. `.hh`/`.hxx`/`.cxx` are unmapped on purpose and fall to
+  // 'unknown' (the lexical planner), which is a first-class answer here.
   h: 'c',
   cc: 'cpp',
   cpp: 'cpp',

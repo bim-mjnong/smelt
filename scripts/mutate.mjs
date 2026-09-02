@@ -6,7 +6,7 @@
  * ships with at least one *mutation*: a specific, minimal break in the source that the
  * guard must catch. This script copies `packages/core/src` to a scratch directory,
  * applies one mutation, points the guard at the copy via `SMELT_GUARD_SRC`, and
- * asserts the guard goes **red**. Forty-four mutations across twelve guards; a mutation the
+ * asserts the guard goes **red**. Fifty-two mutations across twelve guards; a mutation the
  * guard survives is reported as a failure of the *guard*, not of the mutation.
  *
  * It also runs every guard against the pristine tree first, because a guard that fails
@@ -323,8 +323,10 @@ const MUTATIONS = [
     id: 'structural-bash-shebang-collapsed',
     guard: 'test/guards/structural.test.ts',
     file: 'plan/structural.ts',
-    find: '    pinnedCommentPattern: /^#!/,',
-    replace: '',
+    find:
+      "    // comment node, so it is pinned the way go's build tag is — never collapsed.\n" +
+      '    pinnedCommentPattern: /^#!/,',
+    replace: "    // comment node, so it is pinned the way go's build tag is — never collapsed.",
     why: "the bash shebang pin removed — `#!/usr/bin/env bash` collapses into the head run and the survivor silently changes which interpreter runs it, go build tags' exact failure in a new language",
   },
   {
@@ -382,6 +384,82 @@ const MUTATIONS = [
     find: '    pinnedCommentPattern: /^\\/\\/(go:build|\\s*\\+build)\\s/,',
     replace: '',
     why: 'the build-tag pin removed — `//go:build linux` collapses into the head run and the survivor silently loses its build constraint',
+  },
+  {
+    id: 'structural-python-shebang-collapsed',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find:
+      '    // interpreter runs the file — pinned the way the bash and ruby shebangs are.\n' +
+      '    pinnedCommentPattern: /^#!/,',
+    replace: '    // interpreter runs the file — pinned the way the bash and ruby shebangs are.',
+    why: 'the python shebang pin removed — `#!/usr/bin/env python3` parses as a plain comment, attaches to whatever follows, and collapses into the head run: the survivor silently changes which interpreter runs it',
+  },
+  {
+    id: 'structural-ts-shebang-collapsed',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find:
+      "  // law as javascript's: collapsing it changes which interpreter runs the file.\n" +
+      "  pinnedTypes: new Set(['hash_bang_line']),",
+    replace:
+      "  // law as javascript's: collapsing it changes which interpreter runs the file.\n" +
+      '  pinnedTypes: new Set(),',
+    why: 'the typescript/tsx hash_bang_line pin removed — `#!/usr/bin/env -S npx tsx` collapses into the head run, mislabelled, and the survivor silently changes which interpreter runs it',
+  },
+  {
+    id: 'structural-kotlin-shebang-collapsed',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find:
+      '    // `#!/usr/bin/env kotlin` parses as a shebang_line node; same law as the rest.\n' +
+      "    pinnedTypes: new Set(['shebang_line']),",
+    replace:
+      '    // `#!/usr/bin/env kotlin` parses as a shebang_line node; same law as the rest.\n' +
+      '    pinnedTypes: new Set(),',
+    why: 'the kotlin shebang_line pin removed — a `.kts` script loses the line that names its interpreter to a sibling collapse',
+  },
+  {
+    id: 'structural-pragma-once-collapsed',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find:
+      '    // the file *means*, so only it is pinned — the `//go:build` law again.\n' +
+      '    pinnedPatternsByType: { preproc_call: /^#\\s*pragma\\s+once\\b/ },',
+    replace: '    // the file *means*, so only it is pinned — the `//go:build` law again.',
+    why: "c's `#pragma once` pin removed — the pragma collapses into the head run and the survivor silently changes header inclusion semantics, and the fallback labels it a declaration the tree never contained",
+  },
+  {
+    id: 'structural-kotlin-import-doc-swallowed',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: "    trailingCommentSplitTypes: new Set(['import_list']),",
+    replace: '    trailingCommentSplitTypes: new Set(),',
+    why: 'the import_list trailing-comment split disabled — tree-sitter-kotlin extends import_list over the KDoc that follows it, so the first documented declaration after the imports loses its doc comment to the import collapse',
+  },
+  {
+    id: 'structural-ruby-heredoc-split-from-opener',
+    guard: 'test/guards/structural.test.ts',
+    file: 'plan/structural.ts',
+    find: "    ridesBackwardTypes: new Set(['heredoc_body']),",
+    replace: '    ridesBackwardTypes: new Set(),',
+    why: 'the heredoc body detached from its opener — a focus matching the opener keeps it while the body collapses, leaving an unterminated heredoc that swallows every kept declaration after it, with no ERROR node for an ERROR-only reparse to see',
+  },
+  {
+    id: 'kotlin-survivor-marker-not-a-comment',
+    guard: 'test/guards/structural.test.ts',
+    file: 'apply.ts',
+    find: "  kotlin: '// ',\n",
+    replace: '',
+    why: 'the kotlin marker landing as a bare `<<smelt/v1 …>>` line — the reparse scatters ERROR nodes across the kept declarations, exactly the non-local breakage the leader exists to prevent',
+  },
+  {
+    id: 'php-survivor-marker-not-a-comment',
+    guard: 'test/guards/structural.test.ts',
+    file: 'apply.ts',
+    find: "  php: '// ',\n",
+    replace: '',
+    why: "the php marker landing bare — php reads the marker's own `<<` as an operator and re-types the kept function into an expression operand, so the kept declaration is no longer a declaration in the survivor",
   },
   {
     id: 'apply-default-marker-ignores-language',

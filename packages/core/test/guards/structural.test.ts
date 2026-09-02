@@ -16,13 +16,17 @@ import {
   BUILD_TAG_GO,
   FIXTURE_BY_LANGUAGE,
   FUNCTIONS_PY,
-  FUNCTIONS_RB,
   FUNCTIONS_RS,
-  FUNCTIONS_SH,
   FUNCTIONS_TS,
   LONG_DOC_COMMENT,
   LONG_DOC_TS,
   MIXED_TSX,
+  PHP_MIXED_HTML,
+  PRAGMA_C,
+  RUBY_HEREDOC,
+  SHEBANG_KT,
+  SHEBANG_SWIFT,
+  SHEBANG_TS,
 } from '../structural-fixtures.ts';
 
 /**
@@ -262,16 +266,25 @@ describe('Slice 2 — the structural planner keeps its claims', () => {
  * TypeScript and TSX: the marker names kind and count from the parse tree, a kept
  * declaration keeps its signature and its doc comment in the language's own idiom
  * (`///`, javadoc, PHPDoc, KDoc, a docstring, `#`), and grammar failure is an
- * exception, never lexical output. One claim is survivor-shaped: **for python, ruby
- * and bash, the survivor still parses.** Python's significant indentation means a
- * parse error does not stay local; ruby and bash read the marker's own `<<` as a
- * heredoc operator, so a bare marker line would swallow every kept declaration after
- * it into a string. The marker therefore lands as a `#` comment in all three (see
- * `markerForLanguage`), and this guard *reparses the post-applyPlan survivor* and
- * asserts it introduces no ERROR or missing nodes that the original parse did not
- * have. Mutations for each of these live in `scripts/mutate.mjs`.
+ * exception, never lexical output. One claim is survivor-shaped and holds for **every
+ * structural language**: the survivor still parses. A bare `<<smelt…>>` marker line
+ * was verified to break the reparse non-locally in every grammar here — python's
+ * indentation lets the ERROR swallow neighbouring definitions, ruby and bash read the
+ * marker's own `<<` as a heredoc operator, php reads it as an operator and re-types
+ * the kept function into an expression operand, and the brace-delimited grammars
+ * scatter ERROR nodes across the kept declarations. The marker therefore lands
+ * behind the language's own line-comment leader (see `markerForLanguage`), and this
+ * guard *reparses the post-applyPlan survivor* of every language's fixture and
+ * asserts it introduces no ERROR, missing or zero-width nodes that the original
+ * parse did not have. Mutations for each of these live in `scripts/mutate.mjs`.
  */
-/** Every ERROR or missing node in an independent parse of `text`. */
+/**
+ * Every parse issue in an independent parse of `text`: ERROR nodes, missing nodes,
+ * and zero-width tokens. The last matters because tree-sitter-ruby recovers from an
+ * unterminated heredoc at EOF with a zero-width `heredoc_end` and **no ERROR node at
+ * all** — an ERROR-only walk is blind to the exact breakage the heredoc unit rule
+ * exists to prevent.
+ */
 async function parseIssues(
   text: string,
   language: PlanInput['language'],
@@ -285,6 +298,8 @@ async function parseIssues(
   const walk = (node: Node): void => {
     if (node.type === 'ERROR' || node.isMissing) {
       issues.push(`${node.type}@${String(node.startIndex)}`);
+    } else if (node.childCount === 0 && node.startIndex === node.endIndex && node.parent !== null) {
+      issues.push(`zero-width ${node.type}@${String(node.startIndex)}`);
     }
     for (const child of node.children) {
       if (child !== null) walk(child);
@@ -387,14 +402,31 @@ describe('Slices 4 and 4b — every claimed language keeps the same claims', () 
     }
   });
 
-  for (const [language, text, focus] of [
-    ['python', FUNCTIONS_PY, ['fetch_user']],
-    ['ruby', FUNCTIONS_RB, ['handle_request']],
-    ['bash', FUNCTIONS_SH, ['handle_request']],
-  ] as const) {
-    it(`the ${language} survivor still parses: the reparse introduces no ERROR nodes`, async () => {
-      // Self-check: the fixture parses cleanly, so "no new ERROR nodes" below means
-      // exactly "no ERROR nodes at all" — the comparison cannot be vacuous.
+  // The expected leader per language, written out literally rather than read from
+  // MARKER_LINE_COMMENT_LEADERS — a guard that derives its expectation from the code
+  // under test cannot notice that code losing an entry.
+  const EXPECTED_LEADERS: Readonly<Record<string, string>> = {
+    typescript: '// ',
+    tsx: '// ',
+    javascript: '// ',
+    rust: '// ',
+    python: '# ',
+    go: '// ',
+    java: '// ',
+    c: '// ',
+    cpp: '// ',
+    c_sharp: '// ',
+    ruby: '# ',
+    php: '// ',
+    kotlin: '// ',
+    swift: '// ',
+    bash: '# ',
+  };
+
+  for (const { language, text, focus } of CASES) {
+    it(`the ${language} survivor still parses: the reparse introduces no new issues`, async () => {
+      // Self-check: the fixture parses cleanly, so "no new issues" below means
+      // exactly "no issues at all" — the comparison cannot be vacuous.
       expect(await parseIssues(text, language), 'the fixture itself must parse cleanly').toEqual(
         [],
       );
@@ -410,12 +442,15 @@ describe('Slices 4 and 4b — every claimed language keeps the same claims', () 
         `the survivor no longer parses as ${language} — an elision broke the structure of what remains`,
       ).toEqual([]);
       // How that is achieved: every marker landed as a comment in the survivor's own
-      // syntax. In python a bare marker breaks the block structure; in ruby and bash
-      // the marker's own `<<` would open a heredoc and swallow what follows.
+      // syntax. A bare `<<smelt…>>` line was verified to break the reparse in every
+      // grammar here — indentation errors cascade in python, `<<` opens a heredoc in
+      // ruby and bash and is an operator in php, and the brace grammars scatter
+      // ERROR nodes across the kept declarations.
+      const leader = EXPECTED_LEADERS[language]!;
       for (const { marker } of result.elisions) {
         expect(
-          marker.startsWith('# <<smelt/'),
-          `marker is not a ${language} comment: ${marker}`,
+          marker.startsWith(`${leader}<<smelt/`),
+          `marker is not a ${language} line comment: ${marker}`,
         ).toBe(true);
       }
       expect(smelter.reconstruct(result)).toBe(text);
@@ -478,24 +513,63 @@ describe('Slices 4 and 4b — every claimed language keeps the same claims', () 
     expect(smelter.reconstruct(result)).toBe(BUILD_TAG_GO);
   });
 
-  it('pins file-governing prefixes in the 4b languages: shebangs, magic comments, `<?php`', async () => {
+  it('pins file-governing prefixes: shebangs, magic comments, `<?php`, `#pragma once`', async () => {
     // Same law as the go build tag: a run that swallows one of these changes what the
     // survivor *is* — which interpreter runs it, whether its strings are frozen,
-    // whether the file is php at all — with no elision the caller asked for.
+    // whether the file is php at all, what including the header means — with no
+    // elision the caller asked for. Shebangs are covered across every grammar shape
+    // they take: a plain comment (python, ruby, bash), a hash_bang_line (javascript,
+    // typescript, tsx) and a shebang_line (kotlin, swift).
+    const fixturePins = (
+      [
+        ['javascript', '#!/usr/bin/env node'],
+        ['python', '#!/usr/bin/env python3'],
+        ['ruby', '#!/usr/bin/env ruby'],
+        ['ruby', '# frozen_string_literal: true'],
+        ['php', '<?php'],
+        ['bash', '#!/usr/bin/env bash'],
+      ] as const
+    ).map(([language, pinned]) => ({
+      language,
+      pinned,
+      text: FIXTURE_BY_LANGUAGE[language].text,
+      focus: FIXTURE_BY_LANGUAGE[language].focus,
+    }));
     const PINS = [
-      { language: 'javascript', pinned: '#!/usr/bin/env node' },
-      { language: 'ruby', pinned: '#!/usr/bin/env ruby' },
-      { language: 'ruby', pinned: '# frozen_string_literal: true' },
-      { language: 'php', pinned: '<?php' },
-      { language: 'bash', pinned: '#!/usr/bin/env bash' },
+      ...fixturePins,
+      {
+        language: 'typescript',
+        pinned: '#!/usr/bin/env -S npx tsx',
+        text: SHEBANG_TS,
+        focus: ['runTarget'],
+      },
+      {
+        language: 'tsx',
+        pinned: '#!/usr/bin/env -S npx tsx',
+        text: SHEBANG_TS,
+        focus: ['runTarget'],
+      },
+      {
+        language: 'kotlin',
+        pinned: '#!/usr/bin/env kotlin',
+        text: SHEBANG_KT,
+        focus: ['runTarget'],
+      },
+      {
+        language: 'swift',
+        pinned: '#!/usr/bin/env swift',
+        text: SHEBANG_SWIFT,
+        focus: ['runTarget'],
+      },
+      { language: 'c', pinned: '#pragma once', text: PRAGMA_C, focus: ['run_target'] },
+      { language: 'cpp', pinned: '#pragma once', text: PRAGMA_C, focus: ['run_target'] },
     ] as const;
-    for (const { language, pinned } of PINS) {
-      const fixture = FIXTURE_BY_LANGUAGE[language];
+    for (const { language, pinned, text, focus } of PINS) {
       const smelter = createSmelter({ strategy: 'structural' });
-      const result = await smelter.smelt(fixture.text, {
+      const result = await smelter.smelt(text, {
         language,
         budgetBytes: 10,
-        focus: fixture.focus,
+        focus,
       });
       expect(
         result.elisions.length,
@@ -505,7 +579,87 @@ describe('Slices 4 and 4b — every claimed language keeps the same claims', () 
         result.text,
         `${language}: the pinned prefix ${JSON.stringify(pinned)} did not survive`,
       ).toContain(pinned);
-      expect(smelter.reconstruct(result)).toBe(fixture.text);
+      expect(smelter.reconstruct(result)).toBe(text);
     }
+  });
+
+  it('labels c/c++ preprocessor regions honestly, never as declarations', async () => {
+    // `#pragma once` is a preproc_call, `#ifdef … #endif` a preproc_ifdef — kinds the
+    // parse tree states plainly. A marker calling either a "declaration" reports a
+    // kind not read off the tree, which is the structural guard's own standard.
+    for (const language of ['c', 'cpp'] as const) {
+      const plan = await structuralPlan(PRAGMA_C, ['run_target'], language);
+      expect(
+        plan.elisions.length,
+        `${language}: no elisions planned — this labelling check is vacuous`,
+      ).toBeGreaterThan(0);
+      const explanations = plan.elisions.map((e) => e.reason.explanation).join(' | ');
+      expect(explanations, `${language}: ${explanations}`).toContain('1 preprocessor conditional');
+      expect(explanations).not.toContain('declaration');
+    }
+  });
+
+  it('keeps a ruby heredoc whole: the body can never be cut away from its opener', async () => {
+    // tree-sitter-ruby emits heredoc_body as a top-level sibling of the statement
+    // holding the `<<~SQL` opener. A plan that keeps the opener while collapsing the
+    // body leaves an unterminated heredoc — `ruby -c` refuses the survivor, and every
+    // kept declaration after it is swallowed into the string. Worse, tree-sitter
+    // reports no ERROR node for it, only a zero-width heredoc_end, which is exactly
+    // why parseIssues flags zero-width tokens.
+    expect(await parseIssues(RUBY_HEREDOC, 'ruby'), 'the fixture must parse cleanly').toEqual([]);
+
+    // Focus on the target method: the opener statement and the heredoc body must
+    // collapse together, as one unit of the same elision.
+    const smelter = createSmelter({ strategy: 'structural' });
+    const result = await smelter.smelt(RUBY_HEREDOC, {
+      language: 'ruby',
+      budgetBytes: 10,
+      focus: ['handle_request'],
+    });
+    expect(result.elisions.length, 'nothing elided — vacuous').toBeGreaterThan(0);
+    expect(
+      result.text.includes('QUERY_FOR_ACTIVE_USERS'),
+      'the opener survived — the heredoc did not collapse as one unit',
+    ).toBe(false);
+    expect(
+      result.text.includes('order by last_seen_at desc'),
+      'heredoc content survived without its opener',
+    ).toBe(false);
+    expect(await parseIssues(result.text, 'ruby'), 'the survivor no longer parses').toEqual([]);
+    expect(smelter.reconstruct(result)).toBe(RUBY_HEREDOC);
+
+    // Focus on the opener: the kept unit is the whole heredoc, terminator included.
+    const kept = await smelter.smelt(RUBY_HEREDOC, {
+      language: 'ruby',
+      budgetBytes: 10,
+      focus: ['QUERY_FOR_ACTIVE_USERS'],
+    });
+    expect(kept.elisions.length, 'nothing elided — vacuous').toBeGreaterThan(0);
+    expect(kept.text).toContain('QUERY_FOR_ACTIVE_USERS = <<~SQL');
+    expect(kept.text).toContain('order by last_seen_at desc\nSQL');
+    expect(await parseIssues(kept.text, 'ruby'), 'the survivor no longer parses').toEqual([]);
+  });
+
+  it('labels php mixed-HTML text honestly and keeps that survivor parsing', async () => {
+    // Raw markup between `?>` and `<?php` parses as text/text_interpolation nodes.
+    // Calling them "declarations" would defeat the mixed-heading honesty rule
+    // upstream, at the kind level — the marker must say what the tree says: html.
+    expect(await parseIssues(PHP_MIXED_HTML, 'php'), 'the fixture must parse cleanly').toEqual([]);
+    const plan = await structuralPlan(PHP_MIXED_HTML, ['render_target'], 'php');
+    expect(plan.elisions.length, 'no elisions planned — vacuous').toBeGreaterThan(0);
+    const explanations = plan.elisions.map((e) => e.reason.explanation).join(' | ');
+    expect(explanations, `php: ${explanations}`).toContain('html section');
+    expect(explanations).not.toContain('declaration');
+
+    const smelter = createSmelter({ strategy: 'structural' });
+    const result = await smelter.smelt(PHP_MIXED_HTML, {
+      language: 'php',
+      budgetBytes: 10,
+      focus: ['render_target'],
+    });
+    expect(result.elisions.length, 'nothing elided — vacuous').toBeGreaterThan(0);
+    expect(result.text).toContain('function render_target(): string {');
+    expect(await parseIssues(result.text, 'php'), 'the survivor no longer parses').toEqual([]);
+    expect(smelter.reconstruct(result)).toBe(PHP_MIXED_HTML);
   });
 });
