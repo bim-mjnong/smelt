@@ -5,7 +5,7 @@
 **Structure-aware, reversible context optimization for coding agents.**
 A library, not a proxy.
 
-[![CI](https://img.shields.io/github/actions/workflow/status/mong-x/smelt/ci.yml?style=for-the-badge&logo=githubactions&logoColor=EFEBE5&label=CI&labelColor=131417&color=E4602F)](https://github.com/mong-x/smelt/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/smeltjs/smelt/ci.yml?style=for-the-badge&logo=githubactions&logoColor=EFEBE5&label=CI&labelColor=131417&color=E4602F)](https://github.com/smeltjs/smelt/actions/workflows/ci.yml)
 [![network calls](https://img.shields.io/badge/network_calls-0-E4602F?style=for-the-badge&labelColor=131417)](#the-four-laws)
 [![node](https://img.shields.io/badge/node-%5E20.19_%7C%7C_%3E%3D22.12-6E7783?style=for-the-badge&logo=nodedotjs&logoColor=EFEBE5&labelColor=131417)](#requirements)
 [![License](https://img.shields.io/badge/license-Apache_2.0-6E7783?style=for-the-badge&labelColor=131417)](./LICENSE)

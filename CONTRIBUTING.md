@@ -9,7 +9,7 @@ helpfully unless they know why they are there.
 ## Dev setup
 
 ```sh
-git clone https://github.com/mong-x/smelt.git && cd smelt
+git clone https://github.com/smeltjs/smelt.git && cd smelt
 pnpm install
 pnpm verify        # the whole gate: format, lint, typecheck, build, test, mutate
 ```

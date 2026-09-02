@@ -4,7 +4,7 @@ Structure-aware, reversible context optimization for coding agents. Zero network
 
 This is the library package. The project README, the four laws and their reasoning, the
 build plan and the consumer contract all live in the repository root:
-**https://github.com/mong-x/smelt**
+**https://github.com/smeltjs/smelt**
 
 ```ts
 import { createSmelter } from '@smeltjs/core';
@@ -50,6 +50,6 @@ signatures and doc comments always kept), the lexical planner, a persistent
 content-addressed store, cache-prefix hygiene (detect, never rewrite), a repo-map
 planner modelled on Aider's, the `smelt init` wizard, and a committed measurement
 harness. An unsupported language under `strategy: 'structural'` is refused, never
-approximated. See [`docs/HANDOFF.md`](https://github.com/mong-x/smelt/blob/main/docs/HANDOFF.md).
+approximated. See [`docs/HANDOFF.md`](https://github.com/smeltjs/smelt/blob/main/docs/HANDOFF.md).
 
 Apache-2.0.
