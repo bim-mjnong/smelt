@@ -264,13 +264,33 @@ function repositoryOf(dep) {
 const invokedDirectly =
   process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
+/**
+ * The emitted document is passed through prettier (the repo's own devDependency,
+ * with the repo's own config) before it is written or printed, so the committed
+ * file is a **fixed point of `prettier --write`**: a formatting pass over the tree
+ * is a no-op on it and can never make the committed copy disagree with what this
+ * generator produces. This matters because a `.prettierignore` entry cannot be
+ * relied on to protect it — prettier resolves its default ignore files
+ * (`.gitignore`, `.prettierignore`) against the process cwd only, with no upward
+ * search, so any invocation started anywhere but the repo root (an editor's
+ * format-on-save, a `prettier --write .` from `packages/core`) silently bypasses
+ * the entry and reformats the file into a state the freshness guard rejects.
+ * Canonical-by-construction beats hoping the ignore file is seen.
+ */
+async function formatted(markdown) {
+  const { format, resolveConfig } = await import('prettier');
+  const config = (await resolveConfig(THIRD_PARTY_PATH)) ?? {};
+  return format(markdown, { ...config, filepath: THIRD_PARTY_PATH });
+}
+
 if (invokedDirectly) {
   // `--print` writes to stdout instead of the file. The freshness guard uses it, so the
   // guard checks the generator that actually ships rather than a copy of its logic.
+  const document = await formatted(renderThirdParty());
   if (process.argv.includes('--print')) {
-    process.stdout.write(renderThirdParty());
+    process.stdout.write(document);
   } else {
-    writeFileSync(THIRD_PARTY_PATH, renderThirdParty());
+    writeFileSync(THIRD_PARTY_PATH, document);
     process.stderr.write('generate-third-party: wrote packages/core/THIRD-PARTY.md\n');
   }
 }
