@@ -45,7 +45,13 @@ codebase-design glossary.
   `grammar-provenance.json` holds the licence facts, its key set guard-pinned to the
   registry's wasm set.
 - **MarkerPricing**: the seam through which planners ask what a marker will cost in
-  bytes. Owned and built by `apply.ts`; planners never estimate independently.
+  bytes — `costBytes(reason, elidedBytes)`, required on every `PlanInput`. Owned and
+  built by `apply.ts`: `markerPricing(language, marker)` is the one adapter, built from
+  the exact builder `applyPlan` will use (a caller's custom `MarkerBuilder` prices with
+  its own rendering, so a longer marker makes small cuts unprofitable and the planner
+  sees it). Planners never estimate independently; `createSmelter` and the CLI construct
+  the pricing centrally, and a JS caller who omits it gets `MissingMarkerPricingError`,
+  never a guessed cost.
 - **ResolvedRun**: the CLI's single merge of flags + config + defaults; the only place
   precedence lives.
 - **retrieveStats**: the one exported derivation within `src/` of the honesty

@@ -61,6 +61,25 @@ export class UnknownHashError extends SmeltError {
 }
 
 /**
+ * A planner was handed a `PlanInput` without `pricing`. The type makes `pricing`
+ * required, so TypeScript callers cannot get here; a JS caller can, and the honest
+ * answer is this error rather than a guessed marker cost — a planner pricing markers
+ * itself is exactly the inversion the MarkerPricing seam removed.
+ */
+export class MissingMarkerPricingError extends SmeltError {
+  override readonly name = 'MissingMarkerPricingError';
+
+  constructor(plannerId: string) {
+    super(
+      `smelt: ${plannerId} was handed a PlanInput without \`pricing\`. A planner never ` +
+        `guesses what a marker costs — the applier renders markers, so the applier ` +
+        `prices them. Build one with markerPricing(language, marker) from apply.ts and ` +
+        `put it on the input; createSmelter and the CLI construct it centrally.`,
+    );
+  }
+}
+
+/**
  * The CLI was invoked wrongly — a missing `--budget`, an unknown flag, a budget that
  * is not a number. Distinct from every other `SmeltError` so the CLI can exit with a
  * usage code rather than pretending the library refused.

@@ -58,6 +58,11 @@ describe('createSmelter({ planner }) — an injected planner drives smelt() end 
     expect(planner.seen).toHaveLength(1);
     expect(planner.seen[0]?.budgetBytes).toBe(50);
     expect(planner.seen[0]?.focus).toEqual(['keep']);
+    // The MarkerPricing seam arrives constructed — createSmelter builds it centrally,
+    // so even a hand-written planner never guesses what a marker costs.
+    expect(
+      planner.seen[0]?.pricing.costBytes({ rule: 'r', explanation: 'e' }, 100),
+    ).toBeGreaterThan(0);
 
     // The cut really happened, with a marker in place of the middle line.
     expect(result.text).not.toContain('ELIDE ME');

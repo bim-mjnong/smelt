@@ -1,17 +1,7 @@
-import { markerForLanguage } from '../apply.ts';
-import type { MarkerBuilder } from '../apply.ts';
-import { HASH_LENGTH } from '../hash.ts';
-import type { ElisionPlan, PlanInput, PlannedElision, Planner } from '../types.ts';
+import { MissingMarkerPricingError } from '../errors.ts';
+import type { ElisionPlan, MarkerPricing, PlanInput, PlannedElision, Planner } from '../types.ts';
 
 export const LEXICAL_PLANNER_ID = 'lexical/v1';
-
-/**
- * A stand-in hash of the real length, so profitability and output prediction can
- * render the exact marker a cut would earn before the cut exists — the same device
- * the structural planner uses. Marker cost depends on the hash's *length*, never its
- * value.
- */
-const PLACEHOLDER_HASH = '0'.repeat(HASH_LENGTH);
 
 /** How hard the head/tail strategy squeezes, in order, when the budget is not met. */
 const HEAD_TAIL_LADDER: readonly number[] = [1, 0.5, 0.25, 0.1, 0.05];
@@ -73,19 +63,17 @@ export class LexicalPlanner implements Planner {
  * check `outputBytes` and decide; smelt will not decide for them.
  *
  * Profitability and budget prediction are **measured, not estimated**: every candidate
- * elision renders the exact marker it would earn — the language's comment leader
- * included — the same way the structural planner does. A guessed constant here once
- * under-counted real ~105-byte markers as 64, so a plan could be "chosen as fitting"
- * and then come back over budget after the markers landed.
+ * elision is priced through the input's {@link MarkerPricing} — the seam `apply.ts`
+ * builds from the exact builder `applyPlan` will use, comment leader and custom
+ * builder included. A guessed constant here once under-counted real ~105-byte markers
+ * as 64, so a plan could be "chosen as fitting" and then come back over budget after
+ * the markers landed.
  */
 export function planLexical(input: PlanInput, options: LexicalPlannerOptions = {}): ElisionPlan {
+  const pricing = requirePricing(input);
   const lines = splitLines(input.text);
   const focus = (input.focus ?? []).filter((term) => term.length > 0);
   const minRunLines = options.minRunLines ?? 3;
-  // The same builder applyPlan will use for this plan's language, so the predicted
-  // marker bytes equal the applied marker bytes (the placeholder hash has the real
-  // hash's length).
-  const buildMarker = markerForLanguage(input.language);
 
   const attempts: readonly (readonly PlannedElision[])[] =
     focus.length > 0
@@ -93,7 +81,7 @@ export function planLexical(input: PlanInput, options: LexicalPlannerOptions = {
           collapse(lines, keepByFocus(lines, focus, context, options.caseSensitive ?? false), {
             minRunLines,
             rule: 'focus-window',
-            buildMarker,
+            pricing,
           }),
         )
       : HEAD_TAIL_LADDER.map((shrink) =>
@@ -104,14 +92,14 @@ export function planLexical(input: PlanInput, options: LexicalPlannerOptions = {
               Math.max(3, Math.round((options.headLines ?? 40) * shrink)),
               Math.max(3, Math.round((options.tailLines ?? 20) * shrink)),
             ),
-            { minRunLines, rule: 'head-tail', buildMarker },
+            { minRunLines, rule: 'head-tail', pricing },
           ),
         );
 
   const inputBytes = Buffer.byteLength(input.text, 'utf8');
   const chosen =
     attempts.find(
-      (elisions) => predictOutputBytes(inputBytes, elisions, buildMarker) <= input.budgetBytes,
+      (elisions) => predictOutputBytes(inputBytes, elisions, pricing) <= input.budgetBytes,
     ) ?? attempts[attempts.length - 1]!;
 
   return {
@@ -129,27 +117,30 @@ function ladder(start: number): readonly number[] {
   return sizes;
 }
 
-/** The exact UTF-8 cost of the marker this elision would earn. Measured, not guessed. */
-function markerBytes(elision: PlannedElision, buildMarker: MarkerBuilder): number {
-  return Buffer.byteLength(
-    buildMarker({
-      hash: PLACEHOLDER_HASH,
-      bytes: elision.range.end - elision.range.start,
-      rule: elision.reason.rule,
-      explanation: elision.reason.explanation,
-    }),
-    'utf8',
-  );
+/**
+ * The runtime backstop for JS callers: TypeScript makes `pricing` required, but a JS
+ * caller can omit it, and the honest answer is a named refusal rather than a planner
+ * quietly pricing markers itself — the inversion the seam removed.
+ */
+function requirePricing(input: PlanInput): MarkerPricing {
+  const pricing: MarkerPricing | undefined = input.pricing;
+  if (pricing === undefined) throw new MissingMarkerPricingError(LEXICAL_PLANNER_ID);
+  return pricing;
+}
+
+/** The exact UTF-8 cost of the marker this elision would earn. Asked, not guessed. */
+function markerBytes(elision: PlannedElision, pricing: MarkerPricing): number {
+  return pricing.costBytes(elision.reason, elision.range.end - elision.range.start);
 }
 
 function predictOutputBytes(
   inputBytes: number,
   elisions: readonly PlannedElision[],
-  buildMarker: MarkerBuilder,
+  pricing: MarkerPricing,
 ): number {
   return elisions.reduce(
     (bytes, elision) =>
-      bytes - (elision.range.end - elision.range.start) + markerBytes(elision, buildMarker),
+      bytes - (elision.range.end - elision.range.start) + markerBytes(elision, pricing),
     inputBytes,
   );
 }
@@ -199,7 +190,7 @@ function keepByHeadTail(lines: readonly Line[], head: number, tail: number): boo
 function collapse(
   lines: readonly Line[],
   keep: readonly boolean[],
-  config: { readonly minRunLines: number; readonly rule: string; buildMarker: MarkerBuilder },
+  config: { readonly minRunLines: number; readonly rule: string; readonly pricing: MarkerPricing },
 ): readonly PlannedElision[] {
   const elisions: PlannedElision[] = [];
   let runStart = -1;
@@ -220,9 +211,9 @@ function collapse(
       },
     };
     // Profitability, measured rather than estimated: a marker that costs at least as
-    // many bytes as it removes grows the output — same rule, same mechanism, as the
+    // many bytes as it removes grows the output — same rule, same seam, as the
     // structural planner.
-    if (range.end - range.start <= markerBytes(candidate, config.buildMarker)) return;
+    if (range.end - range.start <= markerBytes(candidate, config.pricing)) return;
     elisions.push(candidate);
   };
 

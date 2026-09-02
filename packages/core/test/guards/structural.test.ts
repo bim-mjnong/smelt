@@ -3,7 +3,7 @@ import type { Node } from 'web-tree-sitter';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { applyPlan } from '@guard/apply';
+import { applyPlan, markerPricing } from '@guard/apply';
 import { GrammarUnavailableError } from '@guard/errors';
 import { createSmelter } from '@guard/index';
 import { loadGrammar } from '@guard/plan/grammar';
@@ -63,7 +63,7 @@ import {
  */
 
 function inputFor(text: string, focus: readonly string[], language: PlanInput['language']) {
-  return { text, language, budgetBytes: 600, focus } as const;
+  return { text, language, budgetBytes: 600, focus, pricing: markerPricing(language) } as const;
 }
 
 async function structuralPlan(

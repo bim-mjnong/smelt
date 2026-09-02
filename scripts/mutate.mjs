@@ -6,7 +6,7 @@
  * ships with at least one *mutation*: a specific, minimal break in the source that the
  * guard must catch. This script copies `packages/core/src` to a scratch directory,
  * applies one mutation, points the guard at the copy via `SMELT_GUARD_SRC`, and
- * asserts the guard goes **red**. Fifty-seven mutations across twelve guards; a mutation the
+ * asserts the guard goes **red**. Fifty-nine mutations across thirteen guards; a mutation the
  * guard survives is reported as a failure of the *guard*, not of the mutation.
  *
  * It also runs every guard against the pristine tree first, because a guard that fails
@@ -69,10 +69,27 @@ const MUTATIONS = [
     id: 'law1-node-https-import',
     guard: 'test/guards/no-network.test.ts',
     file: 'plan/lexical.ts',
-    find: "import type { ElisionPlan, PlanInput, PlannedElision, Planner } from '../types.ts';",
-    replace:
-      "import 'node:https';\nimport type { ElisionPlan, PlanInput, PlannedElision, Planner } from '../types.ts';",
+    find: "import { MissingMarkerPricingError } from '../errors.ts';",
+    replace: "import 'node:https';\nimport { MissingMarkerPricingError } from '../errors.ts';",
     why: 'a network transport imported directly into the elision path',
+  },
+  {
+    id: 'pricing-wired-to-constant',
+    guard: 'test/guards/structural.test.ts',
+    file: 'apply.ts',
+    find:
+      '    costBytes: (reason, elidedBytes) =>\n' +
+      '      Buffer.byteLength(\n' +
+      '        build({\n' +
+      '          hash: PLACEHOLDER_HASH,\n' +
+      '          bytes: elidedBytes,\n' +
+      '          rule: reason.rule,\n' +
+      '          explanation: reason.explanation,\n' +
+      '        }),\n' +
+      "        'utf8',\n" +
+      '      ),',
+    replace: '    costBytes: () => 8,',
+    why: 'the MarkerPricing seam answering a constant instead of rendering the real marker — every planner now believes a ~105-byte marker costs 8 bytes, plans cuts the marker outweighs, and the output grows with no error anywhere',
   },
   {
     id: 'law1-global-fetch',

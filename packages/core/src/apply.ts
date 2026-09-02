@@ -1,4 +1,5 @@
 import { OverlappingElisionError, RangeOutOfBoundsError, UnknownHashError } from './errors.ts';
+import { HASH_LENGTH } from './hash.ts';
 import { LANGUAGE_PROFILES } from './lang/registry.ts';
 import type {
   AppliedElision,
@@ -6,6 +7,7 @@ import type {
   DetectedLanguage,
   ElisionPlan,
   ElisionStore,
+  MarkerPricing,
   Measure,
   SmeltResult,
 } from './types.ts';
@@ -108,6 +110,52 @@ export function markerForLanguage(
   const leader = MARKER_LINE_COMMENT_LEADERS[language];
   if (leader === undefined) return base;
   return (info) => `${leader}${base(info)}`;
+}
+
+/**
+ * A stand-in hash of the real length, so a marker can be priced before the cut that
+ * would earn it exists. Marker cost depends on the hash's *length*, never its value.
+ */
+const PLACEHOLDER_HASH = '0'.repeat(HASH_LENGTH);
+
+/**
+ * The one adapter behind the {@link MarkerPricing} seam.
+ *
+ * Marker cost is this module's fact: `applyPlan` renders the marker, so only this
+ * module can price it without guessing. The pricing is built from the **exact builder
+ * `applyPlan` will use** — the same resolution, in the same order: a caller-supplied
+ * builder (`SmelterConfig.marker` / `ApplyOptions.marker`) wins wholesale, otherwise
+ * the language's leader-wrapped default via {@link markerForLanguage}.
+ *
+ * The custom-builder leg is load-bearing, not a convenience: a caller who installs a
+ * longer `MarkerBuilder` changes what every elision costs, and a planner still pricing
+ * the *default* marker would keep planning elisions the real marker makes
+ * unprofitable — cuts that grow the output, silently. Pricing with the builder's own
+ * rendering closes that hole: `costBytes` measures the marker *that builder* would
+ * emit, byte for byte.
+ *
+ * `createSmelter` (and through it, the CLI) calls this centrally, once per smelt call;
+ * a caller driving `planLexical`/`planStructural` directly builds its own and puts it
+ * on the {@link PlanInput}.
+ */
+export function markerPricing(
+  language: DetectedLanguage = 'unknown',
+  markerBuilder?: MarkerBuilder,
+): MarkerPricing {
+  // The same resolution applyPlan performs: a supplied builder wins wholesale.
+  const build = markerBuilder ?? markerForLanguage(language);
+  return {
+    costBytes: (reason, elidedBytes) =>
+      Buffer.byteLength(
+        build({
+          hash: PLACEHOLDER_HASH,
+          bytes: elidedBytes,
+          rule: reason.rule,
+          explanation: reason.explanation,
+        }),
+        'utf8',
+      ),
+  };
 }
 
 export interface ApplyOptions {
