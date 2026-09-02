@@ -102,11 +102,11 @@ here is extrapolated, rounded up, or converted between units.
 
 ## run 2026-09-02 — tier 1 — corpus 916469e794aa
 
-| case | tier | date | corpus commit | model | unit | input | output | elisions | note |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| large-ts-file | tier 1 | 2026-09-02 | 916469e794aa | — | bytes | 22462 | 3680 | 2 | budget 4000 B, structural/v1 |
-| tsx-component | tier 1 | 2026-09-02 | 916469e794aa | — | bytes | 1090 | 861 | 1 | budget 700 B, structural/v1 — OVER BUDGET |
-| java-classes | tier 1 | 2026-09-02 | 916469e794aa | — | bytes | 689 | 366 | 2 | budget 400 B, structural/v1 |
-| multi-file-grep | tier 1 | 2026-09-02 | 916469e794aa | — | bytes | 6451 | 986 | 2 | budget 1500 B, lexical/v1 |
-| stack-trace | tier 1 | 2026-09-02 | 916469e794aa | — | bytes | 542 | 389 | 1 | budget 400 B, lexical/v1 |
-| build-log | tier 1 | 2026-09-02 | 916469e794aa | — | bytes | 16354 | 109 | 1 | budget 800 B, lexical/v1 |
+| case            | tier   | date       | corpus commit | model | unit  | input | output | elisions | note                                      |
+| --------------- | ------ | ---------- | ------------- | ----- | ----- | ----- | ------ | -------- | ----------------------------------------- |
+| large-ts-file   | tier 1 | 2026-09-02 | 916469e794aa  | —     | bytes | 22462 | 3680   | 2        | budget 4000 B, structural/v1              |
+| tsx-component   | tier 1 | 2026-09-02 | 916469e794aa  | —     | bytes | 1090  | 861    | 1        | budget 700 B, structural/v1 — OVER BUDGET |
+| java-classes    | tier 1 | 2026-09-02 | 916469e794aa  | —     | bytes | 689   | 366    | 2        | budget 400 B, structural/v1               |
+| multi-file-grep | tier 1 | 2026-09-02 | 916469e794aa  | —     | bytes | 6451  | 986    | 2        | budget 1500 B, lexical/v1                 |
+| stack-trace     | tier 1 | 2026-09-02 | 916469e794aa  | —     | bytes | 542   | 389    | 1        | budget 400 B, lexical/v1                  |
+| build-log       | tier 1 | 2026-09-02 | 916469e794aa  | —     | bytes | 16354 | 109    | 1        | budget 800 B, lexical/v1                  |
