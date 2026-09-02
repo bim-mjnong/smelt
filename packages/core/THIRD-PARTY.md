@@ -45,23 +45,23 @@ SOFTWARE.
 
 The `.wasm` parsers in `grammars/` were taken from **tree-sitter-wasms 0.1.13** (Unlicense), which prebuilds them. The packaging licence covers the packaging; each grammar carries its own, listed after the table.
 
-| file | from | version range | licence | bytes | sha256 |
-| ---- | ---- | ------------- | ------- | ----- | ------ |
-| `tree-sitter-bash.wasm` | tree-sitter-bash | `^0.20.5` | MIT | 1400214 | `807dcdb1380a59be` |
-| `tree-sitter-c.wasm` | tree-sitter-c | `^0.20.7` | MIT | 792959 | `056b25072382f72d` |
-| `tree-sitter-c_sharp.wasm` | tree-sitter-c-sharp | `^0.20.0` | MIT | 3978594 | `6266a7e32d68a345` |
-| `tree-sitter-cpp.wasm` | tree-sitter-cpp | `^0.20.4` | MIT | 4662978 | `f6afdf53bfd6de76` |
-| `tree-sitter-go.wasm` | tree-sitter-go | `^0.20.0` | MIT | 235957 | `9963ca89b616eaf0` |
-| `tree-sitter-java.wasm` | tree-sitter-java | `^0.20.2` | MIT | 430239 | `637aac4415fb39a2` |
-| `tree-sitter-javascript.wasm` | tree-sitter-javascript | `^0.20.3` | MIT | 647334 | `63812b9e275d2685` |
-| `tree-sitter-kotlin.wasm` | tree-sitter-kotlin | `^0.3.1` | MIT | 4052705 | `b5cb00c8d06ed0f1` |
-| `tree-sitter-php.wasm` | tree-sitter-php | `^0.22.0` | MIT | 812594 | `55bb617b6f01e14b` |
-| `tree-sitter-python.wasm` | tree-sitter-python | `^0.21.0` | MIT | 476105 | `9056d0fb0c337810` |
-| `tree-sitter-ruby.wasm` | tree-sitter-ruby | `^0.20.1` | MIT | 2106447 | `93a5022855314cdb` |
-| `tree-sitter-rust.wasm` | tree-sitter-rust | `^0.20.4` | MIT | 818756 | `4409921a70d0aa5b` |
-| `tree-sitter-swift.wasm` | tree-sitter-swift | `^0.4.0` | MIT | 3147876 | `41c4fdb2249a3aa6` |
-| `tree-sitter-tsx.wasm` | tree-sitter-typescript | `^0.20.5` | MIT | 2411272 | `6aa3b2c70e76f5d4` |
-| `tree-sitter-typescript.wasm` | tree-sitter-typescript | `^0.20.5` | MIT | 2342690 | `8515404dceed38e1` |
+| file                          | from                   | version range | licence | bytes   | sha256             |
+| ----------------------------- | ---------------------- | ------------- | ------- | ------- | ------------------ |
+| `tree-sitter-bash.wasm`       | tree-sitter-bash       | `^0.20.5`     | MIT     | 1400214 | `807dcdb1380a59be` |
+| `tree-sitter-c.wasm`          | tree-sitter-c          | `^0.20.7`     | MIT     | 792959  | `056b25072382f72d` |
+| `tree-sitter-c_sharp.wasm`    | tree-sitter-c-sharp    | `^0.20.0`     | MIT     | 3978594 | `6266a7e32d68a345` |
+| `tree-sitter-cpp.wasm`        | tree-sitter-cpp        | `^0.20.4`     | MIT     | 4662978 | `f6afdf53bfd6de76` |
+| `tree-sitter-go.wasm`         | tree-sitter-go         | `^0.20.0`     | MIT     | 235957  | `9963ca89b616eaf0` |
+| `tree-sitter-java.wasm`       | tree-sitter-java       | `^0.20.2`     | MIT     | 430239  | `637aac4415fb39a2` |
+| `tree-sitter-javascript.wasm` | tree-sitter-javascript | `^0.20.3`     | MIT     | 647334  | `63812b9e275d2685` |
+| `tree-sitter-kotlin.wasm`     | tree-sitter-kotlin     | `^0.3.1`      | MIT     | 4052705 | `b5cb00c8d06ed0f1` |
+| `tree-sitter-php.wasm`        | tree-sitter-php        | `^0.22.0`     | MIT     | 812594  | `55bb617b6f01e14b` |
+| `tree-sitter-python.wasm`     | tree-sitter-python     | `^0.21.0`     | MIT     | 476105  | `9056d0fb0c337810` |
+| `tree-sitter-ruby.wasm`       | tree-sitter-ruby       | `^0.20.1`     | MIT     | 2106447 | `93a5022855314cdb` |
+| `tree-sitter-rust.wasm`       | tree-sitter-rust       | `^0.20.4`     | MIT     | 818756  | `4409921a70d0aa5b` |
+| `tree-sitter-swift.wasm`      | tree-sitter-swift      | `^0.4.0`      | MIT     | 3147876 | `41c4fdb2249a3aa6` |
+| `tree-sitter-tsx.wasm`        | tree-sitter-typescript | `^0.20.5`     | MIT     | 2411272 | `6aa3b2c70e76f5d4` |
+| `tree-sitter-typescript.wasm` | tree-sitter-typescript | `^0.20.5`     | MIT     | 2342690 | `8515404dceed38e1` |
 
 ### Copyright notices
 
