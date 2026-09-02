@@ -146,12 +146,13 @@ Three things that look like bugs and are not:
 
 ## What is in the box
 
-- **Structural planner** — parses with bundled tree-sitter grammars (`typescript`, `tsx`,
-  `rust`, `python`, `go`), keeps focus-matched declarations whole — signature, doc
-  comment, body — and collapses sibling runs into markers that name the kind and count
-  from the parse tree. The Python survivor still parses; Go build tags and Rust
-  attributes stay attached; a marker is only planned when it costs fewer bytes than it
-  removes.
+- **Structural planner** — parses with bundled tree-sitter grammars for **fifteen
+  languages** (`typescript`, `tsx`, `javascript`, `rust`, `python`, `go`, `java`, `c`,
+  `cpp`, `c_sharp`, `ruby`, `php`, `kotlin`, `swift`, `bash`), keeps focus-matched
+  declarations whole — signature, doc comment, body — and collapses sibling runs into
+  markers that name the kind and count from the parse tree. The Python survivor still
+  parses; shebangs, Go build tags, Rust attributes and `#pragma once` stay pinned; a
+  marker is only planned when it costs fewer bytes than it removes.
 - **Lexical planner** — focus windows, head-tail, a context ladder under budget pressure.
   For logs, traces, diffs, and every other blob that is not code.
 - **Persistent store** — `DirectoryElisionStore`: one file per content hash, atomic
@@ -166,29 +167,30 @@ Three things that look like bugs and are not:
   tags, deterministic PageRank over the reference graph, a caller-owned disk cache.
   Modelled on [Aider's repo-map](https://aider.chat/2023/10/22/repomap.html) and credited
   as such. Every included symbol can say why it ranked.
-- **The honesty machinery** — eleven guard suites that walk the real import graph, assert
+- **The honesty machinery** — twelve guard suites that walk the real import graph, assert
   byte-exact reversibility, pin the wire format, and re-derive the attribution file; plus
-  a mutation runner (`pnpm mutate`) that breaks the source on purpose and fails if a
-  guard does not notice. Every guarantee in this README has a guard that has been watched
-  going red.
+  a mutation runner (`pnpm mutate`) that breaks the source on purpose — 52 deliberate
+  breaks, each watched going red — and fails if a guard does not notice. Every guarantee
+  in this README has a guard.
 
 ## Measured numbers
 
 From the committed measurement harness (`pnpm bench`), tier 1 — bytes and elision counts,
 deterministic, offline, reproducible by anyone from a fresh clone. Corpus commit
-`3613beb4b650`, run 2026-09-01, `@smeltjs/core` at the same commit:
+`052bd3be2ed7`, run 2026-09-02, `@smeltjs/core` at the same commit:
 
 | case                            | planner       | in (B) | out (B) |             reduction |
 | ------------------------------- | ------------- | -----: | ------: | --------------------: |
-| large TS file (this repo's own) | structural/v1 | 22,530 |   3,289 |                −85.4% |
+| large TS file (this repo's own) | structural/v1 | 38,267 |   3,295 |                −91.4% |
 | multi-file grep result          | lexical/v1    |  6,451 |     986 |                −84.7% |
+| java classes                    | structural/v1 |    689 |     366 |                −46.9% |
 | stack trace                     | lexical/v1    |    542 |     389 |                −28.2% |
 | build log (synthetic, labelled) | lexical/v1    |  6,984 |     108 |                −98.5% |
-| TSX component (budget 700 B)    | structural/v1 |  1,090 |     858 | over budget, reported |
+| TSX component (budget 700 B)    | structural/v1 |  1,090 |     861 | over budget, reported |
 
 What these are: byte reductions on [a small committed corpus](packages/core/bench/), each
 row reproducible with `pnpm bench`. What they are **not**: token savings, cost savings, or
-an aggregate claim — the corpus is five cases, the build-log row is a synthetic
+an aggregate claim — the corpus is six cases, the build-log row is a synthetic
 best-case and says so in its header, and one case came back over budget and is reported
 as exactly that. Token counts (tier 2) and the **expansion rate** — the fraction of
 hidden bytes the model asks back for, counted from real `smelt_retrieve` calls (tier 3) —
