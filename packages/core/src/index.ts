@@ -107,6 +107,8 @@ export type { FileTagsEntry, RankedDefinition } from './repomap/rank.ts';
 export { extractTags } from './repomap/tags.ts';
 export type { DefinitionTag, FileTags, ReferenceTag } from './repomap/tags.ts';
 export { TAGS_CACHE_FORMAT, TAGS_CACHE_VERSION, tagsCacheKey } from './repomap/cache.ts';
+export { nodeFsReader } from './repomap/reader.ts';
+export type { DirEntry, FileStat, RepoReader } from './repomap/reader.ts';
 export {
   CONFIG_FILE_NAME,
   CONFIG_VERSION,
