@@ -128,10 +128,17 @@ describe('the built binary, as a real process', () => {
     expect(stdout).toBe(text);
   }, 15_000);
 
-  it('prints the manifest version', async () => {
+  it('prints the manifest version, not a second copy of it', async () => {
+    // The behavioural half of "the bin reads its version from the manifest": the
+    // shipped binary is spawned and its stdout compared against the manifest on disk.
+    // A hard-coded version, or a stale copy anywhere in the chain, fails here — which
+    // is why no test greps bin.ts for the spelling of the read.
+    const { version } = JSON.parse(readFileSync(join(packageRoot(), 'package.json'), 'utf8')) as {
+      version: string;
+    };
     const { code, stdout } = await runBin(['--version']);
     expect(code).toBe(EXIT.ok);
-    expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(stdout).toBe(`${version}\n`);
   }, 15_000);
 
   it('smelt map runs from the built binary: map on stdout, report on stderr, exit 0', async () => {
