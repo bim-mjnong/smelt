@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -45,6 +46,13 @@ interface BenchLib {
     truncated: boolean;
     maxRounds: number;
   }): string;
+  CORPUS_REF_FORMAT: string;
+  corpusRefMismatch(input: {
+    refFile: string;
+    from: string;
+    pinned: string;
+    actual: string;
+  }): string;
 }
 
 let lib: BenchLib;
@@ -61,8 +69,13 @@ function manifest(): { format: string; cases: readonly BenchCase[] } {
 }
 
 describe('the corpus and its manifest', () => {
-  it('cases.json is valid and every corpus file it names exists', () => {
-    const problems = lib.validateCases(manifest(), (file) => existsSync(join(benchDir, file)));
+  it('cases.json is valid and every corpus file it names exists — as bytes or as a pinned reference', () => {
+    // A by-reference entry has no committed bytes; its committed `<name>.json`
+    // reference is what exists. The runner materializes the bytes before validating.
+    const problems = lib.validateCases(
+      manifest(),
+      (file) => existsSync(join(benchDir, file)) || existsSync(join(benchDir, `${file}.json`)),
+    );
     expect(problems).toEqual([]);
   });
 
@@ -75,10 +88,35 @@ describe('the corpus and its manifest', () => {
     expect(files.some((file) => file.endsWith('.log'))).toBe(true);
   });
 
-  it('the large TS file is a byte-for-byte copy of the real source it claims to be', () => {
-    const copied = readFileSync(join(benchDir, 'corpus/structural.ts'), 'utf8');
-    const original = readFileSync(resolve(testDir, '../src/plan/structural.ts'), 'utf8');
-    expect(copied).toBe(original);
+  it('the large TS file is a pinned reference to the real source — and the pin matches it', () => {
+    // The old discipline was a committed byte-copy, guarded byte-for-byte. The new
+    // one is a committed reference: the runner materializes the file from the
+    // working tree and refuses a hash mismatch. This test keeps the pin honest at
+    // `pnpm test` time — editing src/plan/structural.ts without re-pinning goes red
+    // here, exactly as the byte-copy used to.
+    const ref = JSON.parse(readFileSync(join(benchDir, 'corpus/structural.ts.json'), 'utf8')) as {
+      format: string;
+      from: string;
+      sha256: string;
+    };
+    expect(ref.format).toBe(lib.CORPUS_REF_FORMAT);
+    expect(ref.from).toBe('packages/core/src/plan/structural.ts');
+    const source = readFileSync(resolve(testDir, '../src/plan/structural.ts'));
+    expect(createHash('sha256').update(source).digest('hex')).toBe(ref.sha256);
+  });
+
+  it('a drifted source is refused with instructions, never silently measured', () => {
+    const message = lib.corpusRefMismatch({
+      refFile: 'corpus/structural.ts.json',
+      from: 'packages/core/src/plan/structural.ts',
+      pinned: 'aaaa',
+      actual: 'bbbb',
+    });
+    expect(message).toContain('REFUSING');
+    expect(message).toContain('update the pinned sha256');
+    expect(message).toContain('corpus/structural.ts.json');
+    expect(message).toContain('aaaa');
+    expect(message).toContain('bbbb');
   });
 
   it('the build log is what its generator derives from the lockfile, and says it is synthetic', () => {

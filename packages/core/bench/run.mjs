@@ -28,12 +28,15 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
   appendResults,
+  CORPUS_REF_FORMAT,
+  corpusRefMismatch,
   renderTable,
   resultRow,
   tier3Aggregate,
@@ -106,6 +109,38 @@ const newestMtime = (dir) => {
 };
 if (newestMtime(join(benchDir, '../src')) > statSync(distEntry).mtimeMs) {
   fail('dist/ is older than src/ — run `pnpm build` first, or the rows measure stale code.');
+}
+
+// -- materialize by-reference corpus entries ----------------------------------
+//
+// A corpus entry that mirrors this repository's own source is committed as a
+// `<name>.json` reference (CORPUS_REF_FORMAT) pinning the source path and its
+// sha256, not as a second copy of the bytes. The runner writes the real file here,
+// from the working tree, and REFUSES a hash mismatch — that refusal replaces the
+// old byte-copy guard: a drifted source cannot be measured under a stale pin. The
+// materialized file itself is gitignored; the reference is the committed artefact,
+// and it sits under corpus/, so the corpus commit every row names covers it. The
+// source itself is committed too — the src/ dirty check above already insisted.
+
+const repoRoot = resolve(benchDir, '../../..');
+const corpusDir = join(benchDir, 'corpus');
+for (const entry of readdirSync(corpusDir)) {
+  if (!entry.endsWith('.json')) continue;
+  const ref = JSON.parse(readFileSync(join(corpusDir, entry), 'utf8'));
+  if (ref?.format !== CORPUS_REF_FORMAT) continue;
+  const source = readFileSync(join(repoRoot, ref.from));
+  const actual = createHash('sha256').update(source).digest('hex');
+  if (actual !== ref.sha256) {
+    fail(
+      corpusRefMismatch({
+        refFile: `corpus/${entry}`,
+        from: ref.from,
+        pinned: ref.sha256,
+        actual,
+      }),
+    );
+  }
+  writeFileSync(join(corpusDir, entry.slice(0, -'.json'.length)), source);
 }
 
 // -- load and validate the cases ---------------------------------------------

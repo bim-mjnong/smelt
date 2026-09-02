@@ -35,7 +35,7 @@ logical path, the focus terms, and the byte budget an agent would have used.
 
 | file                          | provenance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `corpus/structural.ts`        | byte-for-byte copy of this repo's `packages/core/src/plan/structural.ts` at the corpus commit                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `corpus/structural.ts`        | materialized at run time from this repo's `packages/core/src/plan/structural.ts`, sha256-pinned by the committed `corpus/structural.ts.json` reference — a hash mismatch is refused, with instructions to re-pin                                                                                                                                                                                                                                                                                                    |
 | `corpus/toolbar.tsx`          | the `MIXED_TSX` fixture from `packages/core/test/structural-fixtures.ts`, materialized to disk unchanged                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `corpus/request-handler.java` | the `FUNCTIONS_JAVA` fixture from `packages/core/test/structural-fixtures.ts`, materialized to disk unchanged — the slice-4b path through a prebuilt grammar                                                                                                                                                                                                                                                                                                                                                        |
 | `corpus/grep-elision.txt`     | real output of `grep -rn "elision" src` run in `packages/core`                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
@@ -47,6 +47,16 @@ Changing a corpus file changes the corpus commit every subsequent row names; the
 runner refuses to run against uncommitted corpus **or `src/`** changes, and against
 a `dist/` older than `src/` — a row measured from edited or stale code names a
 commit that cannot reproduce its numbers.
+
+One entry is committed **by reference** instead of as bytes: `corpus/structural.ts`
+mirrors this repository's own source, so a byte-copy would be a second copy that
+drifts. Its committed artefact is `corpus/structural.ts.json` — the source path and
+its pinned sha256 — and the runner materializes the real file from the working tree
+before validating cases. When the source has moved since the pin, the runner
+**refuses** and says to update the pinned hash; that refusal is the provenance
+discipline that used to be the byte-copy guard. The materialized file is gitignored;
+the reference lives under `corpus/`, so the corpus commit in every row covers it,
+and `test/bench.test.ts` keeps the pin honest at `pnpm test` time.
 
 ## The tiers (HANDOFF Decision 8)
 
