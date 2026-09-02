@@ -23,9 +23,12 @@ import { packageRoot } from './guards/_source.ts';
 
 /**
  * The guard core, unit by unit: threshold, windows, suggestion rendering, config
- * override, and — end to end against the built script — the fail-open contract:
- * malformed stdin allows with a warning on stderr, never a non-zero exit. A guard
- * that can brick a session is worse than no guard.
+ * override, and — end to end against the built module — the shape its one live
+ * importer uses. The guard core is a *library*, not a process: every shim calls
+ * `decide` in-process, and the opencode plugin the installer writes imports the built
+ * module and calls the same two functions. It ships no stdin/stdout protocol of its
+ * own, so there is none to test here; the fail-open contract lives in `runShimMain`,
+ * exercised against a built shim in `test/hooks-shims.test.ts`.
  */
 
 /** A stat stub: the two fixture paths every test in this file speaks about. */
@@ -351,31 +354,36 @@ describe('parseGuardRequest', () => {
   });
 });
 
-describe('the built script (dist/hooks/guard-core.js) — the artifact the shims and harnesses run', () => {
+describe('the built module (dist/hooks/guard-core.js) — the artifact the opencode plugin imports', () => {
   const script = join(packageRoot(), 'dist', 'hooks', 'guard-core.js');
 
   it('is built (pnpm verify builds before testing; run `pnpm build` if this fails)', () => {
     expect(existsSync(script)).toBe(true);
   });
 
-  it('malformed stdin → allow with a warning on stderr and exit 0 — fail open, never brick a session', () => {
-    const run = spawnSync(process.execPath, [script], { input: 'not json', encoding: 'utf8' });
-    expect(run.status).toBe(0);
-    expect(JSON.parse(run.stdout)).toEqual({ action: 'allow' });
-    expect(run.stderr).toContain('allowing the call');
-  });
-
-  it('denies an oversized Read end to end, naming the replacement command', () => {
+  it('denies an oversized Read through the two functions the plugin calls, naming the replacement', () => {
     const dir = mkdtempSync(join(tmpdir(), 'smelt-guard-e2e-'));
     try {
       const big = join(dir, 'big.log');
       writeFileSync(big, 'x'.repeat(DEFAULT_THRESHOLD_BYTES + 1));
-      const run = spawnSync(process.execPath, [script], {
-        input: JSON.stringify({ tool: 'Read', input: { path: big } }),
-        encoding: 'utf8',
-        cwd: dir,
-      });
-      expect(run.status).toBe(0);
+      // Exactly what the generated opencode plugin does: import the built module by
+      // file URL, read the settings, decide. Nothing else of the library is loaded.
+      const run = spawnSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          `import { pathToFileURL } from 'node:url';` +
+            `const core = await import(pathToFileURL(process.argv[1]).href);` +
+            `const settings = core.readGuardSettings(process.cwd(), () => {});` +
+            `const request = { tool: 'Read', input: { path: process.argv[2] } };` +
+            `process.stdout.write(JSON.stringify(core.decide(request, settings, process.cwd())));`,
+          script,
+          big,
+        ],
+        { encoding: 'utf8', cwd: dir },
+      );
+      expect(run.status, run.stderr).toBe(0);
       const decision = JSON.parse(run.stdout) as {
         action: string;
         reason?: string;
