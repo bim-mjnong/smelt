@@ -211,6 +211,21 @@ envelope) that `smelter.stats()` gives a harness. A hooks preset that wires this
 Claude Code automatically is coming; the instruction pattern above works today, with
 any agent that can run a command.
 
+### As an MCP server
+
+[`@smeltjs/mcp`](packages/mcp/) serves the same library as a stdio MCP server — four
+tools (`smelt_file`, `smelt_retrieve`, `repo_map`, `smelt_stats`) over the same
+`smelt.config.json`-discovered store the CLI uses, so `smelt retrieve <hash>` from a
+shell and the model's `smelt_retrieve` hit one store and move one set of counters:
+
+```sh
+claude mcp add smelt -- npx @smeltjs/mcp
+```
+
+Codex and Grok TOML snippets, the tool contract, and the stdio-local guarantee (the
+SDK's HTTP transports never enter the import graph — guard-enforced):
+[`packages/mcp/README.md`](packages/mcp/README.md).
+
 ## Fine print on the API
 
 Three things that look like bugs and are not:
@@ -246,10 +261,11 @@ Three things that look like bugs and are not:
   tags, deterministic PageRank over the reference graph, a caller-owned disk cache.
   Modelled on [Aider's repo-map](https://aider.chat/2023/10/22/repomap.html) and credited
   as such. Every included symbol can say why it ranked.
-- **The honesty machinery** — thirteen guard suites that walk the real import graph, assert
+- **The honesty machinery** — fourteen guard suites (thirteen in the core, one guarding
+  the MCP server's stdio-local surface) that walk the real import graph, assert
   byte-exact reversibility, pin the wire format, and re-derive the attribution file; plus
-  a mutation runner (`pnpm mutate`) that breaks the source on purpose — 64 mutations
-  across 13 guards, each watched going red — and fails if a guard does not notice. Every
+  a mutation runner (`pnpm mutate`) that breaks the source on purpose — 68 mutations
+  across 14 guards, each watched going red — and fails if a guard does not notice. Every
   guarantee in this README has a guard.
 
 ## Measured numbers

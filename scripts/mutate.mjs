@@ -7,9 +7,11 @@
  * guard must catch — and the mutations live **with their guard**: each
  * `test/guards/*.test.ts` exports `MUTATIONS: GuardMutation[]` beside the assertions
  * that must notice the break (`test/guards/_mutations.ts` holds the shape). This file
- * is only the runner: it discovers the guard files, extracts each one's mutations,
- * copies `packages/core/src` to a scratch directory, applies one mutation, points the
- * guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. A
+ * is only the runner: it discovers the guard files — in **every workspace package**
+ * that has a `test/guards/` directory (`packages/core` and `packages/mcp` today; a new
+ * package joins by existing) — extracts each one's mutations, copies the owning
+ * package's `src` to a scratch directory, applies one mutation, points the guard at
+ * the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. A
  * mutation the guard survives is reported as a failure of the *guard*, not of the
  * mutation — and the run ends with the real tally, counted from the guard files
  * themselves, never typed into prose (a drift check below holds the docs to that).
@@ -19,9 +21,9 @@
  *
  * Two kinds of mutation exist, because not every guard guards source code:
  *
- *   - `kind: 'src'` (the default) breaks a file under `packages/core/src`, and the guard
- *     is pointed at the broken copy via `SMELT_GUARD_SRC`.
- *   - `kind: 'artifact'` breaks a *committed artefact* under `packages/core` — a
+ *   - `kind: 'src'` (the default) breaks a file under the owning package's `src`, and
+ *     the guard is pointed at the broken copy via `SMELT_GUARD_SRC`.
+ *   - `kind: 'artifact'` breaks a *committed artefact* under the owning package — a
  *     generated file, for instance — in a scratch root the guard reads via
  *     `SMELT_GUARD_ROOT`. Nothing in the working tree is touched either way, which
  *     matters: a mutation runner that edits tracked files and crashes leaves the repo
@@ -67,14 +69,32 @@ import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const corePackage = join(repoRoot, 'packages/core');
-const sourceDir = join(corePackage, 'src');
-const guardsDir = join(corePackage, 'test/guards');
+const packagesDir = join(repoRoot, 'packages');
 const scratchDir = join(repoRoot, '.mutants');
 
 function die(message) {
   console.error(`mutate: ${message}`);
   process.exit(1);
+}
+
+/**
+ * Every workspace package that carries guards, discovered rather than listed — a new
+ * package joins the pristine check and the mutation run by having a `test/guards/`
+ * directory. `packages/core` must always be among them: a refactor that silently
+ * dropped the core's guards from discovery would turn this whole runner vacuous.
+ */
+const PACKAGES = readdirSync(packagesDir, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => ({
+    name: entry.name,
+    dir: join(packagesDir, entry.name),
+    sourceDir: join(packagesDir, entry.name, 'src'),
+    guardsDir: join(packagesDir, entry.name, 'test/guards'),
+  }))
+  .filter((pkg) => existsSync(pkg.guardsDir))
+  .toSorted((a, b) => a.name.localeCompare(b.name));
+if (!PACKAGES.some((pkg) => pkg.name === 'core')) {
+  die('packages/core/test/guards was not discovered — the core guards are the floor');
 }
 
 /**
@@ -86,30 +106,44 @@ function die(message) {
  * `test/**\/*.test.ts` (recursive), this discovery is one level deep on purpose, and
  * the gap between the two must be a hard error rather than an invisible hole.
  */
-const guardEntries = readdirSync(guardsDir, { withFileTypes: true });
-for (const entry of guardEntries) {
-  if (entry.isDirectory()) {
+const GUARDS = PACKAGES.flatMap((pkg) => {
+  const guardEntries = readdirSync(pkg.guardsDir, { withFileTypes: true });
+  for (const entry of guardEntries) {
+    if (entry.isDirectory()) {
+      die(
+        `packages/${pkg.name}/test/guards/${entry.name}/ is a subdirectory — vitest ` +
+          `would run tests inside it, but mutation discovery is deliberately flat, so ` +
+          `its MUTATIONS would silently never execute. Keep guards directly under ` +
+          `test/guards/.`,
+      );
+    }
+    if (entry.name.startsWith('_') && entry.name.endsWith('.test.ts')) {
+      die(
+        `packages/${pkg.name}/test/guards/${entry.name} is both underscore-prefixed ` +
+          `(a helper, skipped by discovery) and a .test.ts file (executed by vitest) — ` +
+          `its MUTATIONS would silently never run. Rename the helper without ` +
+          `.test.ts, or drop the prefix.`,
+      );
+    }
+  }
+  const files = guardEntries
+    .map((entry) => entry.name)
+    .filter((entry) => entry.endsWith('.test.ts') && !entry.startsWith('_'))
+    .toSorted();
+  if (files.length === 0) {
     die(
-      `test/guards/${entry.name}/ is a subdirectory — vitest would run tests inside ` +
-        `it, but mutation discovery is deliberately flat, so its MUTATIONS would ` +
-        `silently never execute. Keep guards directly under test/guards/.`,
+      `no guard files found under packages/${pkg.name}/test/guards — a directory of ` +
+        `guards with no guards is a vacuous run wearing a convention`,
     );
   }
-  if (entry.name.startsWith('_') && entry.name.endsWith('.test.ts')) {
-    die(
-      `test/guards/${entry.name} is both underscore-prefixed (a helper, skipped by ` +
-        `discovery) and a .test.ts file (executed by vitest) — its MUTATIONS would ` +
-        `silently never run. Rename the helper without .test.ts, or drop the prefix.`,
-    );
-  }
-}
-const GUARDS = guardEntries
-  .map((entry) => entry.name)
-  .filter((entry) => entry.endsWith('.test.ts') && !entry.startsWith('_'))
-  .toSorted()
-  .map((entry) => `test/guards/${entry}`);
+  return files.map((file) => ({
+    pkg,
+    file: `test/guards/${file}`,
+    label: `${pkg.name}: test/guards/${file}`,
+  }));
+});
 if (GUARDS.length === 0)
-  die('no guard files found under test/guards — a vacuous run proves nothing');
+  die('no guard files found under packages/*/test/guards — a vacuous run proves nothing');
 
 /**
  * Extract one guard's MUTATIONS.
@@ -121,36 +155,37 @@ if (GUARDS.length === 0)
  * check below.
  */
 function extractMutations(guard) {
-  const path = join(corePackage, guard);
+  const path = join(guard.pkg.dir, guard.file);
   const source = readFileSync(path, 'utf8');
 
   const declaration = /^export const MUTATIONS: GuardMutation\[\] = \[$/m.exec(source);
   if (declaration === null) {
     die(
-      `${guard} exports no MUTATIONS — every guard ships its breaks beside its ` +
+      `${guard.label} exports no MUTATIONS — every guard ships its breaks beside its ` +
         `assertions. Add \`export const MUTATIONS: GuardMutation[] = [ … ];\` ` +
         `(see test/guards/_mutations.ts), with at least one entry.`,
     );
   }
   const open = source.indexOf('[', declaration.index);
   const close = source.indexOf('\n];', open);
-  if (close === -1) die(`${guard}: the MUTATIONS literal never closes with a top-level \`];\``);
+  if (close === -1)
+    die(`${guard.label}: the MUTATIONS literal never closes with a top-level \`];\``);
   const literal = source.slice(open, close + 2); // `[` … `\n]`
 
   let mutations;
   try {
     // An empty sandbox: entries are literal data, so any identifier reference —
     // an import, a helper, a computed value — throws here, with the file named.
-    mutations = runInNewContext(`(${literal})`, {}, { filename: `${guard}#MUTATIONS` });
+    mutations = runInNewContext(`(${literal})`, {}, { filename: `${guard.label}#MUTATIONS` });
   } catch (error) {
     die(
-      `${guard}: MUTATIONS did not evaluate as literal data — ` +
+      `${guard.label}: MUTATIONS did not evaluate as literal data — ` +
         `${error instanceof Error ? error.message : String(error)}. Entries must be ` +
         `plain object literals of strings (concatenation with + is fine).`,
     );
   }
   if (!Array.isArray(mutations) || mutations.length === 0) {
-    die(`${guard}: MUTATIONS must be a non-empty array`);
+    die(`${guard.label}: MUTATIONS must be a non-empty array`);
   }
 
   const sourceIds = [...literal.matchAll(/^ {4}id: '([^']+)',$/gm)].map((match) => match[1]);
@@ -177,7 +212,7 @@ function validateMutations(guard, { mutations, sourceIds }, seenIds) {
 
   for (const [index, mutation] of mutations.entries()) {
     const label = () =>
-      `${guard}: MUTATIONS[${String(index)}]` +
+      `${guard.label}: MUTATIONS[${String(index)}]` +
       (typeof mutation?.id === 'string' ? ` ("${mutation.id}")` : '');
     if (typeof mutation !== 'object' || mutation === null) die(`${label()} is not an object`);
     for (const key of Object.keys(mutation)) {
@@ -195,10 +230,10 @@ function validateMutations(guard, { mutations, sourceIds }, seenIds) {
     if (seenIds.has(mutation.id)) {
       die(
         `mutation id "${mutation.id}" appears in both ${seenIds.get(mutation.id)} and ` +
-          `${guard} — every id must be unique across all guards`,
+          `${guard.label} — every id must be unique across all guards`,
       );
     }
-    seenIds.set(mutation.id, guard);
+    seenIds.set(mutation.id, guard.label);
   }
 
   if (sourceIds.length !== mutations.length) {
@@ -211,13 +246,13 @@ function validateMutations(guard, { mutations, sourceIds }, seenIds) {
     if (lost !== undefined) {
       const partner = sourceIds[sourceIds.indexOf(lost) + 1] ?? '(none — trailing id)';
       die(
-        `${guard}: mutations "${lost}" and "${partner}" appear fused into one object — ` +
+        `${guard.label}: mutations "${lost}" and "${partner}" appear fused into one object — ` +
           `"${lost}"'s fields were silently overwritten and its mutation no longer runs. ` +
           `Restore the "},\\n  {" boundary between them.`,
       );
     }
     die(
-      `${guard}: the source declares ${String(sourceIds.length)} id lines but ` +
+      `${guard.label}: the source declares ${String(sourceIds.length)} id lines but ` +
         `${String(mutations.length)} mutation objects exist — two entries have merged ` +
         `or an id moved`,
     );
@@ -257,9 +292,9 @@ function assertProseCountsCurrent() {
 
 assertProseCountsCurrent();
 
-function runGuard(guard, guardSrc, guardRoot = corePackage) {
-  return spawnSync('./node_modules/.bin/vitest', ['run', guard, '--reporter=dot'], {
-    cwd: corePackage,
+function runGuard(guard, guardSrc, guardRoot = guard.pkg.dir) {
+  return spawnSync('./node_modules/.bin/vitest', ['run', guard.file, '--reporter=dot'], {
+    cwd: guard.pkg.dir,
     env: { ...process.env, SMELT_GUARD_SRC: guardSrc, SMELT_GUARD_ROOT: guardRoot },
     encoding: 'utf8',
   });
@@ -277,10 +312,10 @@ let failed = 0;
 
 console.log('\n=== pristine source: every guard must be green ===\n');
 for (const guard of GUARDS) {
-  const run = runGuard(guard, sourceDir);
+  const run = runGuard(guard, guard.pkg.sourceDir);
   const ok = run.status === 0;
   if (!ok) failed += 1;
-  console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${guard}`);
+  console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${guard.label}`);
   if (!ok) console.log(run.stdout + run.stderr);
 }
 
@@ -291,19 +326,19 @@ for (const { guard, mutations } of MUTATIONS_BY_GUARD) {
   for (const mutation of mutations) {
     const kind = mutation.kind ?? 'src';
     const scratch = join(scratchDir, mutation.id);
-    let guardSrc = sourceDir;
-    let guardRoot = corePackage;
+    let guardSrc = guard.pkg.sourceDir;
+    let guardRoot = guard.pkg.dir;
     let target;
 
     if (kind === 'src') {
       const mutantSrc = join(scratch, 'src');
       mkdirSync(dirname(mutantSrc), { recursive: true });
-      cpSync(sourceDir, mutantSrc, { recursive: true });
+      cpSync(guard.pkg.sourceDir, mutantSrc, { recursive: true });
       // The bundled grammars sit beside `src` in the real package, and the grammar
       // loader resolves them relative to its own module — so a mutant tree needs its own
       // copy, or a structural guard would go red for the wrong reason (a missing
       // grammar, not the mutation).
-      const grammarsDir = join(corePackage, 'grammars');
+      const grammarsDir = join(guard.pkg.dir, 'grammars');
       if (existsSync(grammarsDir)) {
         cpSync(grammarsDir, join(scratch, 'grammars'), { recursive: true });
       }
@@ -314,7 +349,7 @@ for (const { guard, mutations } of MUTATIONS_BY_GUARD) {
       // grammars and the real generator — the *committed* copy is the thing being staled.
       const mutantRoot = join(scratch, 'root');
       mkdirSync(mutantRoot, { recursive: true });
-      cpSync(join(corePackage, mutation.file), join(mutantRoot, mutation.file));
+      cpSync(join(guard.pkg.dir, mutation.file), join(mutantRoot, mutation.file));
       guardRoot = mutantRoot;
       target = join(mutantRoot, mutation.file);
     }
@@ -339,7 +374,7 @@ for (const { guard, mutations } of MUTATIONS_BY_GUARD) {
 
     console.log(`  ${caught ? 'CAUGHT ' : 'SURVIVED'} ${mutation.id}`);
     console.log(`           mutation: ${mutation.why}`);
-    console.log(`           guard:    ${guard}`);
+    console.log(`           guard:    ${guard.label}`);
     if (caught) {
       console.log(`           red on:   ${firstFailureLine(results.at(-1).output)}`);
     } else {
