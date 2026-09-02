@@ -9,7 +9,7 @@
       "focus": ["planStructural"],
       "budgetBytes": 4000,
       "task": "an agent read this file to understand planStructural before editing it",
-      "provenance": "byte-for-byte copy of this repository's packages/core/src/plan/structural.ts at the corpus commit"
+      "provenance": "materialized at run time from this repository's packages/core/src/plan/structural.ts, sha256-pinned by the committed corpus/structural.ts.json reference — the runner refuses a hash mismatch"
     },
     {
       "id": "tsx-component",

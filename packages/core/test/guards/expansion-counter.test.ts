@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { createSmelter } from '@guard/index';
+import { retrieveStats } from '@guard/stats';
+import type { RawRetrieveCounters } from '@guard/stats';
 import { MemoryElisionStore } from '@guard/store';
 import { DirectoryElisionStore } from '@guard/store-dir';
 import type { ElisionStore } from '@guard/types';
@@ -25,8 +27,9 @@ import type { ElisionStore } from '@guard/types';
  * `expansionRate` mean different things depending on where the bytes happen to live.
  *
  * Mutation: `pnpm mutate` deletes the increment in `store.ts`, and this must go red.
- * A second mutation nails the degenerate-outcome flag flat to `false`, because a flag
- * that can never fire is the same silence in a different shape.
+ * A second mutation nails the degenerate-outcome flag flat to `false` in the shared
+ * derivation (`stats.ts`), because a flag that can never fire is the same silence in a
+ * different shape — and a third wires the shared expansion-rate arithmetic itself flat.
  */
 
 const roots: string[] = [];
@@ -35,7 +38,10 @@ afterAll(() => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
-const STORES: readonly (readonly [string, () => ElisionStore])[] = [
+/** Both shipped stores expose their raw counters, so the guard can watch the seam. */
+type CounterStore = ElisionStore & { rawCounters(): RawRetrieveCounters };
+
+const STORES: readonly (readonly [string, () => CounterStore])[] = [
   ['MemoryElisionStore', () => new MemoryElisionStore()],
   [
     'DirectoryElisionStore',
@@ -184,5 +190,37 @@ describe.each(STORES)('the expansion rate is actually counted — %s', (_name, m
       before.expansionRate,
     );
     expect(after.allElisionsRetrieved).toBe(false);
+  });
+
+  /**
+   * The seam itself: a store supplies raw counters, and the *shared* `retrieveStats()`
+   * derives the metric — there is no per-store copy of the arithmetic left to drift.
+   * Both stores are driven to the same raw counters and must agree with the shared
+   * derivation on the same values. Mutation: `pnpm mutate` wires the shared
+   * derivation flat in `stats.ts`, and this file must go red.
+   */
+  it('derives stats through the shared retrieveStats() — raw counters in, one arithmetic out', () => {
+    const store = makeStore();
+    const a = store.put('alpha content');
+    store.put('beta content');
+    store.retrieve(a);
+    expect(() => store.retrieve('deadbeefdeadbeef')).toThrow(/no stored content/);
+
+    // Identical operations produce identical raw counters in every store — the
+    // counters are the store contract, byte sizes included.
+    const raw = store.rawCounters();
+    expect(raw).toEqual({
+      elisionsStored: 2,
+      bytesStored: 25,
+      retrieveCalls: 2,
+      uniqueRetrieved: 1,
+      misses: 1,
+    });
+
+    // stats() is exactly the shared derivation over those counters…
+    expect(store.stats()).toEqual(retrieveStats(raw));
+    // …and the derivation itself says what the arithmetic must say, so a broken
+    // shared function cannot hide behind agreeing with itself.
+    expect(store.stats()).toMatchObject({ expansionRate: 0.5, allElisionsRetrieved: false });
   });
 });

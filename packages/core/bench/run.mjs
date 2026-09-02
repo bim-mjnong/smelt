@@ -28,12 +28,15 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
   appendResults,
+  CORPUS_REF_FORMAT,
+  corpusRefMismatch,
   renderTable,
   resultRow,
   tier3Aggregate,
@@ -108,9 +111,74 @@ if (newestMtime(join(benchDir, '../src')) > statSync(distEntry).mtimeMs) {
   fail('dist/ is older than src/ — run `pnpm build` first, or the rows measure stale code.');
 }
 
+// -- materialize by-reference corpus entries ----------------------------------
+//
+// A corpus entry that mirrors this repository's own source is committed as a
+// `<name>.json` reference (CORPUS_REF_FORMAT) pinning the source path and its
+// sha256, not as a second copy of the bytes. The runner writes the real file here,
+// from the working tree, and REFUSES a hash mismatch — that refusal replaces the
+// old byte-copy guard: a drifted source cannot be measured under a stale pin. The
+// materialized file itself is gitignored; the reference is the committed artefact,
+// and it sits under corpus/, so the corpus commit every row names covers it. The
+// source itself is committed too — the src/ dirty check above already insisted.
+
+const repoRoot = resolve(benchDir, '../../..');
+const corpusDir = join(benchDir, 'corpus');
+const materialized = new Set();
+for (const entry of readdirSync(corpusDir)) {
+  if (!entry.endsWith('.json')) continue;
+  const ref = JSON.parse(readFileSync(join(corpusDir, entry), 'utf8'));
+  if (ref?.format !== CORPUS_REF_FORMAT) {
+    // Loud, not a skip: silently ignoring an unrecognized reference would leave its
+    // stale materialized target on disk to be measured with no hash check (Law 4).
+    fail(
+      `corpus/${entry} declares format ${JSON.stringify(ref?.format ?? null)}, not ` +
+        `"${CORPUS_REF_FORMAT}" — an unrecognized reference cannot be materialized, ` +
+        'and cannot be skipped either: its target would be measured with no hash pin.',
+    );
+  }
+  const source = readFileSync(join(repoRoot, ref.from));
+  const actual = createHash('sha256').update(source).digest('hex');
+  if (actual !== ref.sha256) {
+    fail(
+      corpusRefMismatch({
+        refFile: `corpus/${entry}`,
+        from: ref.from,
+        pinned: ref.sha256,
+        actual,
+      }),
+    );
+  }
+  writeFileSync(join(corpusDir, entry.slice(0, -'.json'.length)), source);
+  materialized.add(`corpus/${entry.slice(0, -'.json'.length)}`);
+}
+
 // -- load and validate the cases ---------------------------------------------
 
 const manifest = JSON.parse(readFileSync(join(benchDir, 'cases.json'), 'utf8'));
+
+// A corpus file is measurable only if git tracks its bytes or this run materialized
+// it under a verified pin. A leftover target from a prior materialization whose
+// reference was since removed still exists on disk — gitignored, so the dirty check
+// above is blind to it — but no commit pins its bytes: measuring it would append a
+// row citing a corpus commit that cannot reproduce it (Law 4).
+const trackedResult = git(['ls-files', '--', 'corpus']);
+if (trackedResult.status !== 0) {
+  fail('git ls-files failed — cannot establish which corpus files are committed.');
+}
+const tracked = new Set(trackedResult.stdout.split('\n').filter((line) => line !== ''));
+for (const benchCase of Array.isArray(manifest?.cases) ? manifest.cases : []) {
+  const file = benchCase?.file;
+  if (typeof file !== 'string' || !existsSync(join(benchDir, file))) continue; // validateCases reports
+  if (!tracked.has(file) && !materialized.has(file)) {
+    fail(
+      `bench/${file} exists but is neither git-tracked nor materialized by this run — ` +
+        'a stale leftover from an earlier materialization. Delete it, or restore its ' +
+        `committed reference (${file}.json), so the corpus commit pins every measured byte.`,
+    );
+  }
+}
+
 const problems = validateCases(manifest, (file) => existsSync(join(benchDir, file)));
 if (problems.length > 0) fail(`cases.json is invalid:\n  ${problems.join('\n  ')}`);
 

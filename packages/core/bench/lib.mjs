@@ -167,6 +167,12 @@ export function countTokensRequest(model, text) {
  * retrieved every elision back is a LOSS, reported as such with its input: every
  * byte smelt hid cost a round trip and saved nothing (HANDOFF Decision 4 names
  * this the one degenerate outcome).
+ *
+ * The arithmetic here is deliberately the same formula as `retrieveStats` in
+ * `src/stats.ts` (`loss` = `allElisionsRetrieved`). This file stays import-free so
+ * the bench tests run without a built `dist/`, so the formula cannot be shared —
+ * instead `test/bench.test.ts` pins the two copies to each other, and a drift
+ * between them goes red there before RESULTS.md and a tier3-log can disagree.
  */
 export function tier3Verdict({ elisionsStored, uniqueRetrieved }) {
   if (uniqueRetrieved > elisionsStored) {
@@ -204,4 +210,30 @@ export function tier3RowNote({ verdict, retrieveCalls, truncated, maxRounds }) {
     );
   }
   return verdict.loss ? `${base} — LOSS: the model retrieved everything back` : base;
+}
+
+/**
+ * The format marker a by-reference corpus entry carries. Such an entry is a committed
+ * `<name>.json` beside the corpus instead of committed bytes: it names a working-tree
+ * source file and pins its sha256. The runner materializes the real file at run time
+ * and refuses a hash mismatch — see {@link corpusRefMismatch}. This replaces the old
+ * byte-copy discipline for corpus files that mirror this repository's own source: the
+ * pinned hash, not a second copy of the bytes, is what keeps provenance honest.
+ */
+export const CORPUS_REF_FORMAT = 'smelt-bench-corpus-ref/v1';
+
+/**
+ * The refusal for a by-reference corpus entry whose source drifted from its pinned
+ * hash. Refusing IS the provenance discipline: a source that moved since the hash was
+ * pinned must never be silently measured under the old reference, because the corpus
+ * commit in every RESULTS.md row has to name the exact bytes measured (Law 4).
+ */
+export function corpusRefMismatch({ refFile, from, pinned, actual }) {
+  return (
+    `corpus reference ${refFile} pins sha256 ${pinned}, but ${from} in the working ` +
+    `tree hashes to ${actual}. The source has moved since the hash was pinned — ` +
+    `REFUSING to materialize or measure it. Review the change, update the pinned ` +
+    `sha256 in ${refFile}, and commit it, so the corpus commit in every RESULTS.md ` +
+    `row names the exact bytes it measured.`
+  );
 }
