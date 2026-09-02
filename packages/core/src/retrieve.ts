@@ -1,12 +1,28 @@
+import { defaultMarker } from './apply.ts';
 import type { ElisionStore, RetrieveTool } from './types.ts';
 
 /** The tool name smelt's markers reference. Consumers hard-code it; do not rename it. */
 export const RETRIEVE_TOOL_NAME = 'smelt_retrieve';
 
+/**
+ * The example marker inside the tool description is *rendered by the real marker
+ * builder*, never hand-written — the description is the one string a model reads to
+ * recognize markers, and an example whose shape drifted from the wire format
+ * (`<<smelt: …>>` when real markers say `<<smelt/v1: …>>`) would teach the model to
+ * miss every marker it actually receives. `test/guards/marker-format.test.ts` pins
+ * this to `MARKER_FORMAT_VERSION`.
+ */
+const EXAMPLE_MARKER = defaultMarker({
+  hash: 'a1b2c3d4e5f60718',
+  bytes: 412,
+  rule: 'sibling-collapse',
+  explanation: 'collapsed 3 sibling functions',
+});
+
 const DESCRIPTION =
   'Return the exact original text that was elided from a previous tool result. ' +
-  'Context you were given may contain markers like `<<smelt: collapsed 3 sibling functions ' +
-  '(412B) — retrieve("a1b2c3d4e5f60718")>>`. Call this with that hash to get those bytes ' +
+  `Context you were given may contain markers like \`${EXAMPLE_MARKER}\`. ` +
+  'Call this with that hash to get those bytes ' +
   'back verbatim. Nothing was deleted — it is all still here. Ask whenever the elided ' +
   'material might matter; guessing at what a marker hid is never correct.';
 

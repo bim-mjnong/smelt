@@ -156,4 +156,33 @@ describe.each(STORES)('the expansion rate is actually counted — %s', (_name, m
   it('is false for an empty store — nothing was hidden, so nothing was defeated', () => {
     expect(makeStore().stats().allElisionsRetrieved).toBe(false);
   });
+
+  /**
+   * The other direction of honesty: the counters must not *inflate* either.
+   * `reconstruct()` reassembles the original for the caller — a diff, a round-trip
+   * check, a write to disk — which is not the model asking for hidden material back.
+   * If reconstruction were counted, one verification pass would push the expansion
+   * rate to 1.0 and the honest signal this project sells would read as its own worst
+   * case. Mutation: `pnpm mutate` reverts reconstruct() to the counted retrieve()
+   * path, and this must go red.
+   */
+  it('does not count reconstruction as retrieval — reassembly is not the model asking', async () => {
+    const smelter = createSmelter({ store: makeStore() });
+    const text = Array.from({ length: 300 }, (_, i) => `line ${String(i)} padding padding`).join(
+      '\n',
+    );
+    const result = await smelter.smelt(text, { budgetBytes: 700 });
+    expect(result.elisions.length).toBeGreaterThan(0);
+
+    const before = smelter.stats();
+    expect(smelter.reconstruct(result)).toBe(text);
+    const after = smelter.stats();
+
+    expect(after.retrieveCalls, 'reconstruct() inflated retrieveCalls').toBe(before.retrieveCalls);
+    expect(after.uniqueRetrieved).toBe(before.uniqueRetrieved);
+    expect(after.expansionRate, 'reconstruct() inflated the expansion rate').toBe(
+      before.expansionRate,
+    );
+    expect(after.allElisionsRetrieved).toBe(false);
+  });
 });
