@@ -75,6 +75,10 @@ in 7,297 B → out 985 B   (-86.5%, 3 elisions)
   windows — right for logs, traces, and anything that is not code.
 - `--json` prints a versioned envelope; `--reconstruct` reads it back and prints the
   original, byte for byte. Reversibility you can run from a shell.
+- `smelt map <dir> --budget 4000` prints a ranked symbol map of a whole repository —
+  tree-sitter tags, deterministic PageRank, every included symbol stating why it ranked.
+  Modelled on Aider's repo-map, credited as such. The map fits itself to the budget by
+  construction.
 - The exit code is non-zero when the plan came back over budget, and the report says so.
   `1` over budget, `2` usage, `3` refused, `4` unexpected.
 
@@ -134,6 +138,53 @@ const smelter = createSmelter({
 // Retrieval counters survive restarts, so expansionRate stays meaningful across a session.
 ```
 
+## Wiring it into an agent harness
+
+Three steps, SDK-agnostic:
+
+```ts
+import { createSmelter, DirectoryElisionStore } from '@smeltjs/core';
+
+// once, at session start — the persistent store keeps bytes AND counters
+// across turns and processes, so the honest signal spans the whole session
+const smelter = createSmelter({
+  defaultBudgetBytes: 8_000,
+  store: new DirectoryElisionStore('.smelt/store'),
+});
+
+// 1 — every tool result passes through smelt on its way into the context
+const result = await smelter.smelt(rawToolOutput, {
+  path: 'src/server.ts', // structural planning for supported languages
+  focus: [whatTheModelAskedFor], // the grep pattern, the symbol, the error
+  budgetBytes: 4_000,
+});
+pushToolResult(result.text);
+
+// 2 — register the way back as a normal tool
+const { name, description, inputSchema, invoke } = smelter.tool; // 'smelt_retrieve'
+tools.push({ name, description, input_schema: inputSchema }); // Anthropic shape shown
+// in your dispatcher:
+//   if (call.name === 'smelt_retrieve') return invoke(call.input); // exact bytes back
+
+// 3 — report the stats wherever you surface metrics
+const s = smelter.stats();
+// s.expansionRate          the number to watch: fraction of hidden blobs asked back for
+// s.retrieveCalls          round trips you paid for
+// s.elisionsStored         how much smelt hid
+// s.allElisionsRetrieved   true means the cutting saved nothing — loosen budgets
+```
+
+`expansionRate` is the whole feedback loop: 0 means every cut was right; a rising rate
+means the budget is too aggressive for this task shape. Surface it next to your token
+counts — it is the honest signal this library exists to provide, and the persistent
+store is what makes it a session-level fact rather than a per-turn one.
+
+Prefer your own planner or a hosted reranker? `createSmelter({ planner })` accepts any
+`Planner` implementation, and `RerankStage` is the seam for relevance — both are yours
+to wire, in your source, with your key.
+
+## Fine print on the API
+
 Three things that look like bugs and are not:
 
 - **`budgetBytes` is required** (unless `smelt.config.json` sets a default). A budget
@@ -177,11 +228,11 @@ Three things that look like bugs and are not:
 
 From the committed measurement harness (`pnpm bench`), tier 1 — bytes and elision counts,
 deterministic, offline, reproducible by anyone from a fresh clone. Corpus commit
-`052bd3be2ed7`, run 2026-09-02, `@smeltjs/core` at the same commit:
+`1f65ab089364`, run 2026-09-02, `@smeltjs/core` at the same commit:
 
 | case                            | planner       | in (B) | out (B) |             reduction |
 | ------------------------------- | ------------- | -----: | ------: | --------------------: |
-| large TS file (this repo's own) | structural/v1 | 38,267 |   3,295 |                −91.4% |
+| large TS file (this repo's own) | structural/v1 | 22,462 |   3,680 |                −83.6% |
 | multi-file grep result          | lexical/v1    |  6,451 |     986 |                −84.7% |
 | java classes                    | structural/v1 |    689 |     366 |                −46.9% |
 | stack trace                     | lexical/v1    |    542 |     389 |                −28.2% |
