@@ -46,6 +46,20 @@ codebase-design glossary.
   slice of it. "Structural language" = a profile with a `structure` section;
   `grammar-provenance.json` holds the licence facts, its key set guard-pinned to the
   registry's wasm set.
+- **HarnessProfile**: the single adapter carrying every per-harness fact — tier and
+  caveats, the paths that detect it, its instruction file, its native hook schema as
+  data (`HarnessHookSchema`: read/bash tool names, payload keys, the deny and rewrite
+  documents), and its install steps, each step's kind being also how `remove` takes it
+  back out. One file per harness in `src/harness/`; the registry (`HARNESS_PROFILES` in
+  `src/harness/registry.ts`) is `Record<HarnessId, HarnessProfile>`, so totality is a
+  compile error. It imports nothing from `cli/` — that cycle is why the `--harness` help
+  list used to be hand-typed — and every rendered list and derived set (`HARNESS_IDS`,
+  `MANAGED_EVENTS`, `GUARD_EVENTS`, `JSON_HOOK_FILES`, `GUARD_ONLY_FILES`) is a view
+  over it. `planInstall`/`planRemove` fold over `profile.install`; they hold no per-harness
+  case. `shimFromSchema(schema)` builds the **ShimAdapter** a shim script runs and owns
+  what every shim shares — the rewrite-input splice, the deny fallback, and the one
+  rewrite announcement (also spliced into the generated opencode plugin). ShimAdapter
+  stays public as the escape hatch for a harness a table cannot express.
 - **MarkerPricing**: the seam through which planners ask what a marker will cost in
   bytes — `costBytes(reason, elidedBytes)`, required on every `PlanInput`. Owned and
   built by `apply.ts`: `markerPricing(language, marker)` is the one adapter, built from

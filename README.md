@@ -321,6 +321,8 @@ Three things that look like bugs and are not:
   byte-exact reversibility, pin the wire format, and re-derive the attribution file; plus
   a mutation runner (`pnpm mutate`) that breaks the source on purpose — 71 mutations
   across 15 guards, each watched going red — and fails if a guard does not notice. Every
+  a mutation runner (`pnpm mutate`) that breaks the source on purpose — 73 mutations
+  across 16 guards, each watched going red — and fails if a guard does not notice. Every
   guarantee in this README has a guard.
 
 ## Measured numbers

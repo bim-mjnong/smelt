@@ -1,31 +1,32 @@
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { describe, expect, it } from 'vitest';
 
+import { hasShim, shimAdapterOf } from '../src/harness/profile.ts';
+import { HARNESSES } from '../src/harness/registry.ts';
 import { DEFAULT_GUARD_SETTINGS } from '../src/hooks/guard-core.ts';
 import type { GuardSettings } from '../src/hooks/guard-core.ts';
-import { renderShimDecision } from '../src/hooks/shim.ts';
+import { renderShimDecision, REWRITE_ANNOUNCEMENT_OPENING } from '../src/hooks/shim.ts';
 import type { ShimAdapter } from '../src/hooks/shim.ts';
 import { adapter as claudeCode } from '../src/hooks/shims/claude-code.ts';
 import { adapter as codex } from '../src/hooks/shims/codex.ts';
-import { adapter as gemini } from '../src/hooks/shims/gemini.ts';
-import { adapter as grok } from '../src/hooks/shims/grok.ts';
-import { adapter as hermes } from '../src/hooks/shims/hermes.ts';
-import { adapter as cursor } from '../src/hooks/shims/cursor.ts';
 import { adapter as cline } from '../src/hooks/shims/cline.ts';
+
+import { FIXTURE_BY_HARNESS, harnessPayloads, valueAt } from './hooks-fixtures.ts';
 import { packageRoot } from './guards/_source.ts';
 
 /**
- * Schema-mapping tests, one recorded fixture file per harness
- * (`test/fixtures/hooks/<id>.json`). Each fixture cites the row of
- * docs/research/2026-09-02-harness-capability-matrix.md (or the § of the
- * enforcement research note) that its input shape was recorded from — so when a
- * harness moves its schema, the place to re-verify is one hop away.
+ * Schema-mapping tests — a **loop over the harness registry**, not a hand-written case
+ * per harness. Every profile that ships a shim is exercised through
+ * `renderShimDecision`, the exact function the shim processes run, against its own
+ * recorded payloads (`test/fixtures/hooks/<id>.json`) and its declared expectations
+ * (`test/hooks-fixtures.ts`). A new harness joins this suite by existing;
+ * `test/guards/harness-registry.test.ts` is what makes that a rule rather than a habit.
  *
- * Every case runs through `renderShimDecision`, the exact function the shim
- * processes run, with a stat stub for the two paths the fixtures speak about.
+ * The harness-specific properties that are not table-shaped — Claude Code's payload
+ * `cwd`, Codex's forbidden `"ask"`, Cline's nested input spelling — stay written out
+ * below, where they can say why they matter.
  */
 
 const stat = (path: string): { size: number; isFile: boolean } | undefined => {
@@ -37,14 +38,8 @@ const stat = (path: string): { size: number; isFile: boolean } | undefined => {
 const DENY: GuardSettings = DEFAULT_GUARD_SETTINGS;
 const REWRITE: GuardSettings = { ...DEFAULT_GUARD_SETTINGS, enforcement: 'rewrite' };
 
-function fixture(id: string): Record<string, unknown> {
-  const path = join(packageRoot(), 'test', 'fixtures', 'hooks', `${id}.json`);
-  const parsed = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
-  expect(parsed['_cites'], `${id}.json must cite the matrix row it was recorded from`).toContain(
-    'docs/research/2026-09-02',
-  );
-  return parsed;
-}
+/** The replacement the guard names for the oversized fixture file, in every harness. */
+const REPLACEMENT = 'smelt /repo/big.ts --budget 8000';
 
 function run(
   adapter: ShimAdapter,
@@ -58,58 +53,99 @@ function run(
   };
 }
 
-describe('claude-code shim (VERIFIED)', () => {
-  const cases = fixture('claude-code');
+describe.each(HARNESSES.filter(hasShim).map((profile) => [profile.id, profile] as const))(
+  '%s shim',
+  (id, profile) => {
+    const adapter = shimAdapterOf(profile);
+    const fixture = FIXTURE_BY_HARNESS[profile.id];
+    const cases = harnessPayloads(id);
 
-  it('denies an oversized Read in the PreToolUse decision schema, reason to the model', () => {
-    const { json, exitCode } = run(claudeCode, cases['readBig'], DENY);
-    expect(exitCode).toBe(0);
-    expect(json).toMatchObject({
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: 'deny',
-      },
+    it(`(${profile.tier}) has a recorded fixture — a shim with none is an untested shim`, () => {
+      expect(fixture, `${id}: no entry in FIXTURE_BY_HARNESS`).toBeDefined();
     });
-    const reason = (json as { hookSpecificOutput: { permissionDecisionReason: string } })
-      .hookSpecificOutput.permissionDecisionReason;
-    expect(reason).toContain('smelt /repo/big.ts --budget 8000');
-    expect(reason).toContain('smelt retrieve');
-  });
 
-  it('passes a windowed Read, a small Read, an un-guarded tool, and grep in deny mode', () => {
-    for (const name of ['readWindowed', 'readSmall', 'otherTool', 'bashGrep']) {
-      expect(run(claudeCode, cases[name], DENY), name).toEqual({
-        stdout: '',
-        exitCode: 0,
-        json: undefined,
-      });
-    }
-  });
-
-  it('denies an oversized cat in deny mode — never a silent rewrite', () => {
-    const { json } = run(claudeCode, cases['bashCatBig'], DENY);
-    expect(json).toMatchObject({
-      hookSpecificOutput: { permissionDecision: 'deny' },
+    it('denies an oversized Read in its own schema, with the steering reason where the model reads it', () => {
+      const { json, exitCode } = run(adapter, cases[fixture!.readBigCase], DENY);
+      expect(exitCode).toBe(0);
+      expect(json).toMatchObject(fixture!.denyShape);
+      const reason = valueAt(json, fixture!.reasonKeyPath);
+      expect(reason, `${id}: no reason at ${fixture!.reasonKeyPath.join('.')}`).toContain(
+        REPLACEMENT,
+      );
+      expect(reason).toContain('smelt retrieve');
     });
-    expect(JSON.stringify(json)).not.toContain('updatedInput');
-  });
 
-  it('rewrite mode substitutes via updatedInput, replacing the whole input object and saying so', () => {
+    it('passes what the guard has no opinion on', () => {
+      for (const name of fixture!.passCases) {
+        expect(run(adapter, cases[name], DENY), `${id}: ${name}`).toEqual({
+          stdout: '',
+          exitCode: 0,
+          json: undefined,
+        });
+      }
+    });
+
+    it('denies an oversized cat in deny mode — never a silent rewrite', () => {
+      const { json } = run(adapter, cases[fixture!.catCase], DENY);
+      expect(json).toMatchObject(fixture!.denyShape);
+      if (fixture!.rewrite !== undefined) {
+        expect(valueAt(json, fixture!.rewrite.commandKeyPath)).toBeUndefined();
+      }
+    });
+
+    it('rewrite mode substitutes the replacement and announces it — or falls back to the deny', () => {
+      const output = run(adapter, cases[fixture!.catCase], REWRITE);
+      const rewrite = fixture!.rewrite;
+      if (rewrite === undefined) {
+        // A deny-only harness: the input is read-only to its hooks, so rewrite mode
+        // must land on the deny whose reason still carries the exact replacement —
+        // never on nothing.
+        expect(output.json).toMatchObject(fixture!.denyShape);
+        expect(valueAt(output.json, fixture!.reasonKeyPath)).toContain(REPLACEMENT);
+        return;
+      }
+      expect(output.json).toMatchObject(rewrite.shape);
+      expect(valueAt(output.json, rewrite.commandKeyPath)).toBe(REPLACEMENT);
+      // What lands in the input slot, exactly: the whole input object with `command`
+      // replaced, or — where the harness shallow-merges — only the key that changed.
+      // Sending the whole object into a shallow merge would overwrite arguments the
+      // harness was keeping; sending only `command` where the whole object is
+      // expected would drop them.
+      const payloadInput = valueAt(cases[fixture!.catCase], fixture!.inputKeyPath);
+      expect(valueAt(output.json, rewrite.commandKeyPath.slice(0, -1))).toEqual(
+        rewrite.input === 'whole'
+          ? { ...(payloadInput as Record<string, unknown>), command: REPLACEMENT }
+          : { command: REPLACEMENT },
+      );
+      if (rewrite.announce === 'stderr') {
+        // No reason channel in this document, so the substitution is announced on
+        // stderr — through the one shared constant, never a per-shim copy.
+        expect(output.stderr).toBeDefined();
+        expect(output.stderr!.startsWith(REWRITE_ANNOUNCEMENT_OPENING)).toBe(true);
+        expect(output.stderr).toContain(REPLACEMENT);
+      } else {
+        expect(output.stderr).toBeUndefined();
+        expect(valueAt(output.json, fixture!.reasonKeyPath)).toContain('rewrote');
+      }
+    });
+  },
+);
+
+describe('claude-code shim (VERIFIED) — the properties only its schema has', () => {
+  const cases = harnessPayloads('claude-code');
+
+  it('rewrite mode replaces the whole input object, so unchanged fields ride along', () => {
     const { json } = run(claudeCode, cases['bashCatBig'], REWRITE);
     expect(json).toMatchObject({
       hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
         permissionDecision: 'allow',
         updatedInput: {
-          command: 'smelt /repo/big.ts --budget 8000',
+          command: REPLACEMENT,
           // unchanged fields ride along — updatedInput replaces the entire object
           description: 'Read the big file',
         },
       },
     });
-    const reason = (json as { hookSpecificOutput: { permissionDecisionReason: string } })
-      .hookSpecificOutput.permissionDecisionReason;
-    expect(reason).toContain('rewrote');
   });
 
   it('rewrite mode wraps grep through smelt — no --focus on the searched pattern', () => {
@@ -152,12 +188,11 @@ describe('claude-code shim (VERIFIED)', () => {
   });
 });
 
-describe('codex shim (VERIFIED)', () => {
-  const cases = fixture('codex');
+describe('codex shim (VERIFIED) — the two documented differences from Claude Code', () => {
+  const cases = harnessPayloads('codex');
 
-  it('mirrors the Claude Code decision schema, and never emits the unsupported "ask"', () => {
+  it('never emits the unsupported "ask" decision', () => {
     const { json } = run(codex, cases['readBig'], DENY);
-    expect(json).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
     expect(JSON.stringify(json)).not.toContain('"ask"');
   });
 
@@ -166,116 +201,25 @@ describe('codex shim (VERIFIED)', () => {
     const updated = (json as { hookSpecificOutput: { updatedInput: { command: unknown } } })
       .hookSpecificOutput.updatedInput;
     expect(typeof updated.command).toBe('string');
-    expect(updated.command).toBe('smelt /repo/big.ts --budget 8000');
   });
 
-  it('maps the `shell` tool spelling too, and passes a small grep through', () => {
-    expect(run(codex, cases['shellGrep'], DENY)).toEqual({
-      stdout: '',
-      exitCode: 0,
-      json: undefined,
-    });
+  it('maps the `shell` tool spelling too', () => {
+    expect(run(codex, cases['shellGrep'], DENY).stdout).toBe('');
   });
 });
 
-describe('gemini shim (EXPERIMENTAL)', () => {
-  const cases = fixture('gemini');
+describe('cline shim (EXPERIMENTAL) — the nested input spelling', () => {
+  const cases = harnessPayloads('cline');
 
-  it('denies with the BeforeTool {"decision":"deny"} shape', () => {
-    const { json } = run(gemini, cases['readBig'], DENY);
-    expect(json).toMatchObject({ decision: 'deny' });
-    expect((json as { reason: string }).reason).toContain('smelt /repo/big.ts');
-  });
-
-  it('honors a windowed read_file (offset/limit)', () => {
-    expect(run(gemini, cases['readWindowed'], DENY).stdout).toBe('');
-  });
-
-  it('rewrites run_shell_command via hookSpecificOutput.tool_input, announced on stderr', () => {
-    const output = run(gemini, cases['shellCatBig'], REWRITE);
-    expect(output.json).toMatchObject({
-      hookSpecificOutput: {
-        hookEventName: 'BeforeTool',
-        tool_input: { command: 'smelt /repo/big.ts --budget 8000' },
-      },
-    });
-    expect(output.stderr).toContain('rewrite mode');
-  });
-});
-
-describe('grok shim (EXPERIMENTAL, deny-only)', () => {
-  const cases = fixture('grok');
-
-  it('denies with {"decision":"deny"}', () => {
-    expect(run(grok, cases['readBig'], DENY).json).toMatchObject({ decision: 'deny' });
-  });
-
-  it('rewrite mode falls back to a deny whose reason carries the replacement — input is read-only there', () => {
-    const { json } = run(grok, cases['bashCatBig'], REWRITE);
-    expect(json).toMatchObject({ decision: 'deny' });
-    expect((json as { reason: string }).reason).toContain('smelt /repo/big.ts --budget 8000');
-  });
-});
-
-describe('hermes shim (EXPERIMENTAL)', () => {
-  const cases = fixture('hermes');
-
-  it('blocks with {"action":"block"}', () => {
-    expect(run(hermes, cases['readBig'], DENY).json).toMatchObject({ action: 'block' });
-  });
-
-  it('rewrites with {"action":"modify","args":{command}} and announces on stderr — the modify schema has no reason field', () => {
-    const output = run(hermes, cases['bashCatBig'], REWRITE);
-    expect(output.json).toEqual({
-      action: 'modify',
-      args: { command: 'smelt /repo/big.ts --budget 8000' },
-    });
-    // A rewrite must never be silent: no reason channel
-    // in the schema means the substitution is announced on stderr instead.
-    expect(output.stderr).toContain('rewrite mode');
-    expect(output.stderr).toContain('smelt /repo/big.ts --budget 8000');
-  });
-});
-
-describe('cursor shim (EXPERIMENTAL)', () => {
-  const cases = fixture('cursor');
-
-  it('denies with permission:"deny" and the steering text in agentMessage', () => {
-    const { json } = run(cursor, cases['readBig'], DENY);
-    expect(json).toMatchObject({ permission: 'deny' });
-    expect((json as { agentMessage: string }).agentMessage).toContain('smelt retrieve');
-  });
-
-  it('rewrites via updated_input (snake_case), announced on stderr', () => {
-    const output = run(cursor, cases['terminalCatBig'], REWRITE);
-    expect(output.json).toMatchObject({
-      permission: 'allow',
-      updated_input: { command: 'smelt /repo/big.ts --budget 8000' },
-    });
-    expect(output.stderr).toContain('rewrite mode');
-  });
-});
-
-describe('cline shim (EXPERIMENTAL, deny-only)', () => {
-  const cases = fixture('cline');
-
-  it('cancels with {"cancel":true} in both accepted input spellings', () => {
-    expect(run(cline, cases['readBig'], DENY).json).toMatchObject({ cancel: true });
+  it('cancels on a tool call nested under preToolUse, not only the flat spelling', () => {
     expect(run(cline, cases['readBigNested'], DENY).json).toMatchObject({ cancel: true });
-  });
-
-  it('rewrite mode falls back to cancel — the response schema has no input-modification field', () => {
-    const { json } = run(cline, cases['bashCatBig'], REWRITE);
-    expect(json).toMatchObject({ cancel: true });
-    expect((json as { errorMessage: string }).errorMessage).toContain(
-      'smelt /repo/big.ts --budget 8000',
-    );
   });
 });
 
 describe('the built shim scripts are runnable front doors', () => {
+  const script = join(packageRoot(), 'dist', 'hooks', 'shims', 'claude-code.js');
+
   it('dist/hooks/shims/claude-code.js answers a real spawned request (isMainModule wiring)', () => {
-    const script = join(packageRoot(), 'dist', 'hooks', 'shims', 'claude-code.js');
     const spawned = spawnSync(process.execPath, [script], {
       input: JSON.stringify({
         tool_name: 'Bash',
@@ -285,5 +229,12 @@ describe('the built shim scripts are runnable front doors', () => {
     });
     expect(spawned.status).toBe(0);
     expect(spawned.stdout).toBe(''); // allow: no output
+  });
+
+  it('malformed stdin → allow with a warning on stderr and exit 0 — fail open, never brick a session', () => {
+    const spawned = spawnSync(process.execPath, [script], { input: 'not json', encoding: 'utf8' });
+    expect(spawned.status).toBe(0);
+    expect(spawned.stdout).toBe(''); // an allow is silence, in this schema
+    expect(spawned.stderr).toContain('allowing the call');
   });
 });
