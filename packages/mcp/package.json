@@ -1,0 +1,65 @@
+{
+  "name": "@smeltjs/mcp",
+  "version": "0.1.0",
+  "description": "The smelt MCP server: structure-aware, reversible context optimization as four stdio tools.",
+  "license": "Apache-2.0",
+  "author": "mong-x",
+  "homepage": "https://github.com/smeltjs/smelt#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smeltjs/smelt.git",
+    "directory": "packages/mcp"
+  },
+  "bugs": "https://github.com/smeltjs/smelt/issues",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "llm",
+    "context",
+    "tokens",
+    "agents",
+    "compression",
+    "offline"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "smelt-mcp": "dist/bin.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "pnpm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@smeltjs/core": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "moduleDetection": "force",
+    "types": ["node"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+
+    // Same arrangement as packages/core: source imports name the file on disk
+    // (`./server.ts`), tsc rewrites to `.js` on emit, dist is plain ESM.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // Mirrors the vitest alias, so the guard typechecks against the real source while
+    // running against whatever tree `SMELT_GUARD_SRC` points at.
+    "paths": {
+      "@guard/*": ["./src/*.ts"]
+    }
+  },
+  "include": ["src", "test", "vitest.config.ts"]
+}
