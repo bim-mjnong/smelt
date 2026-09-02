@@ -19,6 +19,8 @@ import { EXIT, runCli } from '@guard/cli/run';
 import { SmeltError } from '@guard/errors';
 import { extractTags } from '@guard/repomap/tags';
 
+import type { GuardMutation } from './_mutations.ts';
+
 /**
  * REPO-MAP GUARD — the guarantees Slice 7 claims.
  *
@@ -46,8 +48,8 @@ import { extractTags } from '@guard/repomap/tags';
  *     the byte count of what actually landed on stdout, read off the RepoMap —
  *     never a second tally, never the budget dressed up as a measurement.
  *
- * Mutations for 2, 1, 4, 5 and 7 live in `scripts/mutate.mjs`; `pnpm mutate` proves
- * each one turns this file red.
+ * Mutations for 2, 1, 4, 5 and 7 live in the MUTATIONS export at the bottom of this
+ * file; `pnpm mutate` proves each one turns this file red.
  */
 
 const fixtureRoot = fileURLToPath(new URL('../fixtures/repomap-repo', import.meta.url));
@@ -420,3 +422,64 @@ describe('Slice 7 — the repo map keeps its claims', () => {
     expect(Number(match![2]!.replaceAll(',', ''))).toBe(BUDGET);
   });
 });
+
+/**
+ * The breaks this guard must catch. `pnpm mutate` applies each one to a scratch copy
+ * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
+ */
+export const MUTATIONS: GuardMutation[] = [
+  {
+    id: 'repomap-budget-unenforced',
+    file: 'repomap/map.ts',
+    find: '    if (bytes + lineBytes > budgetBytes) return false;',
+    replace: '    if (false) return false;',
+    why: 'the repo-map byte budget ignored — a map that overruns the budget it was handed breaks the planner contract silently',
+  },
+  {
+    id: 'repomap-tiebreak-dropped',
+    file: 'repomap/rank.ts',
+    find: '  if (a.name !== b.name) return a.name < b.name ? -1 : 1;',
+    replace: '  // name tie-break removed',
+    why: 'the stable path+name tie-break loses its name leg — equal-rank symbols fall back to incidental document order, and byte-for-byte determinism quietly dies',
+  },
+  {
+    id: 'repomap-cache-key-ignores-content',
+    file: 'repomap/cache.ts',
+    find: '  return contentHash(`${TAGS_CACHE_FORMAT}/${String(TAGS_CACHE_VERSION)}\\0${language}\\0${content}`);',
+    replace:
+      '  return contentHash(`${TAGS_CACHE_FORMAT}/${String(TAGS_CACHE_VERSION)}\\0${language}`);',
+    why: 'the cache key no longer derived from file content — an edited file is answered with stale tags, the exact staleness a content-hash key exists to make impossible',
+  },
+  {
+    id: 'repomap-corrupt-cache-trusted',
+    file: 'repomap/cache.ts',
+    find: "    if (tags === undefined) {\n      this.#discard(key);\n      return 'corrupt';\n    }",
+    replace: '    if (tags === undefined) {\n      return { defs: [], refs: [] };\n    }',
+    why: 'a corrupt cache entry quietly trusted as empty tags instead of discarded loudly — symbols vanish from the map with no warning anywhere',
+  },
+  {
+    id: 'repomap-refsout-per-definer',
+    file: 'repomap/rank.ts',
+    find: '    refsOut: refsOutByFile.get(def.path) ?? 0,',
+    replace: '    refsOut: outWeight.get(def.path) ?? 0,',
+    why: 'refsOut reported from the PageRank edge denominator, which grows once per definer file — a reference to a name two files define counts double, and every Law 2 explanation states a number nothing measured',
+  },
+  {
+    id: 'repomap-usage-site-counted-as-definition',
+    file: 'repomap/tags.ts',
+    find:
+      "  if (BODY_REQUIRED_TYPES.has(node.type) && node.childForFieldName('body') === null) {\n" +
+      '    return false; // a bodiless specifier is a usage or forward declaration, not a definition\n' +
+      '  }\n',
+    replace: '',
+    why: "the C/C++ body requirement dropped — `struct point p;` earns a `defined at` receipt it never had, and its name node poisons defNameStarts so the true definition's cross-file references silently vanish from the map",
+  },
+  {
+    id: 'repomap-map-report-bytes-invented',
+    file: 'cli/report.ts',
+    find: '    `bytes used ${group(map.outputBytes)} of ${group(map.budgetBytes)} budget — the map ` +',
+    replace:
+      '    `bytes used ${group(map.budgetBytes)} of ${group(map.budgetBytes)} budget — the map ` +',
+    why: "the map report's bytes-used figure wired to the budget — a budget-fitting report that always claims the budget spent, so the one number a human reads off `smelt map` stops being a measurement",
+  },
+];

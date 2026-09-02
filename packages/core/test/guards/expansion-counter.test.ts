@@ -11,6 +11,8 @@ import { MemoryElisionStore } from '@guard/store';
 import { DirectoryElisionStore } from '@guard/store-dir';
 import type { ElisionStore } from '@guard/types';
 
+import type { GuardMutation } from './_mutations.ts';
+
 /**
  * EXPANSION-COUNTER GUARD — the honest half of Law 3.
  *
@@ -224,3 +226,44 @@ describe.each(STORES)('the expansion rate is actually counted — %s', (_name, m
     expect(store.stats()).toMatchObject({ expansionRate: 0.5, allElisionsRetrieved: false });
   });
 });
+
+/**
+ * The breaks this guard must catch. `pnpm mutate` applies each one to a scratch copy
+ * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
+ */
+export const MUTATIONS: GuardMutation[] = [
+  {
+    id: 'counter-increment-dropped',
+    file: 'store.ts',
+    find: '    this.#retrieveCalls += 1;',
+    replace: '    // this.#retrieveCalls += 1;',
+    why: 'the expansion rate pinned at a flattering zero forever',
+  },
+  {
+    id: 'degenerate-outcome-never-fires',
+    file: 'stats.ts',
+    find: '    allElisionsRetrieved: raw.elisionsStored > 0 && raw.uniqueRetrieved === raw.elisionsStored,',
+    replace: '    allElisionsRetrieved: false,',
+    why: 'the one degenerate outcome smelt names, wired to a constant that can never fire',
+  },
+  {
+    id: 'reconstruct-counts-as-retrieval',
+    file: 'apply.ts',
+    find:
+      '    const content = store.peek(elision.hash);\n' +
+      '    if (content === undefined) throw new UnknownHashError(elision.hash);\n' +
+      '    pieces.push(output.subarray(cursor, elision.outputRange.start));\n' +
+      "    pieces.push(Buffer.from(content, 'utf8'));",
+    replace:
+      '    pieces.push(output.subarray(cursor, elision.outputRange.start));\n' +
+      "    pieces.push(Buffer.from(store.retrieve(elision.hash), 'utf8'));",
+    why: 'reconstruct() reverted to the counted retrieve() path — one verification round trip would push the expansion rate to 1.0, inflating the exact number this project exists to keep honest',
+  },
+  {
+    id: 'retrieve-stats-shared-derivation-broken',
+    file: 'stats.ts',
+    find: '    expansionRate: raw.elisionsStored === 0 ? 0 : raw.uniqueRetrieved / raw.elisionsStored,',
+    replace: '    expansionRate: 0,',
+    why: 'the one shared derivation of the honest signal wired flat — every store now reports a flattering zero at once, and no per-store copy of the arithmetic exists to disagree',
+  },
+];

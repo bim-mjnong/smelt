@@ -4,6 +4,8 @@ import { defaultMarker, MARKER_FORMAT_VERSION } from '@guard/apply';
 import { createRetrieveTool } from '@guard/retrieve';
 import { MemoryElisionStore } from '@guard/store';
 
+import type { GuardMutation } from './_mutations.ts';
+
 /**
  * MARKER-FORMAT GUARD — the wire surface a *model* sees.
  *
@@ -128,3 +130,25 @@ describe('the marker format is frozen, and versioned in band', () => {
     );
   });
 });
+
+/**
+ * The breaks this guard must catch. `pnpm mutate` applies each one to a scratch copy
+ * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
+ */
+export const MUTATIONS: GuardMutation[] = [
+  {
+    id: 'marker-format-silent-change',
+    file: 'apply.ts',
+    find: '  `<<smelt/${MARKER_FORMAT_VERSION}: ${explanation} (${String(bytes)}B) — retrieve("${hash}")>>`;',
+    replace:
+      '  `<<smelt/${MARKER_FORMAT_VERSION}: ${explanation} [${String(bytes)} bytes] retrieve=${hash}>>`;',
+    why: 'the wire surface a model sees, reshaped without its version moving — worse output, no error anywhere',
+  },
+  {
+    id: 'marker-version-not-frozen',
+    file: 'apply.ts',
+    find: "export const MARKER_FORMAT_VERSION = 'v1';",
+    replace: "export const MARKER_FORMAT_VERSION = 'v2';",
+    why: 'a new marker version with no frozen rendering — the format table must be total, not advisory',
+  },
+];

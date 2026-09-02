@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { WASM_BY_LANGUAGE } from '@guard/plan/grammar';
 
+import type { GuardMutation } from './_mutations.ts';
 import { guardRoot, packageRoot, repoRoot } from './_source.ts';
 
 /**
@@ -163,3 +164,18 @@ describe('THIRD-PARTY.md is generated, current, and total', () => {
     expect(run.stdout).toContain('would ship unattributed');
   });
 });
+
+/**
+ * The breaks this guard must catch. `pnpm mutate` stales the committed artefact in a
+ * scratch root and asserts this file goes red — see `test/guards/_mutations.ts`.
+ */
+export const MUTATIONS: GuardMutation[] = [
+  {
+    kind: 'artifact',
+    id: 'third-party-attribution-dropped',
+    file: 'THIRD-PARTY.md',
+    find: '| `tree-sitter-rust.wasm`',
+    replace: '| `tree-sitter-omitted.wasm`',
+    why: 'a bundled grammar losing its attribution in the committed notices — redistribution without a licence',
+  },
+];

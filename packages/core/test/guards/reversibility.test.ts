@@ -12,6 +12,8 @@ import type { ElisionPlan } from '@guard/types';
 
 import { BOUNDARY_TS, FUNCTIONS_TS, LONG_DOC_TS, MIXED_TSX } from '../structural-fixtures.ts';
 
+import type { GuardMutation } from './_mutations.ts';
+
 /**
  * REVERSIBILITY GUARD — Law 3.
  *
@@ -248,3 +250,26 @@ describe('Law 3 — every structural elision is reversible', () => {
     });
   }
 });
+
+/**
+ * The breaks this guard must catch. `pnpm mutate` applies each one to a scratch copy
+ * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
+ */
+export const MUTATIONS: GuardMutation[] = [
+  {
+    id: 'law3-marker-range-off-by-one',
+    file: 'apply.ts',
+    find: '      outputRange: { start: outputBytes, end: outputBytes + markerBuffer.length },',
+    replace:
+      '      outputRange: { start: outputBytes, end: outputBytes + markerBuffer.length - 1 },',
+    why: 'off-by-one marker bookkeeping — reconstruct would return almost-right text',
+  },
+  {
+    id: 'law3-elision-not-stored',
+    file: 'apply.ts',
+    find: '    const hash = store.put(removedText);',
+    replace:
+      '    const hash = removedText.length > 4096 ? store.put(removedText) : "0000000000000000";',
+    why: 'a size threshold that quietly makes small elisions unrecoverable',
+  },
+];

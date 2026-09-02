@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as cachePrefix from '@guard/cache/prefix';
 
+import type { GuardMutation } from './_mutations.ts';
 import { allSourceFiles, guardSrcRoot, readSource } from './_source.ts';
 
 const { detectCacheBreakers, findPrefixDivergence } = cachePrefix;
@@ -113,3 +114,27 @@ describe('cache-prefix hygiene: detect and warn, never rewrite', () => {
     }
   });
 });
+
+/**
+ * The breaks this guard must catch. `pnpm mutate` applies each one to a scratch copy
+ * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
+ */
+export const MUTATIONS: GuardMutation[] = [
+  {
+    id: 'cache-hygiene-rewrites-input',
+    file: 'cache/prefix.ts',
+    find: '  const keys = Object.keys(record);',
+    replace:
+      '  const keys = Object.keys(record).toSorted();\n' +
+      '  for (const key of keys) { const kept = record[key]; delete record[key]; record[key] = kept; }',
+    why: 'the helpful in-place fix — sorting the caller\'s JSON keys for the cache — that "detect and warn, never rewrite" exists to refuse',
+  },
+  {
+    id: 'cache-hit-rate-claimed',
+    file: 'cache/prefix.ts',
+    find: 'export const ANTHROPIC_PROMPT_CACHE_FACTS = {',
+    replace:
+      '// smelt keeps its consumers’ cache hit rate high\nexport const ANTHROPIC_PROMPT_CACHE_FACTS = {',
+    why: "the pitch's hit-rate claim reappearing as a comment — even figure-free, a hit rate is a frequency nothing here has measured, the exact class of claim Law 4 was written against",
+  },
+];

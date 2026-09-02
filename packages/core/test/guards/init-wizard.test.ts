@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CONFIG_FILE_NAME } from '@guard/cli/config';
 import { RERANK_STUB_FILE, runInit } from '@guard/cli/init';
 
+import type { GuardMutation } from './_mutations.ts';
+
 /**
  * INIT-WIZARD GUARD — the two promises `smelt init` makes about other people's files.
  *
@@ -79,3 +81,17 @@ describe('the init wizard never touches an existing file without a per-file yes'
     expect(readFileSync(join(dir, RERANK_STUB_FILE), 'utf8')).toBe(sentinel);
   });
 });
+
+/**
+ * The breaks this guard must catch. `pnpm mutate` applies each one to a scratch copy
+ * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
+ */
+export const MUTATIONS: GuardMutation[] = [
+  {
+    id: 'init-overwrite-without-consent',
+    file: 'cli/init.ts',
+    find: "      if (answer !== 'yes') {",
+    replace: '      if (false) {',
+    why: 'the per-file overwrite consent wired shut — `smelt init` would clobber a hand-written file after any answer, the helpful-looking break the never-overwrite rule exists to refuse',
+  },
+];
