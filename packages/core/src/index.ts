@@ -36,8 +36,13 @@ export {
 export { clearGrammarCache, grammarPath, loadGrammar, WASM_BY_LANGUAGE } from './plan/grammar.ts';
 export { LEXICAL_PLANNER_ID, LexicalPlanner, planLexical } from './plan/lexical.ts';
 export type { LexicalPlannerOptions } from './plan/lexical.ts';
-export { planStructural, STRUCTURAL_PLANNER_ID, StructuralPlanner } from './plan/structural.ts';
-export type { StructuralPlannerOptions } from './plan/structural.ts';
+export {
+  planStructural,
+  STRUCTURAL_LANGUAGES,
+  STRUCTURAL_PLANNER_ID,
+  StructuralPlanner,
+} from './plan/structural.ts';
+export type { StructuralLanguage, StructuralPlannerOptions } from './plan/structural.ts';
 export { createRetrieveTool, RETRIEVE_TOOL_NAME } from './retrieve.ts';
 export { unconfiguredDistillStage, unconfiguredRerankStage } from './stages.ts';
 export { MemoryElisionStore } from './store.ts';
@@ -114,9 +119,11 @@ export {
 export type { InitIo } from './cli/init.ts';
 
 /**
- * Which planner a smelter uses. `'structural'` parses TypeScript, TSX, Rust, Python
- * and Go with a bundled grammar and throws {@link GrammarUnavailableError} for
- * anything else — never a silent lexical fallback. See {@link StructuralPlanner}.
+ * Which planner a smelter uses. `'structural'` parses every language named in
+ * {@link STRUCTURAL_LANGUAGES} with a bundled grammar and throws
+ * {@link GrammarUnavailableError} for anything else — never a silent lexical
+ * fallback. The list is the single source of truth, so this doc cannot fall behind
+ * it. See {@link StructuralPlanner}.
  */
 export type Strategy = 'lexical' | 'structural';
 
