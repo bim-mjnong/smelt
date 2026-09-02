@@ -1,44 +1,36 @@
 import { Parser } from 'web-tree-sitter';
 import type { Node, Tree } from 'web-tree-sitter';
 
-import { markerForLanguage, MARKER_LINE_COMMENT_LEADERS } from '../apply.ts';
+import { markerForLanguage } from '../apply.ts';
 import { GrammarUnavailableError } from '../errors.ts';
 import { HASH_LENGTH } from '../hash.ts';
-import type { ElisionPlan, PlanInput, PlannedElision, Planner } from '../types.ts';
+import type { LanguageStructure } from '../lang/profile.ts';
+import { profileFor, structuralLanguages } from '../lang/registry.ts';
+import type { ElisionPlan, LanguageId, PlanInput, PlannedElision, Planner } from '../types.ts';
 
 import { loadGrammar } from './grammar.ts';
 
 export const STRUCTURAL_PLANNER_ID = 'structural/v1';
 
 /**
- * The languages this planner actually parses. Slice 2 scoped it to two grammars;
- * Slice 4 added rust, python and go, and Slice 4b added the ten prebuilt grammars
- * below — the same machinery, ten more node-kind sets. A language appears here only
- * once its node kinds are mapped in {@link STRUCTURE_BY_LANGUAGE}, because claiming a
- * language before that would produce markers that mislabel what they collapsed.
+ * The languages this planner actually parses — a derived view of the registry: every
+ * {@link LanguageProfile} that carries a `structure` section, in registry order. A
+ * language appears here only once its node kinds are mapped in its profile
+ * (`src/lang/<id>.ts`), because claiming a language before that would produce markers
+ * that mislabel what they collapsed.
  *
  * Exported for the totality guard (`test/guards/structural-totality.test.ts`): every
  * language named here must have a fixture, a snapshot and a doc-comment case, so a
  * language cannot be claimed without tests.
  */
-export const STRUCTURAL_LANGUAGES = [
-  'typescript',
-  'tsx',
-  'javascript',
-  'rust',
-  'python',
-  'go',
-  'java',
-  'c',
-  'cpp',
-  'c_sharp',
-  'ruby',
-  'php',
-  'kotlin',
-  'swift',
-  'bash',
-] as const;
-export type StructuralLanguage = (typeof STRUCTURAL_LANGUAGES)[number];
+export const STRUCTURAL_LANGUAGES: readonly LanguageId[] = structuralLanguages();
+
+/**
+ * Historically the union of the claimed ids; every `LanguageId` carries a profile
+ * now, so the compile-time totality this type enforced lives on the registry
+ * (`Record<LanguageId, LanguageProfile>`) instead.
+ */
+export type StructuralLanguage = LanguageId;
 
 /**
  * Every elision this planner produces carries this rule id, and the profitability
@@ -187,13 +179,17 @@ function planFromTree(
   options: StructuralPlannerOptions,
   language: StructuralLanguage,
 ): readonly PlannedElision[] {
-  const structure = STRUCTURE_BY_LANGUAGE[language];
+  const profile = profileFor(language);
+  // assertStructuralLanguage admits only languages whose profile carries a
+  // `structure` section — that is the definition of a structural language — so the
+  // assertion states a fact the seam already proved.
+  const structure = profile.structure!;
   const buildMarker = markerForLanguage(language);
-  // The marker lands as a line comment in every structural language (see
-  // MARKER_LINE_COMMENT_LEADERS), and a line comment comments out everything to the
-  // end of its line — so a collapse is only legal where nothing kept follows on the
-  // marker's own line. See the flush below.
-  const markerIsLineComment = MARKER_LINE_COMMENT_LEADERS[language] !== undefined;
+  // The marker lands as a line comment in every structural language (the profile's
+  // markerLeader), and a line comment comments out everything to the end of its
+  // line — so a collapse is only legal where nothing kept follows on the marker's
+  // own line. See the flush below.
+  const markerIsLineComment = profile.markerLeader !== undefined;
   const units = unitsOf(tree.rootNode, input.text, structure);
   const matched = matchUnits(units, input, options);
   const minSiblings = options.minSiblings ?? 1;
@@ -514,397 +510,9 @@ function countNoun(kind: string, count: number): string {
 }
 
 /**
- * Human words for the tree-sitter node types this planner expects at the top level of
- * a TypeScript or TSX file. What the map does not name, {@link kindOf} still labels
- * honestly: an `ERROR` node is an `'unparsed region'`, any other statement kind is a
- * `'statement'`, and only what remains is called a `'declaration'` — a marker that
- * calls a parse error or a log line a declaration would be lying about the tree.
- */
-const TS_KIND_LABELS: Readonly<Record<string, string>> = {
-  function_declaration: 'function',
-  generator_function_declaration: 'function',
-  function_signature: 'function',
-  class_declaration: 'class',
-  abstract_class_declaration: 'class',
-  interface_declaration: 'interface',
-  type_alias_declaration: 'type alias',
-  enum_declaration: 'enum',
-  lexical_declaration: 'variable',
-  variable_declaration: 'variable',
-  import_statement: 'import statement',
-  internal_module: 'namespace',
-  module: 'namespace',
-  ambient_declaration: 'ambient declaration',
-  expression_statement: 'statement',
-  hash_bang_line: 'shebang',
-  comment: 'comment',
-};
-
-/**
- * What this planner needs to know about a language, beyond its grammar: which node
- * types are comments (so a doc comment travels with its declaration), which node types
- * merely wrap the declaration that should be named (`export function f()` is a
- * function, `@cached def f()` is a function), and the human word for each top-level
- * node kind. One entry per {@link StructuralLanguage} — the `Record` keeps the two
- * lists total, so adding a language without mapping its kinds is a compile error.
- */
-interface LanguageStructure {
-  /** Top-level node types that are comments, in this grammar's vocabulary. */
-  readonly commentTypes: ReadonlySet<string>;
-  /**
-   * Top-level node types that are outer attributes — parsed as siblings of the item
-   * they decorate, but attached forward to it unconditionally by {@link unitsOf},
-   * because that is what the attribute means in the language.
-   */
-  readonly attributeTypes: ReadonlySet<string>;
-  /**
-   * Comments matching this pattern are pinned to the file — never attached, never
-   * collapsed. Go's `//go:build` governs which builds see the whole file, and the
-   * spec's mandatory blank line after it means it could never attach; bash and ruby
-   * shebang lines, and ruby's `# frozen_string_literal:` magic comment, govern how
-   * the file executes at all.
-   */
-  readonly pinnedCommentPattern?: RegExp;
-  /**
-   * Non-comment node types pinned to the file the same way — php's `<?php` open tag,
-   * a `#!` shebang line (javascript's `hash_bang_line`, kotlin and swift's
-   * `shebang_line`). Each is its own uncollapsible unit: a run that swallowed one
-   * would change what the survivor *is*, not just what it contains.
-   */
-  readonly pinnedTypes?: ReadonlySet<string>;
-  /**
-   * Per-node-type text patterns that pin a node the way {@link pinnedTypes} does —
-   * for kinds where only *some* nodes govern the file. C and C++ parse every
-   * `#pragma` as a `preproc_call`; only `#pragma once` changes what including the
-   * survivor *means*, so only it is pinned.
-   */
-  readonly pinnedPatternsByType?: Readonly<Record<string, RegExp>>;
-  /**
-   * Node types that belong to the *preceding* statement despite being parsed as
-   * top-level siblings — ruby's `heredoc_body`, which tree-sitter emits as a sibling
-   * of the statement holding the heredoc opener. Such a node extends the previous
-   * unit, so a collapse can never keep an opener while cutting its body (an
-   * unterminated heredoc the reparse cannot even see — tree-sitter-ruby reports no
-   * ERROR for a heredoc left open at EOF).
-   */
-  readonly ridesBackwardTypes?: ReadonlySet<string>;
-  /**
-   * Node types the grammar extends over trailing comments that belong to what
-   * *follows* — kotlin's `import_list` swallows a KDoc that directly follows the
-   * imports, which is the doc comment of the first declaration after them. The unit
-   * for such a node ends at its last non-comment token; the trailing comments ride
-   * forward and attach like any other comment block.
-   */
-  readonly trailingCommentSplitTypes?: ReadonlySet<string>;
-  /**
-   * Node types that wrap the declaration worth naming — the marker should say what is
-   * inside, not name the wrapper. The value is the label to fall back to when nothing
-   * nameable is found inside.
-   */
-  readonly wrapperTypes: Readonly<Record<string, string>>;
-  /** Human words per node type. See {@link TS_KIND_LABELS} for the labelling rules. */
-  readonly kindLabels: Readonly<Record<string, string>>;
-}
-
-const TS_STRUCTURE: LanguageStructure = {
-  commentTypes: new Set(['comment']),
-  attributeTypes: new Set(),
-  // `#!/usr/bin/env -S npx tsx` parses as a hash_bang_line here too — same node, same
-  // law as javascript's: collapsing it changes which interpreter runs the file.
-  pinnedTypes: new Set(['hash_bang_line']),
-  wrapperTypes: { export_statement: 'export' },
-  kindLabels: TS_KIND_LABELS,
-};
-
-const STRUCTURE_BY_LANGUAGE: Readonly<Record<StructuralLanguage, LanguageStructure>> = {
-  typescript: TS_STRUCTURE,
-  tsx: TS_STRUCTURE,
-  javascript: {
-    commentTypes: new Set(['comment']),
-    attributeTypes: new Set(),
-    // `#!/usr/bin/env node` parses as a hash_bang_line node, and it decides how the
-    // file executes — a collapse that swallowed it would break every direct invocation.
-    pinnedTypes: new Set(['hash_bang_line']),
-    wrapperTypes: { export_statement: 'export' },
-    kindLabels: {
-      function_declaration: 'function',
-      generator_function_declaration: 'function',
-      class_declaration: 'class',
-      lexical_declaration: 'variable',
-      variable_declaration: 'variable',
-      import_statement: 'import statement',
-      expression_statement: 'statement',
-      hash_bang_line: 'shebang',
-      comment: 'comment',
-    },
-  },
-  rust: {
-    // `///` and `//!` doc comments are line_comment nodes; `/** … */` is block_comment.
-    commentTypes: new Set(['line_comment', 'block_comment']),
-    // `#[…]` is a top-level sibling in tree-sitter-rust; it rides forward to its item.
-    attributeTypes: new Set(['attribute_item']),
-    wrapperTypes: {},
-    kindLabels: {
-      function_item: 'function',
-      struct_item: 'struct',
-      enum_item: 'enum',
-      union_item: 'union',
-      trait_item: 'trait',
-      impl_item: 'impl block',
-      mod_item: 'module',
-      macro_definition: 'macro',
-      type_item: 'type alias',
-      const_item: 'constant',
-      static_item: 'static item',
-      use_declaration: 'use declaration',
-      extern_crate_declaration: 'extern crate declaration',
-      attribute_item: 'attribute',
-      foreign_mod_item: 'extern block',
-    },
-  },
-  python: {
-    // Docstrings are not comments — they live inside the definition's body, so a kept
-    // definition keeps its docstring because units are kept whole. `#` comments above
-    // a definition attach the same way `/** … */` does in TypeScript.
-    commentTypes: new Set(['comment']),
-    attributeTypes: new Set(),
-    // `#!/usr/bin/env python3` parses as a plain comment node, but it decides which
-    // interpreter runs the file — pinned the way the bash and ruby shebangs are.
-    pinnedCommentPattern: /^#!/,
-    wrapperTypes: { decorated_definition: 'declaration' },
-    kindLabels: {
-      function_definition: 'function',
-      class_definition: 'class',
-      import_statement: 'import statement',
-      import_from_statement: 'import statement',
-      future_import_statement: 'import statement',
-      expression_statement: 'statement',
-    },
-  },
-  go: {
-    commentTypes: new Set(['comment']),
-    attributeTypes: new Set(),
-    // `//go:build` (and the legacy `// +build`) constrain the whole file's builds.
-    pinnedCommentPattern: /^\/\/(go:build|\s*\+build)\s/,
-    wrapperTypes: {},
-    kindLabels: {
-      function_declaration: 'function',
-      method_declaration: 'method',
-      type_declaration: 'type declaration',
-      const_declaration: 'constant',
-      var_declaration: 'variable',
-      import_declaration: 'import declaration',
-      package_clause: 'package clause',
-    },
-  },
-  java: {
-    // `//` is line_comment, `/** … */` javadoc is block_comment — both attach.
-    commentTypes: new Set(['line_comment', 'block_comment']),
-    attributeTypes: new Set(),
-    wrapperTypes: {},
-    kindLabels: {
-      class_declaration: 'class',
-      interface_declaration: 'interface',
-      enum_declaration: 'enum',
-      record_declaration: 'record',
-      annotation_type_declaration: 'annotation type',
-      package_declaration: 'package declaration',
-      import_declaration: 'import declaration',
-      module_declaration: 'module declaration',
-    },
-  },
-  c: {
-    commentTypes: new Set(['comment']),
-    attributeTypes: new Set(),
-    // Every `#pragma` is a preproc_call; only `#pragma once` governs what including
-    // the file *means*, so only it is pinned — the `//go:build` law again.
-    pinnedPatternsByType: { preproc_call: /^#\s*pragma\s+once\b/ },
-    wrapperTypes: {},
-    kindLabels: {
-      function_definition: 'function',
-      declaration: 'declaration',
-      struct_specifier: 'struct',
-      union_specifier: 'union',
-      enum_specifier: 'enum',
-      type_definition: 'type definition',
-      preproc_include: 'include directive',
-      preproc_def: 'macro definition',
-      preproc_function_def: 'macro definition',
-      // `#pragma`, `#if`/`#ifdef` regions — read off the tree, never "declaration".
-      preproc_call: 'preprocessor directive',
-      preproc_if: 'preprocessor conditional',
-      preproc_ifdef: 'preprocessor conditional',
-      preproc_else: 'preprocessor conditional',
-    },
-  },
-  cpp: {
-    commentTypes: new Set(['comment']),
-    attributeTypes: new Set(),
-    // Same preprocessor, same `#pragma once` pin as c above.
-    pinnedPatternsByType: { preproc_call: /^#\s*pragma\s+once\b/ },
-    // `template <typename T> class Box {}` — the marker should say what the template
-    // declares, not just that it is a template.
-    wrapperTypes: { template_declaration: 'template' },
-    kindLabels: {
-      function_definition: 'function',
-      declaration: 'declaration',
-      struct_specifier: 'struct',
-      class_specifier: 'class',
-      union_specifier: 'union',
-      enum_specifier: 'enum',
-      type_definition: 'type definition',
-      alias_declaration: 'type alias',
-      namespace_definition: 'namespace',
-      using_declaration: 'using declaration',
-      linkage_specification: 'extern block',
-      preproc_include: 'include directive',
-      preproc_def: 'macro definition',
-      preproc_function_def: 'macro definition',
-      preproc_call: 'preprocessor directive',
-      preproc_if: 'preprocessor conditional',
-      preproc_ifdef: 'preprocessor conditional',
-      preproc_else: 'preprocessor conditional',
-    },
-  },
-  c_sharp: {
-    // `///` doc comments and `//` line comments are both plain comment nodes.
-    commentTypes: new Set(['comment']),
-    attributeTypes: new Set(),
-    wrapperTypes: {},
-    kindLabels: {
-      class_declaration: 'class',
-      interface_declaration: 'interface',
-      struct_declaration: 'struct',
-      enum_declaration: 'enum',
-      record_declaration: 'record',
-      delegate_declaration: 'delegate',
-      namespace_declaration: 'namespace',
-      file_scoped_namespace_declaration: 'namespace',
-      using_directive: 'using directive',
-      global_statement: 'statement',
-    },
-  },
-  ruby: {
-    commentTypes: new Set(['comment']),
-    attributeTypes: new Set(),
-    // The shebang and the `# frozen_string_literal:` magic comment both govern how
-    // the whole file executes; neither may collapse into a run.
-    pinnedCommentPattern: /^#(?:!|\s*frozen_string_literal:)/,
-    // A heredoc's body is a top-level sibling of the statement holding its opener —
-    // it extends that statement's unit, or a collapse could keep the opener and cut
-    // the body, leaving an unterminated heredoc that swallows every declaration
-    // after it (and tree-sitter-ruby reports no ERROR for it at EOF).
-    ridesBackwardTypes: new Set(['heredoc_body']),
-    wrapperTypes: {},
-    kindLabels: {
-      method: 'method',
-      singleton_method: 'method',
-      class: 'class',
-      module: 'module',
-      // Top-level `require "json"` and `CONSTANT = 1` are expression nodes in
-      // tree-sitter-ruby; "statement" is the honest generic word for both — and for
-      // top-level control-flow blocks, which are expressions here too.
-      call: 'statement',
-      assignment: 'statement',
-      if: 'statement',
-      unless: 'statement',
-      case: 'statement',
-      while: 'statement',
-      until: 'statement',
-      for: 'statement',
-      begin: 'statement',
-      heredoc_body: 'heredoc body',
-      comment: 'comment',
-    },
-  },
-  php: {
-    // `//`, `#` and `/** … */` PHPDoc are all comment nodes.
-    commentTypes: new Set(['comment']),
-    attributeTypes: new Set(),
-    // `<?php` is what makes the rest of the file php at all.
-    pinnedTypes: new Set(['php_tag']),
-    wrapperTypes: {},
-    kindLabels: {
-      function_definition: 'function',
-      class_declaration: 'class',
-      interface_declaration: 'interface',
-      trait_declaration: 'trait',
-      enum_declaration: 'enum',
-      const_declaration: 'constant',
-      namespace_definition: 'namespace',
-      namespace_use_declaration: 'use declaration',
-      expression_statement: 'statement',
-      php_tag: 'php tag',
-      // Raw markup between `?>` and `<?php` — calling it a declaration would be the
-      // marker lying about the tree.
-      text: 'html section',
-      text_interpolation: 'html section',
-    },
-  },
-  kotlin: {
-    // `//` is line_comment; `/** … */` KDoc is multiline_comment.
-    commentTypes: new Set(['line_comment', 'multiline_comment']),
-    attributeTypes: new Set(),
-    // `#!/usr/bin/env kotlin` parses as a shebang_line node; same law as the rest.
-    pinnedTypes: new Set(['shebang_line']),
-    // tree-sitter-kotlin extends import_list over a doc comment that directly
-    // follows it — the KDoc of the first documented declaration after the imports.
-    // Split it back out, or that declaration loses its doc to the import collapse.
-    trailingCommentSplitTypes: new Set(['import_list']),
-    wrapperTypes: {},
-    kindLabels: {
-      function_declaration: 'function',
-      // tree-sitter-kotlin parses class, interface and enum headers all as
-      // class_declaration — "type declaration" is the honest word for the union.
-      class_declaration: 'type declaration',
-      object_declaration: 'object',
-      property_declaration: 'property',
-      type_alias: 'type alias',
-      package_header: 'package header',
-      import_list: 'import list',
-      shebang_line: 'shebang',
-    },
-  },
-  swift: {
-    // `//` and `///` are comment nodes; `/* … */` is multiline_comment.
-    commentTypes: new Set(['comment', 'multiline_comment']),
-    attributeTypes: new Set(),
-    // `#!/usr/bin/env swift` parses as a shebang_line node; same law as the rest.
-    pinnedTypes: new Set(['shebang_line']),
-    wrapperTypes: {},
-    kindLabels: {
-      function_declaration: 'function',
-      // tree-sitter-swift parses struct, class, enum and extension declarations all
-      // as class_declaration — "type declaration" is the honest word for the union.
-      class_declaration: 'type declaration',
-      protocol_declaration: 'protocol',
-      property_declaration: 'property',
-      typealias_declaration: 'type alias',
-      import_declaration: 'import declaration',
-      shebang_line: 'shebang',
-    },
-  },
-  bash: {
-    commentTypes: new Set(['comment']),
-    attributeTypes: new Set(),
-    // The shebang decides which interpreter runs the file. It parses as an ordinary
-    // comment node, so it is pinned the way go's build tag is — never collapsed.
-    pinnedCommentPattern: /^#!/,
-    wrapperTypes: {},
-    kindLabels: {
-      function_definition: 'function',
-      command: 'command',
-      variable_assignment: 'variable assignment',
-      declaration_command: 'variable assignment',
-      comment: 'comment',
-    },
-  },
-};
-
-/**
  * The kind of a declaration, unwrapping wrappers (`export …`, `@decorator`) so the
  * marker names what it hides. What the language's map does not name is still labelled
- * honestly — see {@link TS_KIND_LABELS}.
+ * honestly — see {@link LanguageStructure.kindLabels} for the labelling rules.
  */
 function kindOf(node: Node, structure: LanguageStructure): string {
   const wrapperFallback = structure.wrapperTypes[node.type];

@@ -330,16 +330,24 @@ laptop is the worst possible outcome.
 
 ## Adding a language
 
-1. Add the id to `LanguageId` in `src/types.ts`. `WASM_BY_LANGUAGE` in
-   `src/plan/grammar.ts` is typed `Record<LanguageId, string>`, so this immediately fails
-   to compile until you map its grammar — the two cannot drift.
-2. Map the extensions in `src/detect.ts` and add the id to `SUPPORTED_LANGUAGES`.
-3. `test/detect.test.ts` asserts a grammar resolves on disk for every language in
-   `SUPPORTED_LANGUAGES`. It will fail until step 1 is real.
-4. Add the language's node kinds to `STRUCTURE_BY_LANGUAGE` in
-   `src/plan/structural.ts`, and a fixture proving a sibling collapse on it — the
-   totality guard (`test/guards/structural-totality.test.ts`) fails until the
-   fixture, snapshot and doc-comment case all exist.
+1. Add the id to `LanguageId` in `src/types.ts`. The registry in `src/lang/registry.ts`
+   is typed `Record<LanguageId, LanguageProfile>`, so this immediately fails to compile
+   until you write the language's profile — the id list and the facts cannot drift.
+2. Write the profile: one file, `src/lang/<id>.ts`, carrying every per-language fact —
+   extensions, grammar `wasm`, `markerLeader`, the `structure` section (node kinds,
+   pins, doc-comment attachment) and the `repomap` section. Register it in
+   `LANGUAGE_PROFILES`. The extension map, `SUPPORTED_LANGUAGES`, `WASM_BY_LANGUAGE`,
+   `STRUCTURAL_LANGUAGES`, the marker leaders and the repo-map tag tables are all
+   derived from the registry — there is no second table to edit.
+3. Add the grammar's entry to `packages/core/grammar-provenance.json` — the
+   third-party guard pins its key set to the registry's wasm set, and the generator
+   refuses an unattributed grammar.
+4. `test/detect.test.ts` asserts a grammar resolves on disk for every language in
+   `SUPPORTED_LANGUAGES`. It will fail until the grammar is real.
+5. A profile with a `structure` section claims the language for the structural
+   planner, so add a fixture proving a sibling collapse on it — the totality guard
+   (`test/guards/structural-totality.test.ts`) fails until the fixture, snapshot and
+   doc-comment case all exist.
 
 ## Opening a PR
 

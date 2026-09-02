@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { SUPPORTED_LANGUAGES } from '@guard/detect';
+import { structuralLanguages } from '@guard/lang/registry';
 import { WASM_BY_LANGUAGE } from '@guard/plan/grammar';
-import { STRUCTURAL_LANGUAGES } from '@guard/plan/structural';
 
 import { FIXTURE_BY_LANGUAGE } from '../structural-fixtures.ts';
 
@@ -14,8 +14,10 @@ import { packageRoot } from './_source.ts';
 /**
  * STRUCTURAL TOTALITY GUARD — a language cannot be claimed without tests.
  *
- * Slice 4b made adding a language cheap: one entry in `WASM_BY_LANGUAGE`, one in
- * `STRUCTURAL_LANGUAGES`, one node-kind map. That is exactly when the tests stop
+ * Slice 4b made adding a language cheap, and the LanguageProfile registry made it
+ * cheaper still: one profile file in `src/lang/` with a `structure` section, and the
+ * extension map, grammar map and claimed-language list all follow. That is exactly
+ * when the tests stop
  * keeping up — the planner compiles, the demo works, and the new language ships with
  * no fixture, no snapshot and no proof that a doc comment survives in its idiom. Six
  * months later a marker mislabels what it collapsed in that language and nothing is
@@ -41,7 +43,10 @@ import { packageRoot } from './_source.ts';
 const SNAPSHOT_PATH = join(packageRoot(), 'test/__snapshots__/structural.test.ts.snap');
 
 describe('structural totality — every claimed language has a fixture, a snapshot, and a doc-comment case', () => {
-  const claimed = [...STRUCTURAL_LANGUAGES];
+  // Parametrised over the LanguageProfile registry — the single home of per-language
+  // facts — so a language claimed by adding a `structure` section to a profile is
+  // measured against the committed tests, with no second list to fall behind.
+  const claimed = structuralLanguages();
 
   it('claims at least the fifteen slice-4b languages, or the guard is vacuous', () => {
     expect(claimed.length).toBeGreaterThanOrEqual(15);

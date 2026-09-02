@@ -1,74 +1,22 @@
+import { LANGUAGE_PROFILES, profileForPath } from './lang/registry.ts';
 import type { DetectedLanguage, LanguageId } from './types.ts';
 
 /**
- * Extension → language. Deliberately not a content sniffer: guessing from bytes gets
- * things wrong silently, and `'unknown'` costs nothing here — it selects the lexical
- * planner, which works on anything.
+ * Every language smelt has a grammar mapping for — the registry's ids, in registry
+ * order. A derived view of `LANGUAGE_PROFILES`, kept as an export because tests and
+ * the CLI's rendered lists read it.
  */
-const BY_EXTENSION: Readonly<Record<string, LanguageId>> = {
-  ts: 'typescript',
-  mts: 'typescript',
-  cts: 'typescript',
-  tsx: 'tsx',
-  js: 'javascript',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  jsx: 'javascript',
-  rs: 'rust',
-  py: 'python',
-  pyi: 'python',
-  go: 'go',
-  java: 'java',
-  c: 'c',
-  // `.h` maps to c — a deliberate call, pinned by detect.test.ts. A C++-only header
-  // parses under the C grammar into ERROR units, and the dominant real-world header
-  // shapes (an `#ifndef` guard, an `extern "C"` wrapper) parse as one top-level node,
-  // so the structural planner's top-level walk gets little granularity from a .h
-  // either way; c is the better default because plain-C headers are the common case
-  // an agent greps into. `.hh`/`.hxx`/`.cxx` are unmapped on purpose and fall to
-  // 'unknown' (the lexical planner), which is a first-class answer here.
-  h: 'c',
-  cc: 'cpp',
-  cpp: 'cpp',
-  hpp: 'cpp',
-  cs: 'c_sharp',
-  rb: 'ruby',
-  php: 'php',
-  kt: 'kotlin',
-  kts: 'kotlin',
-  swift: 'swift',
-  sh: 'bash',
-  bash: 'bash',
-};
-
-/** Every language smelt has a grammar mapping for. Used by tests to stay total. */
-export const SUPPORTED_LANGUAGES: readonly LanguageId[] = [
-  'typescript',
-  'tsx',
-  'javascript',
-  'rust',
-  'python',
-  'go',
-  'java',
-  'c',
-  'cpp',
-  'c_sharp',
-  'ruby',
-  'php',
-  'kotlin',
-  'swift',
-  'bash',
-];
+export const SUPPORTED_LANGUAGES: readonly LanguageId[] = Object.values(LANGUAGE_PROFILES).map(
+  (profile) => profile.id,
+);
 
 /**
- * Detect the language of a path. Returns `'unknown'` for anything unmapped — which is
- * a normal outcome, not an error.
+ * Detect the language of a path, from its extension. Returns `'unknown'` for anything
+ * unmapped — which is a normal outcome, not an error: it selects the lexical planner,
+ * which works on anything. The extension → profile mapping itself lives on each
+ * language's `LanguageProfile` (`src/lang/`); this is the id-shaped view of
+ * {@link profileForPath}.
  */
 export function detectLanguage(path: string | undefined): DetectedLanguage {
-  if (path === undefined) return 'unknown';
-  const base = path.replace(/\\/g, '/').split('/').pop() ?? '';
-  const dot = base.lastIndexOf('.');
-  if (dot <= 0) return 'unknown';
-  const ext = base.slice(dot + 1).toLowerCase();
-  return BY_EXTENSION[ext] ?? 'unknown';
+  return profileForPath(path)?.id ?? 'unknown';
 }

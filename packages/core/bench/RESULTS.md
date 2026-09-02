@@ -66,3 +66,25 @@ here is extrapolated, rounded up, or converted between units.
 | multi-file-grep | tier 1 | 2026-09-02 | 23cda4d958df  | —     | bytes | 6451  | 986    | 2        | budget 1500 B, lexical/v1                 |
 | stack-trace     | tier 1 | 2026-09-02 | 23cda4d958df  | —     | bytes | 542   | 389    | 1        | budget 400 B, lexical/v1                  |
 | build-log       | tier 1 | 2026-09-02 | 23cda4d958df  | —     | bytes | 6984  | 108    | 1        | budget 800 B, lexical/v1                  |
+
+## run 2026-09-02 — tier 1 — corpus 031510948db6
+
+| case            | tier   | date       | corpus commit | model | unit  | input | output | elisions | note                                      |
+| --------------- | ------ | ---------- | ------------- | ----- | ----- | ----- | ------ | -------- | ----------------------------------------- |
+| large-ts-file   | tier 1 | 2026-09-02 | 031510948db6  | —     | bytes | 22432 | 3281   | 2        | budget 4000 B, structural/v1              |
+| tsx-component   | tier 1 | 2026-09-02 | 031510948db6  | —     | bytes | 1090  | 861    | 1        | budget 700 B, structural/v1 — OVER BUDGET |
+| java-classes    | tier 1 | 2026-09-02 | 031510948db6  | —     | bytes | 689   | 366    | 2        | budget 400 B, structural/v1               |
+| multi-file-grep | tier 1 | 2026-09-02 | 031510948db6  | —     | bytes | 6451  | 986    | 2        | budget 1500 B, lexical/v1                 |
+| stack-trace     | tier 1 | 2026-09-02 | 031510948db6  | —     | bytes | 542   | 389    | 1        | budget 400 B, lexical/v1                  |
+| build-log       | tier 1 | 2026-09-02 | 031510948db6  | —     | bytes | 6984  | 108    | 1        | budget 800 B, lexical/v1                  |
+
+## run 2026-09-02 — tier 1 — corpus 2675775cb1e3
+
+| case            | tier   | date       | corpus commit | model | unit  | input | output | elisions | note                                      |
+| --------------- | ------ | ---------- | ------------- | ----- | ----- | ----- | ------ | -------- | ----------------------------------------- |
+| large-ts-file   | tier 1 | 2026-09-02 | 2675775cb1e3  | —     | bytes | 22432 | 3281   | 2        | budget 4000 B, structural/v1              |
+| tsx-component   | tier 1 | 2026-09-02 | 2675775cb1e3  | —     | bytes | 1090  | 861    | 1        | budget 700 B, structural/v1 — OVER BUDGET |
+| java-classes    | tier 1 | 2026-09-02 | 2675775cb1e3  | —     | bytes | 689   | 366    | 2        | budget 400 B, structural/v1               |
+| multi-file-grep | tier 1 | 2026-09-02 | 2675775cb1e3  | —     | bytes | 6451  | 986    | 2        | budget 1500 B, lexical/v1                 |
+| stack-trace     | tier 1 | 2026-09-02 | 2675775cb1e3  | —     | bytes | 542   | 389    | 1        | budget 400 B, lexical/v1                  |
+| build-log       | tier 1 | 2026-09-02 | 2675775cb1e3  | —     | bytes | 6984  | 108    | 1        | budget 800 B, lexical/v1                  |

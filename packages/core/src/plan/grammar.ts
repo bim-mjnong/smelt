@@ -6,34 +6,22 @@ import { fileURLToPath } from 'node:url';
 import { Language, Parser } from 'web-tree-sitter';
 
 import { GrammarUnavailableError } from '../errors.ts';
+import { LANGUAGE_PROFILES } from '../lang/registry.ts';
 import { assertLocalResource } from '../net/policy.ts';
 import type { LanguageId } from '../types.ts';
 
 /**
- * Grammar file for each language smelt claims to parse. This map is
- * `Record<LanguageId, string>` on purpose: adding a `LanguageId` without adding its
- * grammar is a type error, so the two cannot drift. It is exported because
- * `scripts/bundle-grammars.mjs` and the attribution generator both read it — a
- * hand-written second list of grammar filenames would be exactly the drift this map
- * exists to prevent.
+ * Grammar file for each language smelt claims to parse — the registry's `wasm`
+ * facts, as a map. Derived from `LANGUAGE_PROFILES` (which is
+ * `Record<LanguageId, LanguageProfile>`, so adding a `LanguageId` without a profile —
+ * and its grammar — is a type error and the two cannot drift). It stays exported
+ * because `scripts/bundle-grammars.mjs` and the attribution generator both read it —
+ * a hand-written second list of grammar filenames would be exactly the drift the
+ * registry exists to prevent.
  */
-export const WASM_BY_LANGUAGE: Readonly<Record<LanguageId, string>> = {
-  typescript: 'tree-sitter-typescript.wasm',
-  tsx: 'tree-sitter-tsx.wasm',
-  javascript: 'tree-sitter-javascript.wasm',
-  rust: 'tree-sitter-rust.wasm',
-  python: 'tree-sitter-python.wasm',
-  go: 'tree-sitter-go.wasm',
-  java: 'tree-sitter-java.wasm',
-  c: 'tree-sitter-c.wasm',
-  cpp: 'tree-sitter-cpp.wasm',
-  c_sharp: 'tree-sitter-c_sharp.wasm',
-  ruby: 'tree-sitter-ruby.wasm',
-  php: 'tree-sitter-php.wasm',
-  kotlin: 'tree-sitter-kotlin.wasm',
-  swift: 'tree-sitter-swift.wasm',
-  bash: 'tree-sitter-bash.wasm',
-};
+export const WASM_BY_LANGUAGE: Readonly<Record<LanguageId, string>> = Object.fromEntries(
+  Object.values(LANGUAGE_PROFILES).map((profile) => [profile.id, profile.wasm]),
+) as Record<LanguageId, string>;
 
 /**
  * Where the bundled grammars live, relative to this module.

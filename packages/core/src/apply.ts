@@ -1,4 +1,5 @@
 import { OverlappingElisionError, RangeOutOfBoundsError, UnknownHashError } from './errors.ts';
+import { LANGUAGE_PROFILES } from './lang/registry.ts';
 import type {
   AppliedElision,
   ByteRange,
@@ -83,24 +84,17 @@ export const defaultMarker: MarkerBuilder = ({ explanation, bytes, hash }) =>
  * leader is part of the substituted marker text, so `outputRange` covers it and
  * reconstruction stays byte-exact. A comment leader in the survivor's own syntax is
  * the one wrapping that cannot change what a model reads out of the marker.
+ *
+ * A derived view: each leader is the `markerLeader` fact on the language's
+ * {@link LanguageProfile} (`src/lang/`), collected here so marker construction keeps
+ * one lookup table.
  */
-export const MARKER_LINE_COMMENT_LEADERS: Readonly<Partial<Record<DetectedLanguage, string>>> = {
-  typescript: '// ',
-  tsx: '// ',
-  javascript: '// ',
-  rust: '// ',
-  python: '# ',
-  go: '// ',
-  java: '// ',
-  c: '// ',
-  cpp: '// ',
-  c_sharp: '// ',
-  ruby: '# ',
-  php: '// ',
-  kotlin: '// ',
-  swift: '// ',
-  bash: '# ',
-};
+export const MARKER_LINE_COMMENT_LEADERS: Readonly<Partial<Record<DetectedLanguage, string>>> =
+  Object.fromEntries(
+    Object.values(LANGUAGE_PROFILES)
+      .filter((profile) => profile.markerLeader !== undefined)
+      .map((profile) => [profile.id, profile.markerLeader]),
+  );
 
 /**
  * The marker builder for a language: {@link defaultMarker}, wrapped in the language's

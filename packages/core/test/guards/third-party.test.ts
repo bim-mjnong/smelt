@@ -71,6 +71,30 @@ describe('THIRD-PARTY.md is generated, current, and total', () => {
     expect(shipped.length).toBeGreaterThanOrEqual(6);
   });
 
+  it("grammar-provenance.json's key set equals the registry's wasm set — the totality tie", () => {
+    // The generator already refuses a *bundled* grammar without provenance, but the
+    // bundle is produced from the registry by a build step — so between "profile
+    // added" and "pnpm build" nothing else compares the two directly. This pins the
+    // partition at the source: every wasm the LanguageProfile registry names has a
+    // provenance entry, and every provenance entry names a wasm some profile claims.
+    // Read the staled copy when the mutation runner provides one, else the real file
+    // — same pattern as the bench guard's artifacts.
+    const staled = join(guardRoot(), 'grammar-provenance.json');
+    const provenance = JSON.parse(
+      readFileSync(
+        existsSync(staled) ? staled : join(packageRoot(), 'grammar-provenance.json'),
+        'utf8',
+      ),
+    ) as { grammars: Record<string, unknown> };
+    const attributed = Object.keys(provenance.grammars).toSorted();
+    const claimed = [...new Set(Object.values(WASM_BY_LANGUAGE))].toSorted();
+    expect(
+      attributed,
+      'grammar-provenance.json and the registry disagree about which grammars exist — ' +
+        'a profile shipped without attribution facts, or provenance outlived its grammar',
+    ).toEqual(claimed);
+  });
+
   it('names every runtime dependency, with a licence', () => {
     const doc = readFileSync(join(guardRoot(), DOC), 'utf8');
     const manifest = JSON.parse(readFileSync(join(packageRoot(), 'package.json'), 'utf8')) as {
