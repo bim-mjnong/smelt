@@ -118,6 +118,18 @@ describe('the built binary, as a real process', () => {
     expect(code).toBe(EXIT.ok);
     expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
   }, 15_000);
+
+  it('smelt map runs from the built binary: map on stdout, report on stderr, exit 0', async () => {
+    // The subcommand smoke case: everything else about `map` is proven in-process
+    // (test/cli-map.test.ts, test/guards/repo-map.test.ts); this asserts the shipped
+    // executable actually routes the subcommand and keeps the two streams apart.
+    const fixtureRoot = join(packageRoot(), 'test', 'fixtures', 'repomap-repo');
+    const { code, stdout, stderr } = await runBin(['map', fixtureRoot, '--budget', '10000']);
+    expect(code).toBe(EXIT.ok);
+    expect(stdout).toContain('readSettings');
+    expect(stderr).toContain('smelt map  ');
+    expect(stderr).toMatch(/bytes used [\d,]+ of 10,000 budget/);
+  }, 15_000);
 });
 
 describe('the built package loads from CommonJS via require(esm)', () => {

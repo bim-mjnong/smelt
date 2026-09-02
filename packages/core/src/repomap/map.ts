@@ -33,6 +33,14 @@ import type { FileTags } from './tags.ts';
  *    construction: symbols are added in rank order until the next line would not fit.
  *  - **The cache lives only in a directory the caller explicitly hands in**, and a
  *    corrupt entry is discarded loudly — a warning in the result — never trusted.
+ *
+ * **Deliberately NOT a `Planner`.** `buildRepoMap` returns a {@link RepoMap},
+ * not an `ElisionPlan`: nothing here is elided, nothing is stored under a hash, and
+ * there is no original to reconstruct — the map is a *summary built up under a
+ * budget*, not a *removal to be reversed*. Forcing the Planner interface onto it
+ * would claim Law 3 (reversibility) about output that has no bytes to give back,
+ * which is exactly the kind of lie the interface exists to prevent. The CLI serves
+ * it as its own subcommand (`smelt map`), never as a `--strategy`.
  */
 
 /** The id stamped on every map this module emits. */
@@ -47,6 +55,13 @@ export const REPO_MAP_RANKED_RULE = 'ranked-definition';
 
 /** Rule id for a definition nothing in the scanned tree references. */
 export const REPO_MAP_UNREFERENCED_RULE = 'unreferenced-definition';
+
+/**
+ * Rule id for a definition promoted because it matches a caller-supplied focus term.
+ * The rank stays the measured PageRank share — focus moves a symbol's *place in the
+ * fill order*, never its numbers.
+ */
+export const REPO_MAP_FOCUS_RULE = 'focus-match';
 
 /** Rule id for a file listed by path because no definitions were extracted from it. */
 export const REPO_MAP_PATH_ONLY_RULE = 'path-only';
@@ -74,6 +89,14 @@ export interface RepoMapOptions {
   readonly root: string;
   /** Ceiling for the rendered map, in UTF-8 bytes. Respected, not aimed at. */
   readonly budgetBytes: number;
+  /**
+   * What the task is actually about — same meaning as a planner's focus. A
+   * definition whose name or path contains a term (case-insensitive, like the
+   * lexical planner's default) is promoted to the front of the fill order, so it
+   * survives a tight budget. Promotion only: the measured rank and reference
+   * counts are never altered, and each promoted entry says which term it matched.
+   */
+  readonly focus?: readonly string[];
   /**
    * Paths to skip, replacing {@link DEFAULT_REPO_IGNORE}. An entry containing `/` is
    * matched as a root-relative path prefix — a trailing slash counts, so `build/`
@@ -134,7 +157,7 @@ export interface RepoMap {
   readonly text: string;
   readonly outputBytes: number;
   readonly budgetBytes: number;
-  /** The symbols that fit, in rank order. Every one carries its reason. */
+  /** The symbols that fit, in fill order (focus matches first, then rank). */
   readonly entries: readonly RepoMapEntry[];
   /** Path-only files that fit, after the symbols, in path order. */
   readonly pathOnly: readonly RepoMapPathEntry[];
@@ -199,11 +222,14 @@ export async function buildRepoMap(options: RepoMapOptions): Promise<RepoMap> {
   }
 
   const ranked = rankDefinitions(parsed);
+  const focus = (options.focus ?? []).filter((term) => term.length > 0);
+  const ordered = orderWithFocus(ranked, focus);
 
-  // Fit to the budget: ranked symbols first, in rank order, then path-only files, in
-  // path order. Filling stops at the first line that does not fit, so the included
-  // set is always a rank-order prefix — a map that skipped its #2 symbol to squeeze
-  // in its #9 would be lying about what mattered.
+  // Fit to the budget: ranked symbols first — focus matches promoted to the front,
+  // each partition in rank order — then path-only files, in path order. Filling
+  // stops at the first line that does not fit, so the included set is always a
+  // prefix of that order — a map that skipped its #2 symbol to squeeze in its #9
+  // would be lying about what mattered.
   const lines: string[] = [];
   let bytes = 0;
   const tryAppend = (line: string): boolean => {
@@ -215,12 +241,12 @@ export async function buildRepoMap(options: RepoMapOptions): Promise<RepoMap> {
   };
 
   const entries: RepoMapEntry[] = [];
-  for (const definition of ranked) {
+  for (const { definition, focusTerm } of ordered) {
     if (!tryAppend(renderDefinition(definition))) break;
-    entries.push(toEntry(definition));
+    entries.push(toEntry(definition, focusTerm));
   }
   const pathOnly: RepoMapPathEntry[] = [];
-  if (entries.length === ranked.length) {
+  if (entries.length === ordered.length) {
     for (const rel of pathOnlyPaths) {
       if (!tryAppend(`${rel} [path only]`)) break;
       pathOnly.push({
@@ -325,6 +351,37 @@ function isIgnored(rel: string, ignore: readonly string[]): boolean {
   return false;
 }
 
+/** One ranked definition in fill order, with the focus term that promoted it, if any. */
+interface OrderedDefinition {
+  readonly definition: RankedDefinition;
+  readonly focusTerm?: string;
+}
+
+/**
+ * The fill order: focus-matched definitions first, then the rest, each partition
+ * keeping the ranker's total order. A stable partition of a deterministic order is
+ * itself deterministic, so the map's byte-for-byte claim survives focus untouched.
+ * The match is a case-insensitive substring over name and path — the lexical
+ * planner's default, so "focus" means the same thing in both places — and the
+ * *first* matching term in caller order is the one the receipt names.
+ */
+function orderWithFocus(
+  ranked: readonly RankedDefinition[],
+  focus: readonly string[],
+): readonly OrderedDefinition[] {
+  if (focus.length === 0) return ranked.map((definition) => ({ definition }));
+  const needles = focus.map((term) => term.toLowerCase());
+  const matched: OrderedDefinition[] = [];
+  const rest: OrderedDefinition[] = [];
+  for (const definition of ranked) {
+    const haystack = `${definition.path}\0${definition.name}`.toLowerCase();
+    const index = needles.findIndex((needle) => haystack.includes(needle));
+    if (index === -1) rest.push({ definition });
+    else matched.push({ definition, focusTerm: focus[index]! });
+  }
+  return [...matched, ...rest];
+}
+
 /** One rendered map line. Everything in it is measured, nothing estimated. */
 function renderDefinition(definition: RankedDefinition): string {
   return (
@@ -335,22 +392,28 @@ function renderDefinition(definition: RankedDefinition): string {
 }
 
 /** Law 2, applied to inclusion: the receipt every included symbol carries. */
-function toEntry(definition: RankedDefinition): RepoMapEntry {
+function toEntry(definition: RankedDefinition, focusTerm?: string): RepoMapEntry {
   const site = `defined at ${definition.path}:${String(definition.line)}`;
+  const counts =
+    `${String(definition.refsIn)} ${plural('reference', definition.refsIn)} in ` +
+    `from ${String(definition.refsInFiles)} ${plural('file', definition.refsInFiles)}; ` +
+    `its file makes ${String(definition.refsOut)} ` +
+    `${plural('reference', definition.refsOut)} out`;
   const reason: RepoMapReason =
-    definition.refsIn === 0
+    focusTerm !== undefined
       ? {
-          rule: REPO_MAP_UNREFERENCED_RULE,
-          explanation: `${site}; no references to it anywhere in the scanned tree`,
+          rule: REPO_MAP_FOCUS_RULE,
+          explanation: `${site}; matches focus "${focusTerm}"; ${counts}`,
         }
-      : {
-          rule: REPO_MAP_RANKED_RULE,
-          explanation:
-            `${site}; ${String(definition.refsIn)} ${plural('reference', definition.refsIn)} in ` +
-            `from ${String(definition.refsInFiles)} ${plural('file', definition.refsInFiles)}; ` +
-            `its file makes ${String(definition.refsOut)} ` +
-            `${plural('reference', definition.refsOut)} out`,
-        };
+      : definition.refsIn === 0
+        ? {
+            rule: REPO_MAP_UNREFERENCED_RULE,
+            explanation: `${site}; no references to it anywhere in the scanned tree`,
+          }
+        : {
+            rule: REPO_MAP_RANKED_RULE,
+            explanation: `${site}; ${counts}`,
+          };
   return {
     path: definition.path,
     name: definition.name,

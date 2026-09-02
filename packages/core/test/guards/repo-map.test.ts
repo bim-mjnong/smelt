@@ -9,11 +9,13 @@ import { tagsCacheKey, TAGS_CACHE_FORMAT } from '@guard/repomap/cache';
 import {
   buildRepoMap,
   REPO_MAP_CACHE_CORRUPT_RULE,
+  REPO_MAP_FOCUS_RULE,
   REPO_MAP_ID,
   REPO_MAP_PATH_ONLY_RULE,
   REPO_MAP_RANKED_RULE,
   REPO_MAP_UNREFERENCED_RULE,
 } from '@guard/repomap/map';
+import { EXIT, runCli } from '@guard/cli/run';
 import { SmeltError } from '@guard/errors';
 import { extractTags } from '@guard/repomap/tags';
 
@@ -40,8 +42,11 @@ import { extractTags } from '@guard/repomap/tags';
  *     silently drops symbols from the map with no error anywhere.
  *  6. **The walk stays inside the root**: symlinks are never followed, binary files
  *     are skipped, the ignore list is honored.
+ *  7. **The `smelt map` report tells the truth.** The stderr "bytes used" figure is
+ *     the byte count of what actually landed on stdout, read off the RepoMap —
+ *     never a second tally, never the budget dressed up as a measurement.
  *
- * Mutations for 2, 1, 4 and 5 live in `scripts/mutate.mjs`; `pnpm mutate` proves
+ * Mutations for 2, 1, 4, 5 and 7 live in `scripts/mutate.mjs`; `pnpm mutate` proves
  * each one turns this file red.
  */
 
@@ -358,5 +363,60 @@ describe('Slice 7 — the repo map keeps its claims', () => {
       names,
       'a trailing-slash entry leaked into bare-name mode and ate deep/build too',
     ).toContain('nestedKeeper');
+  });
+
+  it('promotes a focus match without touching its measured numbers, and says which term', async () => {
+    const plain = await buildRepoMap({ root: fixtureRoot, budgetBytes: BUDGET });
+    const focused = await buildRepoMap({
+      root: fixtureRoot,
+      budgetBytes: BUDGET,
+      focus: ['unusedHelper'],
+    });
+
+    // Promotion only: place in the fill order changes, rank and counts do not.
+    const top = focused.entries[0]!;
+    expect(top.name).toBe('unusedHelper');
+    expect(top.reason.rule).toBe(REPO_MAP_FOCUS_RULE);
+    expect(top.reason.explanation).toContain('matches focus "unusedHelper"');
+    const unpromoted = plain.entries.find((entry) => entry.name === 'unusedHelper')!;
+    expect(top.rank).toBe(unpromoted.rank);
+    expect(top.refsIn).toBe(unpromoted.refsIn);
+
+    // Deterministic with focus too — a stable partition of a total order.
+    const again = await buildRepoMap({
+      root: fixtureRoot,
+      budgetBytes: BUDGET,
+      focus: ['unusedHelper'],
+    });
+    expect(JSON.stringify(again)).toBe(JSON.stringify(focused));
+  });
+
+  it('reports bytes used truthfully through the CLI: the stderr figure IS the stdout byte count', async () => {
+    // `smelt map`'s report law, same as the smelt report's: every number is read off
+    // the RepoMap the library returned, never tallied separately. The mutation
+    // `repomap-map-report-bytes-invented` wires the figure to the budget and this
+    // assertion must go red — a budget-fitting report that lies about bytes used
+    // would make the one honest number in the subcommand a decoration.
+    let stdout = '';
+    let stderr = '';
+    const code = await runCli(['map', fixtureRoot, '--budget', String(BUDGET)], {
+      stdout: (text: string) => {
+        stdout += text;
+      },
+      stderr: (text: string) => {
+        stderr += text;
+      },
+      stdin: () => '',
+      version: '0.0.0-guard',
+    });
+    expect(code).toBe(EXIT.ok);
+
+    const match = stderr.match(/bytes used ([\d,]+) of ([\d,]+) budget/);
+    expect(match, 'the report no longer states bytes used against the budget').not.toBeNull();
+    const reported = Number(match![1]!.replaceAll(',', ''));
+    expect(reported, 'the report lies about the bytes the map used').toBe(
+      Buffer.byteLength(stdout, 'utf8'),
+    );
+    expect(Number(match![2]!.replaceAll(',', ''))).toBe(BUDGET);
   });
 });
