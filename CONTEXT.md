@@ -55,3 +55,13 @@ codebase-design glossary.
   counters, never derive the metric. Consumers see only `stats()`; the seam is for
   adapter authors. (`bench/lib.mjs`, deliberately import-free, re-derives the same
   formula; `test/bench.test.ts` pins the two copies to each other.)
+- **ResolvedRun**: the CLI's single merge of flags + config + built-ins (`resolveRun` in
+  `src/cli/resolve.ts`); the only place precedence lives, each value carrying its
+  provenance (`flag`/`config`/`builtin`). It owns the budget-required refusal, and
+  `runSmelt` executes it straight-line with no `??` of its own.
+- **PLANNERS**: the one registry of planner strategies (`src/plan/planners.ts`), string →
+  factory over the lexical/structural option bags. `createSmelter`, `--strategy` and
+  config validation, and the help text all serve its keys; a constructed `planner` on
+  `SmelterConfig` wins over any strategy name.
+- **retrieveStats**: the one shared derivation of expansion-rate arithmetic from a
+  store's raw counters; adapters supply counters, never derive the metric.

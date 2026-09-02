@@ -181,8 +181,9 @@ a failed grammar load throws `GrammarUnavailableError`, because output labelled
 | `packages/core/test/guards/bench-results.test.ts`       | The harness's honesty: `RESULTS.md` rows carry date + corpus commit + tier (and model where required), stay append-only, never say "up to"; network shapes confined to `tier2.mjs`/`tier3.mjs`; `bench/` never enters the published `files` list. |
 | `packages/core/test/guards/repo-map.test.ts`            | Slice 7's claims: the byte budget respected by construction, deterministic ranked output, content-hash cache invalidation, and corrupt cache entries discarded loudly rather than trusted.                                                        |
 | `packages/core/test/guards/init-wizard.test.ts`         | `smelt init`'s one hard rule: an existing file is never overwritten without an explicit per-file yes.                                                                                                                                             |
+| `packages/core/test/guards/planner-registry.test.ts`    | The strategy seam. The `PLANNERS` registry carries exactly the shipped strategies, and the factory, `--strategy`/config validation and the help text all serve its keys — a dropped entry goes red on every face at once.                         |
 | `packages/core/test/guards/_source.ts`                  | Shared source-walking helpers: `guardSrcRoot()`, `guardRoot()`, and the string/comment stripper that stops `net/policy.ts` reporting its own word list.                                                                                           |
-| `scripts/mutate.mjs`                                    | **The meta-guard.** Fifty-six mutations across the twelve guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                              |
+| `scripts/mutate.mjs`                                    | **The meta-guard.** Fifty-seven mutations across the thirteen guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                          |
 | `scripts/bundle-grammars.mjs`                           | Copies the grammars `WASM_BY_LANGUAGE` names into the package, so they ship. Reads the built map rather than keeping a second list.                                                                                                               |
 | `scripts/generate-third-party.mjs`                      | Generates `THIRD-PARTY.md`. The grammar ↔ provenance mapping is a partition: an unattributed grammar throws.                                                                                                                                      |
 | `scripts/check-fresh-clone.sh`                          | Installs and verifies from `git archive` output — tracked files only.                                                                                                                                                                             |
@@ -533,8 +534,8 @@ pnpm mutate
 ```
 
 It copies `packages/core/src` to a scratch tree, applies one deliberate break, points the
-guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Fifty-two
-mutations across twelve guards; a survivor is reported as a hole in the guard, not in the
+guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Fifty-seven
+mutations across thirteen guards; a survivor is reported as a hole in the guard, not in the
 mutation.
 
 Not every guard guards source code, so there is a second mutation kind: an `artifact`
