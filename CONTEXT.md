@@ -81,3 +81,13 @@ codebase-design glossary.
 - **Focus promotion** (repo map): a focus term moves matching symbols to the front
   of the map's fill order with a `focus-match` receipt naming the term; the measured
   rank and reference counts are never altered.
+- **RepoReader**: the repo map's whole door to the filesystem — `list(dir)`,
+  `read(path)`, `stat(path)` in `src/repomap/reader.ts`, optional on
+  `RepoMapOptions` and defaulting to `nodeFsReader()` (the `readdirSync` /
+  `lstatSync` / `readFileSync` calls the map used to make in-line). `decide`'s
+  `statFile` is the sibling seam and the precedent. Read-only by construction:
+  **there is no writer on it**, so the only bytes `buildRepoMap` can put on disk are
+  the tags cache a caller named with `cacheDir`. Because it is injectable, the walk's
+  claims are asserted by _counting calls_ — a symlink is statted once and never read
+  (refused on `isSymlink`, not on the accident that an `lstat` of a link is neither
+  file nor directory), an ignored path is never statted at all.
