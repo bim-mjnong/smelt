@@ -1,10 +1,31 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, relative, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
 import { CliUsageError } from '../errors.ts';
+import { nodeCommand, portablePath, shimScriptPath, smeltBinPath } from '../harness/paths.ts';
+import { hasShim, TIER_HONESTY } from '../harness/profile.ts';
+import type {
+  HarnessInstallContext,
+  HarnessJsonHooks,
+  HarnessProfile,
+} from '../harness/profile.ts';
+import {
+  GUARD_EVENTS,
+  GUARD_ONLY_FILES,
+  HARNESSES,
+  harnessById,
+  JSON_HOOK_FILES,
+  LIFECYCLE_EVENTS,
+  MANAGED_EVENTS,
+} from '../harness/registry.ts';
+import {
+  instructionSnippet,
+  OURS_TOKEN,
+  SNIPPET_END_MD,
+  SNIPPET_START_MD,
+} from '../harness/snippet.ts';
 import { DEFAULT_SUGGESTION_BUDGET_BYTES, DEFAULT_THRESHOLD_BYTES } from '../hooks/guard-core.ts';
 import type { EnforcementMode } from '../hooks/guard-core.ts';
 
@@ -20,6 +41,12 @@ import type { SmeltConfig, SmeltConfigHooks } from './config.ts';
  * hook schema onto it, and this installer, which writes the harness config that wires
  * a shim in — plus an instruction-file snippet as belt and braces, because the
  * snippet is also what teaches the model to run `smelt retrieve` after a deny.
+ *
+ * Every per-harness fact lives in that harness's {@link HarnessProfile}
+ * (`src/harness/<id>.ts`), including what to write and how to take it back out. This
+ * module owns only what is the *same* for every harness: the byte-faithful JSON merge,
+ * the marker-block upsert, the wizard, and the two plans below — folds over
+ * `profile.install`, with no case list of its own.
  *
  * Harnesses come in three honesty tiers (docs/research/2026-09-02-harness-capability-matrix.md):
  *
@@ -49,245 +76,20 @@ export interface HooksIo {
   readonly home?: string;
 }
 
-export type HarnessTier = 'verified' | 'experimental' | 'advisory';
-
-export type HarnessId =
-  | 'claude-code'
-  | 'codex'
-  | 'gemini'
-  | 'grok'
-  | 'hermes'
-  | 'cursor'
-  | 'opencode'
-  | 'cline'
-  | 'kilocode'
-  | 'aider';
-
-export interface HarnessSpec {
-  readonly id: HarnessId;
-  readonly name: string;
-  readonly tier: HarnessTier;
-  /** Paths (relative to the project) whose existence means "this harness is in use here". */
-  readonly detect: readonly string[];
-  /** Paths relative to the user's home directory — "installed on this machine". */
-  readonly detectHome: readonly string[];
-  /** The standing-instructions file this harness reads (capability matrix column d). */
-  readonly instructionFile: string;
-  /** Caveats carried from the capability matrix, shown at install time. */
-  readonly caveats: readonly string[];
-}
-
-/** One line of honesty per tier, shown wherever a tier label appears. */
-export const TIER_HONESTY: Record<HarnessTier, string> = {
-  verified: 'schema verified against primary docs and pinned by fixtures',
-  experimental:
-    'schema mapped from the 2026-09-02 capability matrix, not yet smoke-tested against the real binary',
-  advisory: 'no usable hook API — instructions only, nothing enforces them',
-};
-
-export const HARNESSES: readonly HarnessSpec[] = [
-  {
-    id: 'claude-code',
-    name: 'Claude Code',
-    tier: 'verified',
-    detect: ['.claude'],
-    detectHome: ['.claude'],
-    instructionFile: 'CLAUDE.md',
-    caveats: [],
-  },
-  {
-    id: 'codex',
-    name: 'Codex CLI',
-    tier: 'verified',
-    detect: ['.codex'],
-    detectHome: ['.codex'],
-    instructionFile: 'AGENTS.md',
-    caveats: [
-      'project-level Codex hooks run only once the project is trusted (features.hooks; see docs/research/2026-09-02-agent-enforcement.md § 3)',
-    ],
-  },
-  {
-    id: 'gemini',
-    name: 'Gemini CLI',
-    tier: 'experimental',
-    detect: ['.gemini'],
-    detectHome: ['.gemini'],
-    instructionFile: 'GEMINI.md',
-    caveats: [
-      'Gemini policy-engine allow rules are ignored in non-interactive runs (google-gemini/gemini-cli#20469) — verify hook behaviour in CI before relying on it',
-    ],
-  },
-  {
-    id: 'grok',
-    name: 'Grok CLI',
-    tier: 'experimental',
-    detect: ['.grok'],
-    detectHome: ['.grok'],
-    instructionFile: 'AGENTS.md',
-    caveats: [
-      'deny-only hooks: input rewrite is not supported, so rewrite mode falls back to deny',
-    ],
-  },
-  {
-    id: 'hermes',
-    name: 'Hermes Agent',
-    tier: 'experimental',
-    detect: ['.hermes', '.hermes.md'],
-    detectHome: ['.hermes'],
-    instructionFile: 'AGENTS.md',
-    caveats: [
-      'Hermes memory tools bypass disabled_toolsets (NousResearch/hermes-agent#46171) — treat tool gating there as leaky',
-      'hook config may need merging into ~/.hermes/config.yaml by hand; the written file says how',
-    ],
-  },
-  {
-    id: 'cursor',
-    name: 'Cursor',
-    tier: 'experimental',
-    detect: ['.cursor'],
-    detectHome: ['.cursor'],
-    instructionFile: 'AGENTS.md',
-    caveats: ['Cursor has no static permission config — gating is entirely hook code'],
-  },
-  {
-    id: 'opencode',
-    name: 'opencode',
-    tier: 'experimental',
-    detect: ['.opencode', 'opencode.json'],
-    detectHome: ['.config/opencode'],
-    instructionFile: 'AGENTS.md',
-    caveats: [
-      'MCP tools can bypass opencode plugin hooks (sst/opencode#2319) — the guard sees built-in tools only',
-    ],
-  },
-  {
-    id: 'cline',
-    name: 'Cline',
-    tier: 'experimental',
-    detect: ['.clinerules'],
-    detectHome: [],
-    instructionFile: '.clinerules/smelt.md',
-    caveats: [
-      'deny-only hooks: input rewrite is not supported, so rewrite mode falls back to deny',
-    ],
-  },
-  {
-    id: 'kilocode',
-    name: 'KiloCode',
-    tier: 'advisory',
-    detect: ['.kilocode'],
-    detectHome: ['.config/kilo'],
-    instructionFile: '.kilocode/rules/smelt.md',
-    caveats: [
-      'no first-class hooks (Kilo-Org/kilocode#5827): enforcement is permissions config + MCP, both manual',
-    ],
-  },
-  {
-    id: 'aider',
-    name: 'Aider',
-    tier: 'advisory',
-    detect: ['.aider.conf.yml'],
-    detectHome: ['.aider.conf.yml'],
-    instructionFile: 'CONVENTIONS.md',
-    caveats: [
-      'Aider auto-reads no rules file: add `read: CONVENTIONS.md` to .aider.conf.yml (or pass --read CONVENTIONS.md) yourself',
-    ],
-  },
-];
-
-export function harnessById(id: string): HarnessSpec | undefined {
-  return HARNESSES.find((spec) => spec.id === id);
-}
+export { instructionSnippet, SNIPPET_END_MD, SNIPPET_START_MD };
 
 /** A harness whose config directory exists in the project or the home directory. */
-export function detectedHarnesses(cwd: string, home: string): readonly HarnessSpec[] {
+export function detectedHarnesses(cwd: string, home: string): readonly HarnessProfile[] {
   return HARNESSES.filter(
-    (spec) =>
-      spec.detect.some((path) => existsSync(join(cwd, path))) ||
-      spec.detectHome.some((path) => existsSync(join(home, path))),
+    (profile) =>
+      profile.detect.some((path) => existsSync(join(cwd, path))) ||
+      profile.detectHome.some((path) => existsSync(join(home, path))),
   );
-}
-
-/* ------------------------------------------------------------------------------------
- * Paths and commands
- * ---------------------------------------------------------------------------------- */
-
-/**
- * The `dist` directory of this installed package — where the shipped guard-core and
- * shim scripts live. Computed from this module's own location, which is
- * `<pkg>/dist/cli/` in every real run (the CLI executes from `dist`); under the test
- * runner it is `<pkg>/src/cli/`, and the substitution still points at `dist`, which
- * is where the scripts will exist once built — the paths are written into config
- * files for *node* to execute, never imported.
- */
-function packageDistDir(): string {
-  const here = dirname(fileURLToPath(import.meta.url)); // <pkg>/(dist|src)/cli
-  return join(dirname(dirname(here)), 'dist');
-}
-
-function shimScriptPath(id: HarnessId): string {
-  return join(packageDistDir(), 'hooks', 'shims', `${id}.js`);
-}
-
-function guardCoreScriptPath(): string {
-  return join(packageDistDir(), 'hooks', 'guard-core.js');
-}
-
-function smeltBinPath(): string {
-  return join(packageDistDir(), 'cli', 'bin.js');
-}
-
-/** Inside the project, a project-relative path travels with the repo; outside, absolute. */
-function portablePath(cwd: string, absolute: string): string {
-  const rel = relative(cwd, absolute);
-  return rel.startsWith('..') || isAbsolute(rel) ? absolute : rel.split(sep).join('/');
-}
-
-function nodeCommand(cwd: string, script: string, args = ''): string {
-  return `node "${portablePath(cwd, script)}"${args === '' ? '' : ` ${args}`}`;
 }
 
 /* ------------------------------------------------------------------------------------
  * Generated content
  * ---------------------------------------------------------------------------------- */
-
-/** Marker lines bracketing every block this installer owns inside a shared file. */
-export const SNIPPET_START_MD = '<!-- smelt:hooks v1 start -->';
-export const SNIPPET_END_MD = '<!-- smelt:hooks v1 end -->';
-const SNIPPET_START_HASH = '# smelt:hooks v1 start';
-const SNIPPET_END_HASH = '# smelt:hooks v1 end';
-
-/** Substring that identifies a file (or JSON hook entry) as written by this installer. */
-const OURS_TOKEN = 'smelt:hooks';
-
-/**
- * The instruction snippet — belt and braces under every shim, and the *only* layer
- * for advisory harnesses. It teaches the three commands, and in particular what to do
- * after a guard deny: run the named replacement, then `smelt retrieve` per marker.
- */
-export function instructionSnippet(thresholdBytes: number, budgetBytes: number): string {
-  return `${SNIPPET_START_MD}
-
-## smelt — context discipline
-
-This project uses [smelt](https://github.com/smeltjs/smelt) to keep large tool output
-out of the context window, reversibly.
-
-- Do not read files over ${String(thresholdBytes)} bytes raw. Run
-  \`smelt <file> --budget ${String(budgetBytes)} --focus <what you are looking for>\`
-  instead (repeat \`--focus\` per term). Focused regions survive verbatim; everything
-  else collapses into a one-line marker stating what was removed.
-- Every marker ends in \`retrieve("hash")\`. \`smelt retrieve <hash>\` prints the
-  exact original bytes back. Retrieve what you actually need — retrievals are counted,
-  and \`smelt stats\` reports the honest expansion rate.
-- For orientation, \`smelt map . --budget ${String(budgetBytes)}\` prints a ranked
-  symbol map of the repository.
-- If a smelt guard hook denies a raw read, run the exact replacement command named in
-  the denial, then \`smelt retrieve\` any marker you need expanded.
-
-${SNIPPET_END_MD}
-`;
-}
 
 /** Claude-style hook entry: one command under an optional matcher. */
 function commandEntry(matcher: string | undefined, command: string): unknown {
@@ -297,22 +99,33 @@ function commandEntry(matcher: string | undefined, command: string): unknown {
   };
 }
 
-interface PresetContext {
-  readonly cwd: string;
-  readonly guard: boolean;
-  readonly statsOnStop: boolean;
-  readonly mapOnStart: boolean;
-  readonly budgetBytes: number;
+/**
+ * The hook command a harness's entries run: its own shim script, through node.
+ *
+ * @throws {Error} when a profile declares a JSON hook file but ships no shim — a
+ *   registry bug, pinned by `test/guards/harness-registry.test.ts`, not a user error.
+ */
+function shimCommand(profile: HarnessProfile, cwd: string): string {
+  /* v8 ignore next 5 -- unreachable: pinned by the harness-registry guard */
+  if (!hasShim(profile)) {
+    throw new Error(
+      `smelt: harness "${profile.id}" wires a hook command but ships no shim script.`,
+    );
+  }
+  return nodeCommand(cwd, shimScriptPath(profile));
 }
 
-/** The three preset hooks in Claude Code's schema; Codex's hooks.json mirrors it. */
-function claudeStyleEvents(
-  ctx: PresetContext,
-  shim: HarnessId,
-  preToolEvent: string,
-  matchers: { readonly read: string; readonly bash: string },
+/**
+ * One harness's hook entries: the guard under each matcher its schema spells, plus
+ * the two session-lifecycle hooks for the harnesses whose schema carries them. Every
+ * toggle the wizard offers is a key that is present or absent here — an absent key is
+ * how a re-run turns a toggle *off*, because the merge deletes what it no longer sees.
+ */
+function jsonHookEvents(
+  step: HarnessJsonHooks,
+  ctx: HarnessInstallContext,
+  command: string,
 ): Record<string, readonly unknown[]> {
-  const shimCommand = nodeCommand(ctx.cwd, shimScriptPath(shim));
   // The trailing shell comment tags the entry as this installer's (see isOursEntry):
   // a bare `cli/bin.js` substring would also match some other npm CLI's built binary.
   const stats = `${nodeCommand(ctx.cwd, smeltBinPath(), 'stats')} 2>/dev/null || true # ${OURS_TOKEN}`;
@@ -325,36 +138,30 @@ function claudeStyleEvents(
   return {
     ...(ctx.guard
       ? {
-          [preToolEvent]: [
-            commandEntry(matchers.read, shimCommand),
-            commandEntry(matchers.bash, shimCommand),
-          ],
+          [step.event]: step.matchers.map((matcher) =>
+            step.entry === 'bare-command' ? { command } : commandEntry(matcher, command),
+          ),
         }
       : {}),
-    ...(ctx.statsOnStop ? { Stop: [commandEntry(undefined, stats)] } : {}),
-    ...(ctx.mapOnStart
-      ? { SessionStart: [commandEntry('startup|resume|clear|compact', map)] }
+    ...(step.lifecycle && ctx.statsOnStop
+      ? { [LIFECYCLE_EVENTS.stats]: [commandEntry(undefined, stats)] }
+      : {}),
+    ...(step.lifecycle && ctx.mapOnStart
+      ? { [LIFECYCLE_EVENTS.map]: [commandEntry('startup|resume|clear|compact', map)] }
       : {}),
   };
 }
 
 /**
- * True for a hook entry this installer wrote. Matched on the shim/guard script paths
- * and the `smelt:hooks` token the stats/map commands carry — never on a substring as
- * generic as `cli/bin.js`, which another npm CLI's built binary could share: remove
- * and re-install may only ever touch entries that are provably smelt's.
+ * True for a hook entry this installer wrote. Matched on the shim script paths and the
+ * `smelt:hooks` token the stats/map commands carry — never on a substring as generic
+ * as `cli/bin.js`, which another npm CLI's built binary could share: remove and
+ * re-install may only ever touch entries that are provably smelt's.
  */
 function isOursEntry(entry: unknown): boolean {
   const text = JSON.stringify(entry) ?? '';
-  return (
-    text.includes('hooks/shims/') ||
-    text.includes('hooks/guard-core.js') ||
-    text.includes(OURS_TOKEN)
-  );
+  return text.includes('hooks/shims/') || text.includes(OURS_TOKEN);
 }
-
-/** The events this installer manages; foreign entries under them are always preserved. */
-const MANAGED_EVENTS = ['PreToolUse', 'Stop', 'SessionStart', 'BeforeTool', 'preToolUse'];
 
 /**
  * Merge our hook entries into a JSON settings file, preserving everything foreign
@@ -621,119 +428,6 @@ export function stripMarkerBlock(
   return stripped.trim() === '' ? undefined : stripped;
 }
 
-/** The Codex `config.toml` block: enables the hooks feature, marker-bracketed. */
-function codexConfigTomlBlock(): string {
-  return `${SNIPPET_START_HASH}
-# Enables Codex's hooks feature so .codex/hooks.json is honored. Project-level hooks
-# run only once this project is trusted. Written by \`smelt hooks install\`.
-[features]
-hooks = true
-${SNIPPET_END_HASH}
-`;
-}
-
-/** The opencode plugin — the shim for a harness whose hooks are a JS plugin API. */
-function opencodePluginSource(cwd: string): string {
-  const guardCore = portablePath(cwd, guardCoreScriptPath());
-  return `// smelt:hooks v1 — opencode plugin shim. EXPERIMENTAL tier: mapped from the
-// capability matrix (docs/research/2026-09-02-harness-capability-matrix.md, opencode
-// row; https://opencode.ai/docs/plugins/). This template's deny/pass/window paths
-// were exercised directly against the built guard core (verified
-// 2026-09-02), but a live opencode session has not been smoke-tested — that needs
-// provider credentials. Caveat carried from the matrix: MCP tools can bypass plugin
-// hooks (sst/opencode#2319) — this guard sees built-in tools only.
-//
-// Thin adapter: maps tool.execute.before onto the smelt guard core (zero
-// dependencies), which owns every decision. Deny mode throws (opencode surfaces the
-// reason to the model); rewrite mode substitutes the faithful replacement command —
-// announced on stderr, because the plugin API has no reason channel on a rewrite
-// and a substitution must never be silent.
-import { pathToFileURL } from 'node:url';
-
-const GUARD_CORE = ${JSON.stringify(guardCore)};
-const core = await import(pathToFileURL(GUARD_CORE).href);
-
-export const SmeltGuard = async () => ({
-  'tool.execute.before': async (input, output) => {
-    const tool = input?.tool;
-    const args = output?.args ?? {};
-    let request;
-    if (tool === 'read' && typeof args.filePath === 'string') {
-      request = {
-        tool: 'Read',
-        input: {
-          path: args.filePath,
-          offsetLimited: args.offset !== undefined || args.limit !== undefined,
-        },
-      };
-    } else if (tool === 'bash' && typeof args.command === 'string') {
-      request = { tool: 'Bash', input: { command: args.command } };
-    } else {
-      return;
-    }
-    const warn = (text) => process.stderr.write(text + '\\n');
-    const settings = core.readGuardSettings(process.cwd(), warn);
-    const decision = core.decide(request, settings, process.cwd());
-    if (decision.action !== 'deny') return;
-    if (
-      settings.enforcement === 'rewrite' &&
-      request.tool === 'Bash' &&
-      decision.suggestion !== undefined
-    ) {
-      warn(
-        'smelt guard (rewrite mode): substituted the command in-flight with \`' +
-          decision.suggestion +
-          '\`. ' +
-          (decision.reason ?? ''),
-      );
-      output.args.command = decision.suggestion;
-      return;
-    }
-    throw new Error(decision.reason ?? 'denied by the smelt guard');
-  },
-});
-`;
-}
-
-/** Cline's hook is an executable file; this two-liner hands it to the cline shim. */
-function clineHookSource(cwd: string): string {
-  return `#!/bin/sh
-# smelt:hooks v1 — Cline PreToolUse hook. EXPERIMENTAL tier: schema mapped from the
-# capability matrix (docs/research/2026-09-02-harness-capability-matrix.md, Cline row),
-# not yet smoke-tested against the real binary. Written by \`smelt hooks install\`.
-exec node "${portablePath(cwd, shimScriptPath('cline'))}"
-`;
-}
-
-/** Hermes hook config, as a mergeable snippet — their config is a home-level YAML. */
-function hermesHooksYaml(cwd: string): string {
-  return `${SNIPPET_START_HASH}
-# Hermes Agent hook config for the smelt guard. EXPERIMENTAL tier: schema mapped from
-# the capability matrix (docs/research/2026-09-02-harness-capability-matrix.md, Hermes
-# row), not yet smoke-tested against the real binary. If Hermes does not read this
-# file directly, merge the \`hooks:\` section into ~/.hermes/config.yaml.
-hooks:
-  pre_tool_call:
-    - command: node "${portablePath(cwd, shimScriptPath('hermes'))}"
-${SNIPPET_END_HASH}
-`;
-}
-
-/** KiloCode's advisory rules file: the snippet plus the two manual enforcement legs. */
-function kilocodeRulesSource(thresholdBytes: number, budgetBytes: number): string {
-  return `${instructionSnippet(thresholdBytes, budgetBytes)}
-<!-- smelt:hooks v1 advisory notes -->
-
-KiloCode has no first-class hook API (Kilo-Org/kilocode#5827), so nothing above is
-enforced — it is advisory. Two manual legs make it harder to bypass:
-
-1. Permissions: in your KiloCode per-tool permission config, set raw-read/execute
-   tools to "ask" so oversized reads surface for review instead of passing silently.
-2. MCP: expose smelt through an MCP server and prefer its tools; a resident server
-   also keeps smelt's grammar cache warm across calls.
-`;
-}
-
 /* ------------------------------------------------------------------------------------
  * Planning
  * ---------------------------------------------------------------------------------- */
@@ -763,7 +457,7 @@ interface PlannedRemoval {
 }
 
 export interface HooksChoices {
-  harnesses: HarnessSpec[];
+  harnesses: HarnessProfile[];
   guard: boolean;
   statsOnStop: boolean;
   mapOnStart: boolean;
@@ -790,8 +484,9 @@ function readIfExists(path: string): string | undefined {
 
 /**
  * Every file `install` would write, computed against the current disk state — pure
- * planning, nothing written. Shared instruction files (several harnesses read
- * AGENTS.md) are planned once.
+ * planning, nothing written. A fold over each chosen profile's `install` list and its
+ * instruction layer; all per-harness knowledge is in the profiles. Shared instruction
+ * files (several harnesses read AGENTS.md) are planned once.
  *
  * @throws {CliUsageError} when an existing `smelt.config.json` is malformed — the
  *   same refusal every other subcommand makes; an installer that guessed around a
@@ -822,11 +517,12 @@ export function planInstall(cwd: string, choices: HooksChoices): InstallPlan {
     unchanged: readIfExists(configPath) === renderConfigWithHooks(existingConfig, hooksBlock),
   });
 
-  const ctx: PresetContext = {
+  const ctx: HarnessInstallContext = {
     cwd,
     guard: choices.guard,
     statsOnStop: choices.statsOnStop,
     mapOnStart: choices.mapOnStart,
+    thresholdBytes: choices.thresholdBytes,
     budgetBytes,
   };
   const snippet = instructionSnippet(choices.thresholdBytes, budgetBytes);
@@ -850,143 +546,60 @@ export function planInstall(cwd: string, choices: HooksChoices): InstallPlan {
     files.set(path, planFile(cwd, name, merged));
   };
 
-  const planSnippetFile = (name: string): void => {
+  const planBlockFile = (
+    name: string,
+    block: string,
+    start: string,
+    end: string,
+    skipWhen?: { readonly contains: string; readonly why: string },
+  ): void => {
     const path = join(cwd, name);
-    if (files.has(path)) return; // shared instruction file, already planned
-    files.set(
-      path,
-      planFile(
-        cwd,
-        name,
-        upsertMarkerBlock(readIfExists(path), snippet, SNIPPET_START_MD, SNIPPET_END_MD),
-      ),
-    );
+    if (files.has(path)) return; // a shared file (AGENTS.md), already planned
+    const existing = readIfExists(path);
+    // A file that already carries its owner's version of what this block does is
+    // theirs to edit, not ours: say so, and touch nothing.
+    if (
+      skipWhen !== undefined &&
+      existing !== undefined &&
+      !existing.includes(start) &&
+      existing.includes(skipWhen.contains)
+    ) {
+      skipped.push({ name, why: skipWhen.why });
+      return;
+    }
+    files.set(path, planFile(cwd, name, upsertMarkerBlock(existing, block, start, end)));
   };
 
-  for (const spec of choices.harnesses) {
-    switch (spec.id) {
-      case 'claude-code': {
-        planJsonHooks(
-          '.claude/settings.json',
-          claudeStyleEvents(ctx, 'claude-code', 'PreToolUse', { read: 'Read', bash: 'Bash' }),
-        );
-        break;
-      }
-      case 'codex': {
-        planJsonHooks(
-          '.codex/hooks.json',
-          claudeStyleEvents(ctx, 'codex', 'PreToolUse', { read: 'Read', bash: 'Bash' }),
-        );
-        const tomlPath = join(cwd, '.codex/config.toml');
-        const existingToml = readIfExists(tomlPath);
-        if (
-          existingToml !== undefined &&
-          !existingToml.includes(SNIPPET_START_HASH) &&
-          existingToml.includes('[features]')
-        ) {
-          skipped.push({
-            name: '.codex/config.toml',
-            why: 'already has a [features] table — add `hooks = true` to it yourself',
-          });
-        } else {
-          files.set(
-            tomlPath,
-            planFile(
-              cwd,
-              '.codex/config.toml',
-              upsertMarkerBlock(
-                existingToml,
-                codexConfigTomlBlock(),
-                SNIPPET_START_HASH,
-                SNIPPET_END_HASH,
-              ),
-            ),
+  for (const profile of choices.harnesses) {
+    for (const step of profile.install) {
+      switch (step.kind) {
+        case 'json-hooks':
+          planJsonHooks(
+            step.file,
+            jsonHookEvents(step, ctx, shimCommand(profile, cwd)),
+            step.shape ?? {},
           );
-        }
-        break;
+          break;
+        case 'marker-block':
+          planBlockFile(step.file, step.block(ctx), step.start, step.end, step.skipWhen);
+          break;
+        case 'own-file':
+          if (step.guardOnly && !ctx.guard) break;
+          files.set(join(cwd, step.file), planFile(cwd, step.file, step.content(ctx), step.mode));
+          break;
       }
-      case 'gemini': {
-        planJsonHooks(
-          '.gemini/settings.json',
-          ctx.guard
-            ? {
-                BeforeTool: [
-                  commandEntry('read_file', nodeCommand(cwd, shimScriptPath('gemini'))),
-                  commandEntry('run_shell_command', nodeCommand(cwd, shimScriptPath('gemini'))),
-                ],
-              }
-            : {},
-        );
-        break;
-      }
-      case 'grok': {
-        planJsonHooks(
-          '.grok/hooks.json',
-          ctx.guard
-            ? {
-                PreToolUse: [
-                  commandEntry('Read', nodeCommand(cwd, shimScriptPath('grok'))),
-                  commandEntry('Bash', nodeCommand(cwd, shimScriptPath('grok'))),
-                ],
-              }
-            : {},
-        );
-        break;
-      }
-      case 'hermes': {
-        if (ctx.guard) {
-          files.set(
-            join(cwd, '.hermes/hooks.yaml'),
-            planFile(cwd, '.hermes/hooks.yaml', hermesHooksYaml(cwd)),
-          );
-        }
-        break;
-      }
-      case 'cursor': {
-        planJsonHooks(
-          '.cursor/hooks.json',
-          ctx.guard
-            ? { preToolUse: [{ command: nodeCommand(cwd, shimScriptPath('cursor')) }] }
-            : {},
-          { version: 1 },
-        );
-        break;
-      }
-      case 'opencode': {
-        if (ctx.guard) {
-          files.set(
-            join(cwd, '.opencode/plugin/smelt-guard.js'),
-            planFile(cwd, '.opencode/plugin/smelt-guard.js', opencodePluginSource(cwd)),
-          );
-        }
-        break;
-      }
-      case 'cline': {
-        if (ctx.guard) {
-          files.set(
-            join(cwd, '.clinerules/hooks/PreToolUse'),
-            planFile(cwd, '.clinerules/hooks/PreToolUse', clineHookSource(cwd), 0o755),
-          );
-        }
-        break;
-      }
-      case 'kilocode': {
-        files.set(
-          join(cwd, spec.instructionFile),
-          planFile(
-            cwd,
-            spec.instructionFile,
-            kilocodeRulesSource(choices.thresholdBytes, budgetBytes),
-          ),
-        );
-        break;
-      }
-      case 'aider':
-        break; // instruction file only, planned below
     }
-    if (spec.id !== 'kilocode') planSnippetFile(spec.instructionFile);
 
-    for (const caveat of spec.caveats) notes.push(`${spec.name}: ${caveat}`);
+    if (profile.instructions === 'snippet') {
+      planBlockFile(profile.instructionFile, snippet, SNIPPET_START_MD, SNIPPET_END_MD);
+    } else {
+      files.set(
+        join(cwd, profile.instructionFile),
+        planFile(cwd, profile.instructionFile, profile.instructions(ctx)),
+      );
+    }
+
+    for (const caveat of profile.caveats) notes.push(`${profile.name}: ${caveat}`);
   }
 
   return { files: [...files.values()], skipped, notes };
@@ -1021,10 +634,15 @@ export function renderConfigWithHooks(
   return `${JSON.stringify(config, null, 2)}\n`;
 }
 
-/** Everything `remove` would delete or strip, computed against the current disk state. */
+/**
+ * Everything `remove` would delete or strip, computed against the current disk state.
+ * The mirror image of {@link planInstall}, over the same data: each install step's
+ * kind is also how it comes back out — a JSON hook file is strip-merged, a marker
+ * block is stripped, a file that is entirely ours is deleted.
+ */
 export function planRemove(
   cwd: string,
-  harnesses: readonly HarnessSpec[],
+  harnesses: readonly HarnessProfile[],
 ): readonly PlannedRemoval[] {
   const removals = new Map<string, PlannedRemoval>();
 
@@ -1068,39 +686,25 @@ export function planRemove(
     removals.set(path, { name, path, action: 'delete' });
   };
 
-  for (const spec of harnesses) {
-    switch (spec.id) {
-      case 'claude-code':
-        planJsonStrip('.claude/settings.json');
-        break;
-      case 'codex':
-        planJsonStrip('.codex/hooks.json');
-        planBlockStrip('.codex/config.toml', SNIPPET_START_HASH, SNIPPET_END_HASH);
-        break;
-      case 'gemini':
-        planJsonStrip('.gemini/settings.json');
-        break;
-      case 'grok':
-        planJsonStrip('.grok/hooks.json');
-        break;
-      case 'hermes':
-        planWholeFileDelete('.hermes/hooks.yaml');
-        break;
-      case 'cursor':
-        planJsonStrip('.cursor/hooks.json');
-        break;
-      case 'opencode':
-        planWholeFileDelete('.opencode/plugin/smelt-guard.js');
-        break;
-      case 'cline':
-        planWholeFileDelete('.clinerules/hooks/PreToolUse');
-        break;
-      case 'kilocode':
-      case 'aider':
-        break;
+  for (const profile of harnesses) {
+    for (const step of profile.install) {
+      switch (step.kind) {
+        case 'json-hooks':
+          planJsonStrip(step.file);
+          break;
+        case 'marker-block':
+          planBlockStrip(step.file, step.start, step.end);
+          break;
+        case 'own-file':
+          planWholeFileDelete(step.file);
+          break;
+      }
     }
-    if (spec.id === 'kilocode') planWholeFileDelete(spec.instructionFile);
-    else planBlockStrip(spec.instructionFile, SNIPPET_START_MD, SNIPPET_END_MD);
+    if (profile.instructions === 'snippet') {
+      planBlockStrip(profile.instructionFile, SNIPPET_START_MD, SNIPPET_END_MD);
+    } else {
+      planWholeFileDelete(profile.instructionFile);
+    }
   }
 
   return [...removals.values()];
@@ -1144,19 +748,19 @@ export async function runHooks(
   }
 }
 
-function resolveHarnessFlag(flag: string): HarnessSpec {
-  const spec = harnessById(flag);
-  if (spec === undefined) {
+function resolveHarnessFlag(flag: string): HarnessProfile {
+  const profile = harnessById(flag);
+  if (profile === undefined) {
     throw new CliUsageError(
       `${CLI_NAME} hooks: unknown harness "${flag}". ` +
         `Known: ${HARNESSES.map((h) => h.id).join(', ')}.`,
     );
   }
-  return spec;
+  return profile;
 }
 
-function tierLabel(spec: HarnessSpec): string {
-  return `${spec.id.padEnd(12)} ${spec.name.padEnd(14)} [${spec.tier}] — ${TIER_HONESTY[spec.tier]}`;
+function tierLabel(profile: HarnessProfile): string {
+  return `${profile.id.padEnd(12)} ${profile.name.padEnd(14)} [${profile.tier}] — ${TIER_HONESTY[profile.tier]}`;
 }
 
 async function installFlow(
@@ -1183,7 +787,7 @@ async function installFlow(
   // With --harness the selection step is skipped, so the tier label — and its one
   // line of honesty about what the tier means — is printed here instead.
   if (harnessFlag !== undefined) {
-    for (const spec of choices.harnesses) io.output(`  ${tierLabel(spec)}\n`);
+    for (const profile of choices.harnesses) io.output(`  ${tierLabel(profile)}\n`);
   }
 
   const steps: readonly ((io_: HooksIo, ask_: Asker) => Promise<'ok' | 'back'>)[] = [
@@ -1257,16 +861,16 @@ async function stepHarnesses(
   io: HooksIo,
   ask: Asker,
   choices: HooksChoices,
-  detected: readonly HarnessSpec[],
+  detected: readonly HarnessProfile[],
 ): Promise<'ok' | 'back'> {
   io.output(`\nHarnesses — detected by their config directories (project or home):\n`);
-  for (const spec of HARNESSES) {
-    const mark = detected.includes(spec) ? '*' : ' ';
-    io.output(`  ${mark} ${tierLabel(spec)}\n`);
+  for (const profile of HARNESSES) {
+    const mark = detected.includes(profile) ? '*' : ' ';
+    io.output(`  ${mark} ${tierLabel(profile)}\n`);
   }
   io.output(`(* = detected here)\n`);
   for (;;) {
-    const current = choices.harnesses.map((spec) => spec.id).join(',') || '(none)';
+    const current = choices.harnesses.map((profile) => profile.id).join(',') || '(none)';
     const answer = await ask(
       `install for which? (comma-separated ids, Enter = ${current}, or back)\n> `,
     );
@@ -1276,18 +880,18 @@ async function stepHarnesses(
       .split(',')
       .map((id) => id.trim())
       .filter((id) => id !== '');
-    const specs: HarnessSpec[] = [];
+    const chosen: HarnessProfile[] = [];
     let bad: string | undefined;
     for (const id of ids) {
-      const spec = harnessById(id);
-      if (spec === undefined) bad = id;
-      else if (!specs.includes(spec)) specs.push(spec);
+      const profile = harnessById(id);
+      if (profile === undefined) bad = id;
+      else if (!chosen.includes(profile)) chosen.push(profile);
     }
     if (bad !== undefined) {
       io.output(`Unknown harness "${bad}". Known: ${HARNESSES.map((h) => h.id).join(', ')}.\n`);
       continue;
     }
-    choices.harnesses = specs;
+    choices.harnesses = chosen;
     return 'ok';
   }
 }
@@ -1364,32 +968,13 @@ async function stepThreshold(
   }
 }
 
-/** The JSON hook files a re-run reads installed toggles back from, per harness. */
-const TOGGLE_READBACK_FILES = [
-  '.claude/settings.json',
-  '.codex/hooks.json',
-  '.gemini/settings.json',
-  '.grok/hooks.json',
-  '.cursor/hooks.json',
-] as const;
-
-/** Guard-only files whose presence means the guard toggle was installed. */
-const GUARD_ONLY_FILES = [
-  '.hermes/hooks.yaml',
-  '.opencode/plugin/smelt-guard.js',
-  '.clinerules/hooks/PreToolUse',
-] as const;
-
-/** The managed events that wire the PreToolUse guard, across harness spellings. */
-const GUARD_EVENTS = ['PreToolUse', 'BeforeTool', 'preToolUse'] as const;
-
 /**
  * A re-run reads the toggles back off what is actually installed — every JSON hook
- * file this installer writes, plus the guard-only shim files — so it edits instead of
- * resetting. Harnesses that only wire the guard (gemini, grok, cursor, hermes,
- * opencode, cline) persist no stats/map entries, so after a re-run scoped to them
- * those toggles read back as off; the defaults below apply only when nothing of
- * smelt's is installed at all.
+ * file this installer writes, plus the guard-only shim files, both derived from the
+ * registry — so it edits instead of resetting. Harnesses that only wire the guard
+ * (gemini, grok, cursor, hermes, opencode, cline) persist no stats/map entries, so
+ * after a re-run scoped to them those toggles read back as off; the defaults below
+ * apply only when nothing of smelt's is installed at all.
  */
 function presetToggles(cwd: string): Pick<HooksChoices, 'guard' | 'statsOnStop' | 'mapOnStart'> {
   const defaults = { guard: true, statsOnStop: true, mapOnStart: false };
@@ -1398,7 +983,7 @@ function presetToggles(cwd: string): Pick<HooksChoices, 'guard' | 'statsOnStop' 
   let statsOnStop = false;
   let mapOnStart = false;
 
-  for (const name of TOGGLE_READBACK_FILES) {
+  for (const name of JSON_HOOK_FILES) {
     const text = readIfExists(join(cwd, name));
     if (text === undefined) continue;
     let hooks: Record<string, unknown> | undefined;

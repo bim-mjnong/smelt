@@ -1,0 +1,216 @@
+import { shimFromSchema } from '../hooks/shim.ts';
+import type { HarnessHookSchema, ShimAdapter } from '../hooks/shim.ts';
+
+/**
+ * Everything smelt knows about one agent harness, in one place.
+ *
+ * Before this module existed, a harness's facts lived at seven edit sites: the
+ * `HarnessId` union, the `HARNESSES` array, a shim file, a case in `planInstall`, a
+ * case in `planRemove`, `MANAGED_EVENTS`, a test fixture — plus a hand-typed id list
+ * in the `--harness` help text, which could not be derived because the registry lived
+ * in `cli/hooks.ts` and `cli/hooks.ts` imports `CLI_NAME` from `cli/args.ts`. The
+ * registry was in the wrong module, and the cycle was the proof.
+ *
+ * A `HarnessProfile` is the single adapter carrying every per-harness fact, and the
+ * registry (`registry.ts`) is `Record<HarnessId, HarnessProfile>` so totality stays a
+ * compile error: a new `HarnessId` without a profile does not build. It imports
+ * nothing from `cli/`, so `cli/args.ts` derives the `--harness` list and every other
+ * rendered view is derived too — the managed event names, the files a re-run reads its
+ * toggles back from, the id list in an error message.
+ *
+ * Installing and removing are **data**, not switch statements: `install` is the list
+ * of artefacts `smelt hooks install` writes for this harness, and each artefact's kind
+ * is also how `smelt hooks remove` takes it back out — a JSON hook file is merged and
+ * strip-merged, a marker block is upserted and stripped, a file that is entirely ours
+ * is written and deleted. `planInstall`/`planRemove` fold over the list.
+ *
+ * The optional sections state capability, never invent it: a harness ships a shim
+ * exactly when it carries a {@link hooks} schema (or, for a harness a table cannot
+ * express, a hand-written {@link shim}), and only such a profile has a shim script
+ * path. What a profile does not claim, the installer does not write.
+ */
+export interface HarnessProfile {
+  readonly id: HarnessId;
+  /** The harness's own name, as its makers spell it. Shown wherever a tier is. */
+  readonly name: string;
+  readonly tier: HarnessTier;
+  /** Paths (relative to the project) whose existence means "this harness is in use here". */
+  readonly detect: readonly string[];
+  /** Paths relative to the user's home directory — "installed on this machine". */
+  readonly detectHome: readonly string[];
+  /** The standing-instructions file this harness reads (capability matrix column d). */
+  readonly instructionFile: string;
+  /**
+   * The standing-instructions layer — belt and braces under every shim, and the *only*
+   * layer an advisory harness has:
+   *
+   *  - `'snippet'`: upsert the shared marker-bracketed block into
+   *    {@link instructionFile} (a file several harnesses read, like `AGENTS.md`, is
+   *    planned once); `remove` strips the block and leaves every other byte.
+   *  - a renderer: a whole file this harness owns, snippet included — KiloCode's rules
+   *    file carries two manual enforcement legs the shared snippet has no room for;
+   *    `remove` deletes it.
+   */
+  readonly instructions: 'snippet' | HarnessFileContent;
+  /** Caveats carried from the capability matrix, shown at install time. */
+  readonly caveats: readonly string[];
+  /**
+   * Everything else `hooks install` writes for this harness, in the order it is
+   * written and listed. Empty means instructions only: the advisory tier, where
+   * nothing enforces anything and the output says so.
+   */
+  readonly install: readonly HarnessInstallStep[];
+  /**
+   * This harness's native pre-tool hook schema, as data. Present exactly when the
+   * harness ships a shim script (`dist/hooks/shims/<id>.js`) — absent for the advisory
+   * tier, and for opencode, whose hook API is a JavaScript plugin rather than a stdin
+   * schema.
+   */
+  readonly hooks?: HarnessHookSchema;
+  /**
+   * The escape hatch: a hand-written adapter, for a harness whose schema a table
+   * cannot express. Wins over {@link hooks} when both are present.
+   */
+  readonly shim?: ShimAdapter;
+}
+
+/** How much smelt is willing to claim about a harness. */
+export type HarnessTier = 'verified' | 'experimental' | 'advisory';
+
+/**
+ * Every harness the preset knows. The registry is keyed by this union, so adding an id
+ * without writing its profile is a compile error — and the `--harness` help list, the
+ * wizard's table and every error message read the registry, never a second list.
+ */
+export type HarnessId =
+  | 'claude-code'
+  | 'codex'
+  | 'gemini'
+  | 'grok'
+  | 'hermes'
+  | 'cursor'
+  | 'opencode'
+  | 'cline'
+  | 'kilocode'
+  | 'aider';
+
+/** One line of honesty per tier, shown wherever a tier label appears. */
+export const TIER_HONESTY: Record<HarnessTier, string> = {
+  verified: 'schema verified against primary docs and pinned by fixtures',
+  experimental:
+    'schema mapped from the 2026-09-02 capability matrix, not yet smoke-tested against the real binary',
+  advisory: 'no usable hook API — instructions only, nothing enforces them',
+};
+
+/**
+ * What the wizard settled on, as the installer's renderers see it: the toggles, the
+ * guard's settings, and the project directory every path is relative to. A renderer
+ * takes this and returns bytes; nothing writes.
+ */
+export interface HarnessInstallContext {
+  /** Project directory: every path a renderer emits is portable relative to it. */
+  readonly cwd: string;
+  readonly guard: boolean;
+  readonly statsOnStop: boolean;
+  readonly mapOnStart: boolean;
+  readonly thresholdBytes: number;
+  /** The `--budget` every suggested command and the snippet quote. */
+  readonly budgetBytes: number;
+}
+
+/** A file's bytes, rendered from the wizard's choices. */
+export type HarnessFileContent = (ctx: HarnessInstallContext) => string;
+
+/**
+ * One artefact `hooks install` writes. The kind is also the un-write: `json-hooks` is
+ * merged in and strip-merged out, `marker-block` is upserted and stripped,
+ * `own-file` is written and deleted.
+ */
+export type HarnessInstallStep = HarnessJsonHooks | HarnessMarkerBlock | HarnessOwnFile;
+
+/**
+ * A JSON settings/hooks file the harness reads. Our entries are merged in
+ * byte-faithfully and, on `remove`, stripped back out with everything foreign left
+ * exactly as it was.
+ */
+export interface HarnessJsonHooks {
+  readonly kind: 'json-hooks';
+  /** Project-relative path of the file. */
+  readonly file: string;
+  /** The pre-tool event, in this harness's spelling (`PreToolUse`, `BeforeTool`, …). */
+  readonly event: string;
+  /**
+   * One hook entry per matcher — the tool names the guard wants to see. `undefined`
+   * is a matcher-less entry, for a harness whose hook fires on every tool.
+   */
+  readonly matchers: readonly (string | undefined)[];
+  /**
+   * The entry shape: `'command-list'` is Claude Code's `{matcher, hooks:[{type,
+   * command}]}`, which Codex, Gemini and Grok mirror; `'bare-command'` is Cursor's
+   * `{command}`.
+   */
+  readonly entry: 'command-list' | 'bare-command';
+  /**
+   * True for a harness whose schema also carries the session-lifecycle events this
+   * preset offers — `smelt stats` on Stop, `smelt map` on SessionStart. The other
+   * harnesses wire the guard only, and the wizard's toggles say so.
+   */
+  readonly lifecycle: boolean;
+  /** Top-level keys a *fresh* file must carry (Cursor's `version: 1`). */
+  readonly shape?: { readonly version: number };
+}
+
+/** A marker-bracketed block inside a file smelt shares with its owner. */
+export interface HarnessMarkerBlock {
+  readonly kind: 'marker-block';
+  readonly file: string;
+  readonly block: HarnessFileContent;
+  /** The marker line opening the block — also how `remove` finds it. */
+  readonly start: string;
+  readonly end: string;
+  /**
+   * Refuse the file instead of editing it when it already carries `contains` and none
+   * of ours: Codex's `config.toml` may have a hand-written `[features]` table, and an
+   * installer that merged into it would be editing what it was never asked to.
+   */
+  readonly skipWhen?: { readonly contains: string; readonly why: string };
+}
+
+/** A file that is entirely smelt's: written whole, deleted whole. */
+export interface HarnessOwnFile {
+  readonly kind: 'own-file';
+  readonly file: string;
+  readonly content: HarnessFileContent;
+  /** chmod after writing (Cline's hook must be executable). */
+  readonly mode?: number;
+  /** True when the file exists only to wire the guard — the guard toggle gates it. */
+  readonly guardOnly: boolean;
+}
+
+/**
+ * A profile that ships a shim script. Only these have a shim path: `shimScriptPath`
+ * takes one, so a harness with no shim cannot name a script that was never built.
+ */
+export type ShimmedHarnessProfile = HarnessProfile &
+  ({ readonly hooks: HarnessHookSchema } | { readonly shim: ShimAdapter });
+
+/** True for a profile that ships a shim script — the narrowing `shimScriptPath` needs. */
+export function hasShim(profile: HarnessProfile): profile is ShimmedHarnessProfile {
+  return profile.hooks !== undefined || profile.shim !== undefined;
+}
+
+/**
+ * The adapter this profile's shim script runs: the one its {@link HarnessProfile.hooks}
+ * schema describes, or the hand-written escape hatch where it carries one.
+ */
+export function shimAdapterOf(profile: ShimmedHarnessProfile): ShimAdapter {
+  const { hooks, shim } = profile;
+  if (shim !== undefined) return shim;
+  /* v8 ignore next 5 -- unreachable: a ShimmedHarnessProfile carries one or the other */
+  if (hooks === undefined) {
+    throw new Error(
+      `smelt: harness "${profile.id}" claims a shim but carries neither a hook schema nor an adapter.`,
+    );
+  }
+  return shimFromSchema(hooks);
+}
