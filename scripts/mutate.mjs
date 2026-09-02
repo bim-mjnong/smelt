@@ -569,6 +569,8 @@ const MUTATIONS = [
     find: '    expansionRate: raw.elisionsStored === 0 ? 0 : raw.uniqueRetrieved / raw.elisionsStored,',
     replace: '    expansionRate: 0,',
     why: 'the one shared derivation of the honest signal wired flat — every store now reports a flattering zero at once, and no per-store copy of the arithmetic exists to disagree',
+  },
+  {
     id: 'planner-registry-entry-dropped',
     guard: 'test/guards/planner-registry.test.ts',
     file: 'plan/planners.ts',
