@@ -7,9 +7,12 @@ import type { ShimAdapter } from '../shim.ts';
  * Schema per <https://code.claude.com/docs/en/hooks> (verified 2026-09-02; the deep
  * dive is docs/research/2026-09-02-agent-enforcement.md § 1):
  *
- *  - stdin: `{ hook_event_name: "PreToolUse", tool_name, tool_input }`. For `Read`,
- *    `tool_input.file_path` is already absolute and `offset`/`limit` mark a windowed
- *    read; for `Bash`, `tool_input.command` is the full command string.
+ *  - stdin: `{ hook_event_name: "PreToolUse", tool_name, tool_input, cwd }`. For
+ *    `Read`, `tool_input.file_path` is already absolute and `offset`/`limit` mark a
+ *    windowed read; for `Bash`, `tool_input.command` is the full command string, and
+ *    a relative path in it resolves against the payload's `cwd` — the *session's*
+ *    working directory, which after the model `cd`s differs from this hook
+ *    process's own cwd.
  *  - deny: `hookSpecificOutput.permissionDecision: "deny"` with
  *    `permissionDecisionReason` — which is **shown to the model**, so the guard's
  *    reason (the exact replacement command, the `smelt retrieve` contract) lands in
@@ -25,6 +28,10 @@ export const adapter: ShimAdapter = {
       read: ['Read'],
       bash: ['Bash'],
     });
+  },
+  cwd: (raw) => {
+    const cwd = asRecord(raw)['cwd'];
+    return typeof cwd === 'string' && cwd !== '' ? cwd : undefined;
   },
   pass: () => ({ stdout: '', exitCode: 0 }),
   deny: (_raw, _request, decision) => ({

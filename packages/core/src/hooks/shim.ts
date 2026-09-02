@@ -30,15 +30,27 @@ import type { GuardDecision, GuardRequest, GuardSettings } from './guard-core.ts
  *    `suggestion`, and this harness can modify tool input, the shim substitutes the
  *    suggestion instead of denying. A harness that cannot rewrite falls back to the
  *    deny — with the exact command in the reason — so rewrite mode never silently
- *    weakens into nothing. And a shim never rewrites in deny mode: a silent rewrite
- *    changes what the model asked for without telling it, which is this project's
- *    signature failure shape applied to the harness (founder ruling, KOT-212).
+ *    weakens into nothing. A substitution is always announced: in the decision
+ *    reason where the harness's rewrite schema carries one (Claude Code, Codex),
+ *    and on stderr where it does not (Gemini, Cursor, Hermes, the opencode
+ *    plugin) — a rewrite nobody can see would change what the model asked for
+ *    without telling anyone. And a shim never rewrites in deny mode: a silent
+ *    rewrite changes what the model asked for without telling it, which is this
+ *    project's signature failure shape applied to the harness (founder ruling,
+ *    KOT-212).
  */
 
 /** What one harness shim supplies. Everything else is {@link runShim}'s. */
 export interface ShimAdapter {
   /** Map the harness's raw stdin JSON to a guard request; `undefined` = pass through. */
   readonly toRequest: (raw: unknown) => GuardRequest | undefined;
+  /**
+   * The working directory tool-relative paths resolve against, read from the raw
+   * payload when the harness sends one (Claude Code's hook stdin carries `cwd`: the
+   * *session's* Bash cwd, which after a `cd` differs from this hook process's own).
+   * `undefined` falls back to the shim process's cwd.
+   */
+  readonly cwd?: (raw: unknown) => string | undefined;
   /** Render an allow. Most harnesses: empty stdout, exit 0. */
   readonly pass: () => ShimOutput;
   /** Render a deny, in the harness's schema. */
@@ -46,7 +58,8 @@ export interface ShimAdapter {
   /**
    * Render an input rewrite (only ever called for a Bash-shaped request whose
    * decision carries a faithful `suggestion`, and only in rewrite mode). Omit on
-   * harnesses whose hook schema cannot modify tool input — they deny instead.
+   * harnesses whose hook schema cannot modify tool input — they deny instead. A
+   * schema with no reason channel must announce the substitution via `stderr`.
    */
   readonly rewrite?: (raw: unknown, request: GuardRequest, decision: GuardDecision) => ShimOutput;
 }
@@ -54,6 +67,9 @@ export interface ShimAdapter {
 /** What a shim writes and how it exits. `stdout` is a complete JSON line or ''. */
 export interface ShimOutput {
   readonly stdout: string;
+  /** Written to the shim process's stderr — the announcement channel for harnesses
+   * whose rewrite schema has no reason field. Never a decision by itself. */
+  readonly stderr?: string;
   readonly exitCode: number;
 }
 
@@ -67,10 +83,11 @@ export function renderShimDecision(
 ): ShimOutput {
   const request = adapter.toRequest(raw);
   if (request === undefined) return adapter.pass();
+  const effectiveCwd = adapter.cwd?.(raw) ?? cwd;
   const decision =
     statFile === undefined
-      ? decide(request, settings, cwd)
-      : decide(request, settings, cwd, statFile);
+      ? decide(request, settings, effectiveCwd)
+      : decide(request, settings, effectiveCwd, statFile);
   if (decision.action === 'allow') return adapter.pass();
   if (
     settings.enforcement === 'rewrite' &&
@@ -117,6 +134,7 @@ export function runShimMain(adapter: ShimAdapter): void {
     );
     output = adapter.pass();
   }
+  if (output.stderr !== undefined && output.stderr !== '') process.stderr.write(output.stderr);
   if (output.stdout !== '') process.stdout.write(output.stdout);
   process.exitCode = output.exitCode;
 }

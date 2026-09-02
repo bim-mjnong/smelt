@@ -313,12 +313,14 @@ function claudeStyleEvents(
   matchers: { readonly read: string; readonly bash: string },
 ): Record<string, readonly unknown[]> {
   const shimCommand = nodeCommand(ctx.cwd, shimScriptPath(shim));
-  const stats = `${nodeCommand(ctx.cwd, smeltBinPath(), 'stats')} 2>/dev/null || true`;
+  // The trailing shell comment tags the entry as this installer's (see isOursEntry):
+  // a bare `cli/bin.js` substring would also match some other npm CLI's built binary.
+  const stats = `${nodeCommand(ctx.cwd, smeltBinPath(), 'stats')} 2>/dev/null || true # ${OURS_TOKEN}`;
   const map = `${nodeCommand(
     ctx.cwd,
     smeltBinPath(),
     `map . --budget ${String(ctx.budgetBytes)} --cache .smelt/tags`,
-  )} 2>/dev/null || true`;
+  )} 2>/dev/null || true # ${OURS_TOKEN}`;
 
   return {
     ...(ctx.guard
@@ -336,13 +338,18 @@ function claudeStyleEvents(
   };
 }
 
-/** True for a hook entry this installer wrote (its command names our shipped scripts). */
+/**
+ * True for a hook entry this installer wrote. Matched on the shim/guard script paths
+ * and the `smelt:hooks` token the stats/map commands carry — never on a substring as
+ * generic as `cli/bin.js`, which another npm CLI's built binary could share: remove
+ * and re-install may only ever touch entries that are provably smelt's.
+ */
 function isOursEntry(entry: unknown): boolean {
   const text = JSON.stringify(entry) ?? '';
   return (
     text.includes('hooks/shims/') ||
     text.includes('hooks/guard-core.js') ||
-    text.includes('cli/bin.js')
+    text.includes(OURS_TOKEN)
   );
 }
 
@@ -350,12 +357,17 @@ function isOursEntry(entry: unknown): boolean {
 const MANAGED_EVENTS = ['PreToolUse', 'Stop', 'SessionStart', 'BeforeTool', 'preToolUse'];
 
 /**
- * Merge our hook entries into a JSON settings file, preserving everything foreign:
- * unknown top-level keys, unmanaged events, and other people's entries under managed
- * events all ride through byte-comparable. Our previous entries are replaced (that is
- * what makes a re-run edit toggles), and events left with no entries disappear.
- * Returns `undefined` when the existing file is not a JSON object — the caller skips
- * the file rather than clobbering something it cannot understand.
+ * Merge our hook entries into a JSON settings file, preserving everything foreign
+ * **byte-faithfully**: the merged `hooks` value is spliced into the original text, so
+ * unknown top-level keys, string escapes, number spellings, indentation and key order
+ * outside the `hooks` property ride through verbatim (founder ruling: an installer
+ * that reformats somebody's settings file has edited what it was never asked to).
+ * Inside `hooks`, unmanaged events and other people's entries under managed events
+ * are preserved; our previous entries are replaced (that is what makes a re-run edit
+ * toggles), and events left with no entries disappear. A semantic no-op returns the
+ * input text unchanged. Returns `undefined` when the existing file is not a JSON
+ * object — the caller skips the file rather than clobbering something it cannot
+ * understand.
  */
 export function mergeJsonHooks(
   existingText: string | undefined,
@@ -373,10 +385,11 @@ export function mergeJsonHooks(
     }
   }
   const hooksValue = root['hooks'];
-  const hooks =
+  const existingHooks =
     typeof hooksValue === 'object' && hooksValue !== null && !Array.isArray(hooksValue)
-      ? { ...(hooksValue as Record<string, unknown>) }
-      : {};
+      ? (hooksValue as Record<string, unknown>)
+      : undefined;
+  const hooks = { ...existingHooks };
 
   for (const event of MANAGED_EVENTS) {
     const existing = Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : [];
@@ -387,10 +400,192 @@ export function mergeJsonHooks(
     else delete hooks[event];
   }
 
-  if (Object.keys(hooks).length > 0) root['hooks'] = hooks;
-  else delete root['hooks'];
-  if (shape.version !== undefined && root['version'] === undefined) root['version'] = shape.version;
-  return `${JSON.stringify(root, null, 2)}\n`;
+  const mergedHooks = Object.keys(hooks).length > 0 ? hooks : undefined;
+
+  // A brand-new file: nothing to preserve, render fresh two-space JSON.
+  if (existingText === undefined) {
+    const fresh: Record<string, unknown> = {};
+    if (mergedHooks !== undefined) fresh['hooks'] = mergedHooks;
+    if (shape.version !== undefined) fresh['version'] = shape.version;
+    return `${JSON.stringify(fresh, null, 2)}\n`;
+  }
+
+  const hooksChanged =
+    JSON.stringify(existingHooks ?? null) !== JSON.stringify(mergedHooks ?? null);
+  const needsVersion = shape.version !== undefined && root['version'] === undefined;
+  if (!hooksChanged && !needsVersion) return existingText;
+
+  const newline = existingText.includes('\r\n') ? '\r\n' : '\n';
+  const indent = /\n([ \t]+)"/.exec(existingText)?.[1] ?? '  ';
+  let text = existingText;
+
+  if (hooksChanged) {
+    const scan = scanJsonTopLevel(text);
+    /* v8 ignore next -- unreachable: JSON.parse accepted the same text above */
+    if (scan === undefined) return undefined;
+    const property = scan.properties.find((candidate) => candidate.key === 'hooks');
+    if (mergedHooks === undefined) {
+      if (property !== undefined) text = removeJsonProperty(text, scan, property);
+    } else {
+      const rendered = renderJsonValue(mergedHooks, indent, newline);
+      text =
+        property !== undefined
+          ? `${text.slice(0, property.valueStart)}${rendered}${text.slice(property.valueEnd)}`
+          : insertJsonProperty(text, scan, 'hooks', rendered, indent, newline);
+    }
+  }
+  if (needsVersion) {
+    const scan = scanJsonTopLevel(text);
+    /* v8 ignore next -- unreachable: every splice above keeps the text valid JSON */
+    if (scan === undefined) return undefined;
+    text = insertJsonProperty(
+      text,
+      scan,
+      'version',
+      JSON.stringify(shape.version),
+      indent,
+      newline,
+    );
+  }
+  return text;
+}
+
+/** One top-level property of a JSON object, located by offsets in its source text. */
+interface JsonTopLevelProperty {
+  readonly key: string;
+  /** Offset of the key's opening quote. */
+  readonly keyStart: number;
+  /** Offset of the value's first byte. */
+  readonly valueStart: number;
+  /** Offset one past the value's last byte. */
+  readonly valueEnd: number;
+}
+
+interface JsonTopLevelScan {
+  /** Offset of the root object's `{`. */
+  readonly open: number;
+  /** Offset of the root object's `}`. */
+  readonly close: number;
+  readonly properties: readonly JsonTopLevelProperty[];
+}
+
+/**
+ * Locate the top-level properties of a JSON object *in its source text*, so one
+ * property can be replaced, inserted or removed while every other byte of the file
+ * rides through verbatim. `undefined` when the text is not an object — callers have
+ * already `JSON.parse`d it, so that is belt and braces, not a validator.
+ */
+function scanJsonTopLevel(text: string): JsonTopLevelScan | undefined {
+  let i = skipJsonWhitespace(text, 0);
+  if (text[i] !== '{') return undefined;
+  const open = i;
+  i = skipJsonWhitespace(text, i + 1);
+  const properties: JsonTopLevelProperty[] = [];
+  if (text[i] === '}') return { open, close: i, properties };
+  for (;;) {
+    if (text[i] !== '"') return undefined;
+    const keyStart = i;
+    const keyEnd = skipJsonString(text, i);
+    if (keyEnd === undefined) return undefined;
+    const key = JSON.parse(text.slice(keyStart, keyEnd)) as string;
+    i = skipJsonWhitespace(text, keyEnd);
+    if (text[i] !== ':') return undefined;
+    const valueStart = skipJsonWhitespace(text, i + 1);
+    const valueEnd = skipJsonValue(text, valueStart);
+    if (valueEnd === undefined) return undefined;
+    properties.push({ key, keyStart, valueStart, valueEnd });
+    i = skipJsonWhitespace(text, valueEnd);
+    if (text[i] === ',') {
+      i = skipJsonWhitespace(text, i + 1);
+      continue;
+    }
+    if (text[i] === '}') return { open, close: i, properties };
+    return undefined;
+  }
+}
+
+function skipJsonWhitespace(text: string, from: number): number {
+  let i = from;
+  while (i < text.length && ' \t\r\n'.includes(text[i]!)) i += 1;
+  return i;
+}
+
+/** `from` points at `"`; returns the offset one past the closing quote. */
+function skipJsonString(text: string, from: number): number | undefined {
+  let i = from + 1;
+  while (i < text.length) {
+    if (text[i] === '\\') i += 2;
+    else if (text[i] === '"') return i + 1;
+    else i += 1;
+  }
+  return undefined;
+}
+
+function skipJsonValue(text: string, from: number): number | undefined {
+  const first = text[from];
+  if (first === '"') return skipJsonString(text, from);
+  if (first === '{' || first === '[') {
+    let depth = 0;
+    let i = from;
+    while (i < text.length) {
+      const ch = text[i]!;
+      if (ch === '"') {
+        const end = skipJsonString(text, i);
+        if (end === undefined) return undefined;
+        i = end;
+        continue;
+      }
+      if (ch === '{' || ch === '[') depth += 1;
+      else if (ch === '}' || ch === ']') {
+        depth -= 1;
+        if (depth === 0) return i + 1;
+      }
+      i += 1;
+    }
+    return undefined;
+  }
+  // number / true / false / null
+  let i = from;
+  while (i < text.length && !',}] \t\r\n'.includes(text[i]!)) i += 1;
+  return i > from ? i : undefined;
+}
+
+/** A JSON value indented for embedding at a top-level property position. */
+function renderJsonValue(value: unknown, indent: string, newline: string): string {
+  return JSON.stringify(value, null, indent).split('\n').join(`${newline}${indent}`);
+}
+
+function removeJsonProperty(
+  text: string,
+  scan: JsonTopLevelScan,
+  property: JsonTopLevelProperty,
+): string {
+  const index = scan.properties.indexOf(property);
+  const next = scan.properties[index + 1];
+  if (next !== undefined) {
+    // Delete through the separating comma and whitespace, up to the next key.
+    return text.slice(0, property.keyStart) + text.slice(next.keyStart);
+  }
+  const previous = scan.properties[index - 1];
+  // Last (or only) property: delete the preceding comma (if any) with it.
+  const from = previous !== undefined ? previous.valueEnd : scan.open + 1;
+  return text.slice(0, from) + text.slice(property.valueEnd);
+}
+
+function insertJsonProperty(
+  text: string,
+  scan: JsonTopLevelScan,
+  key: string,
+  renderedValue: string,
+  indent: string,
+  newline: string,
+): string {
+  const entry = `${JSON.stringify(key)}: ${renderedValue}`;
+  if (scan.properties.length === 0) {
+    return `${text.slice(0, scan.open + 1)}${newline}${indent}${entry}${newline}${text.slice(scan.close)}`;
+  }
+  const last = scan.properties[scan.properties.length - 1]!;
+  return `${text.slice(0, last.valueEnd)},${newline}${indent}${entry}${text.slice(last.valueEnd)}`;
 }
 
 /** Replace this installer's marker block in `existingText`, or append it. */
@@ -450,7 +645,9 @@ function opencodePluginSource(cwd: string): string {
 //
 // Thin adapter: maps tool.execute.before onto the smelt guard core (zero
 // dependencies), which owns every decision. Deny mode throws (opencode surfaces the
-// reason to the model); rewrite mode substitutes the faithful replacement command.
+// reason to the model); rewrite mode substitutes the faithful replacement command —
+// announced on stderr, because the plugin API has no reason channel on a rewrite
+// and a substitution must never be silent.
 import { pathToFileURL } from 'node:url';
 
 const GUARD_CORE = ${JSON.stringify(guardCore)};
@@ -483,6 +680,12 @@ export const SmeltGuard = async () => ({
       request.tool === 'Bash' &&
       decision.suggestion !== undefined
     ) {
+      warn(
+        'smelt guard (rewrite mode): substituted the command in-flight with \`' +
+          decision.suggestion +
+          '\`. ' +
+          (decision.reason ?? ''),
+      );
       output.args.command = decision.suggestion;
       return;
     }
@@ -789,7 +992,19 @@ export function planInstall(cwd: string, choices: HooksChoices): InstallPlan {
   return { files: [...files.values()], skipped, notes };
 }
 
-/** Existing config re-rendered with the hooks block, other fields carried verbatim. */
+/** Where the installed config points the persistent store, relative to the config file. */
+export const DEFAULT_STORE_DIR = '.smelt/store';
+
+/**
+ * Existing config re-rendered with the hooks block, other fields carried verbatim —
+ * except that a config with **no** store block gains a directory store. The deny
+ * reasons and the instruction snippet teach `smelt retrieve <hash>`, and retrieval
+ * across processes needs a persistent store (`smelt retrieve` refuses a memory
+ * store, exit 2) — an install whose own guard promises a command the installed
+ * config cannot run would be the exact silent-failure shape this project refuses.
+ * An *explicit* `{"kind":"memory"}` is respected; the guard then conditions its
+ * retrieve promise on the store kind instead (`retrieveSentence` in guard-core).
+ */
 export function renderConfigWithHooks(
   existing: SmeltConfig | undefined,
   hooks: SmeltConfigHooks,
@@ -800,7 +1015,7 @@ export function renderConfigWithHooks(
       ? {}
       : { defaultBudgetBytes: existing.defaultBudgetBytes }),
     ...(existing?.strategy === undefined ? {} : { strategy: existing.strategy }),
-    ...(existing?.store === undefined ? {} : { store: existing.store }),
+    store: existing?.store ?? { kind: 'directory', path: DEFAULT_STORE_DIR },
     hooks,
   };
   return `${JSON.stringify(config, null, 2)}\n`;
@@ -1109,7 +1324,8 @@ async function stepEnforcement(
       `                transcript stays truthful; the model runs the replacement itself.\n` +
       `  2. rewrite  — on harnesses whose hooks can modify tool input, substitute the\n` +
       `                replacement in-flight (grep/cat piped through smelt). Never\n` +
-      `                silent: the substitution is announced in the decision reason.\n` +
+      `                silent: the substitution is announced in the decision reason\n` +
+      `                where the harness has one, on stderr where it does not.\n` +
       `                Harnesses that cannot rewrite fall back to deny.\n`,
   );
   for (;;) {
@@ -1148,31 +1364,78 @@ async function stepThreshold(
   }
 }
 
-/** A re-run reads the toggles back off `.claude/settings.json`, so it edits, not resets. */
+/** The JSON hook files a re-run reads installed toggles back from, per harness. */
+const TOGGLE_READBACK_FILES = [
+  '.claude/settings.json',
+  '.codex/hooks.json',
+  '.gemini/settings.json',
+  '.grok/hooks.json',
+  '.cursor/hooks.json',
+] as const;
+
+/** Guard-only files whose presence means the guard toggle was installed. */
+const GUARD_ONLY_FILES = [
+  '.hermes/hooks.yaml',
+  '.opencode/plugin/smelt-guard.js',
+  '.clinerules/hooks/PreToolUse',
+] as const;
+
+/** The managed events that wire the PreToolUse guard, across harness spellings. */
+const GUARD_EVENTS = ['PreToolUse', 'BeforeTool', 'preToolUse'] as const;
+
+/**
+ * A re-run reads the toggles back off what is actually installed — every JSON hook
+ * file this installer writes, plus the guard-only shim files — so it edits instead of
+ * resetting. Harnesses that only wire the guard (gemini, grok, cursor, hermes,
+ * opencode, cline) persist no stats/map entries, so after a re-run scoped to them
+ * those toggles read back as off; the defaults below apply only when nothing of
+ * smelt's is installed at all.
+ */
 function presetToggles(cwd: string): Pick<HooksChoices, 'guard' | 'statsOnStop' | 'mapOnStart'> {
   const defaults = { guard: true, statsOnStop: true, mapOnStart: false };
-  const text = readIfExists(join(cwd, '.claude/settings.json'));
-  if (text === undefined) return defaults;
-  try {
-    const parsed: unknown = JSON.parse(text);
-    const hooks =
-      typeof parsed === 'object' && parsed !== null
-        ? ((parsed as Record<string, unknown>)['hooks'] as Record<string, unknown> | undefined)
-        : undefined;
-    if (hooks === undefined || typeof hooks !== 'object') return defaults;
+  let anyOurs = false;
+  let guard = false;
+  let statsOnStop = false;
+  let mapOnStart = false;
+
+  for (const name of TOGGLE_READBACK_FILES) {
+    const text = readIfExists(join(cwd, name));
+    if (text === undefined) continue;
+    let hooks: Record<string, unknown> | undefined;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      const hooksValue =
+        typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>)['hooks']
+          : undefined;
+      hooks =
+        typeof hooksValue === 'object' && hooksValue !== null && !Array.isArray(hooksValue)
+          ? (hooksValue as Record<string, unknown>)
+          : undefined;
+    } catch {
+      hooks = undefined;
+    }
+    if (hooks === undefined) continue;
+    const installed = hooks;
     const hasOurs = (event: string): boolean =>
-      Array.isArray(hooks[event]) &&
-      (hooks[event] as unknown[]).some((entry) => isOursEntry(entry));
-    const anyOurs = MANAGED_EVENTS.some((event) => hasOurs(event));
-    if (!anyOurs) return defaults;
-    return {
-      guard: hasOurs('PreToolUse'),
-      statsOnStop: hasOurs('Stop'),
-      mapOnStart: hasOurs('SessionStart'),
-    };
-  } catch {
-    return defaults;
+      Array.isArray(installed[event]) &&
+      (installed[event] as unknown[]).some((entry) => isOursEntry(entry));
+    if (!MANAGED_EVENTS.some((event) => hasOurs(event))) continue;
+    anyOurs = true;
+    guard ||= GUARD_EVENTS.some((event) => hasOurs(event));
+    statsOnStop ||= hasOurs('Stop');
+    mapOnStart ||= hasOurs('SessionStart');
   }
+
+  for (const name of GUARD_ONLY_FILES) {
+    const text = readIfExists(join(cwd, name));
+    if (text !== undefined && text.includes(OURS_TOKEN)) {
+      anyOurs = true;
+      guard = true;
+    }
+  }
+
+  return anyOurs ? { guard, statsOnStop, mapOnStart } : defaults;
 }
 
 const fileLabel = (file: PlannedFile): string => {

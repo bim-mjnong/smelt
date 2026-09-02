@@ -1,6 +1,6 @@
 import { readSync, statSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import process from 'node:process';
 
 /**
@@ -52,6 +52,28 @@ export type EnforcementMode = (typeof ENFORCEMENT_MODES)[number];
 /** The config file this guard discovers, by the same name the CLI uses. */
 export const GUARD_CONFIG_FILE_NAME = 'smelt.config.json';
 
+/**
+ * The runnable CLI name every reason and suggestion quotes. A local (non-global)
+ * `npm install @smeltjs/core` puts no `smelt` on anyone's PATH — the installer wires
+ * every shim as `node "<dist path>"` for exactly that reason — so a suggestion
+ * saying bare `smelt` would exit 127 the moment the model (or a rewrite-mode
+ * harness) ran it. When this module's sibling `cli/bin.js` exists — the shipped
+ * `dist/` layout every real run executes from — the command names it through `node`
+ * explicitly; the bare name is only the fallback for layouts where the sibling is
+ * absent (the source tree under the test runner).
+ */
+export function smeltCliCommand(): string {
+  try {
+    const bin = join(dirname(fileURLToPath(import.meta.url)), '..', 'cli', 'bin.js');
+    if (existsSync(bin)) return `node ${shellQuote(bin)}`;
+  } catch {
+    // fall through to the PATH name
+  }
+  return 'smelt';
+}
+
+const SMELT_CLI = smeltCliCommand();
+
 /** What a shim hands the guard core: the harness schema already mapped away. */
 export interface GuardRequest {
   /** `'Read'` for a file-read tool, `'Bash'` for a shell tool; anything else passes. */
@@ -90,12 +112,20 @@ export interface GuardSettings {
   readonly enforcement: EnforcementMode;
   /** Quoted in every suggested command, so the model runs a complete line. */
   readonly budgetBytes: number;
+  /**
+   * True when the config carries a directory store. `smelt retrieve <hash>` only
+   * works across processes with a persistent store (the CLI's default is memory,
+   * which dies with the process that elided), so a deny reason may only *promise*
+   * retrieval when this is true — otherwise it says what to configure instead.
+   */
+  readonly persistentStore: boolean;
 }
 
 export const DEFAULT_GUARD_SETTINGS: GuardSettings = {
   thresholdBytes: DEFAULT_THRESHOLD_BYTES,
   enforcement: 'deny',
   budgetBytes: DEFAULT_SUGGESTION_BUDGET_BYTES,
+  persistentStore: false,
 };
 
 /**
@@ -150,7 +180,16 @@ export function readGuardSettings(cwd: string, warn: (text: string) => void): Gu
       `${path}: defaultBudgetBytes`,
       warn,
     ),
+    persistentStore: isDirectoryStore(fields['store']),
   };
+}
+
+/** True for a well-formed `{"kind":"directory","path":…}` store block; no warning
+ * otherwise — an absent or memory store is a valid (just non-persistent) choice. */
+function isDirectoryStore(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const fields = value as Record<string, unknown>;
+  return fields['kind'] === 'directory' && typeof fields['path'] === 'string';
 }
 
 function positiveInteger(
@@ -310,13 +349,19 @@ function decideBash(
         const decision = denyOversized(path, stat.size, settings, `\`${command}\``);
         // The suggestion is only a *faithful* replacement when cat named exactly this
         // one file; `cat a b` replaced by `smelt a` would silently drop b, so the
-        // multi-file case keeps the reason (the model decides) and drops the
-        // suggestion (nothing may auto-substitute it).
+        // multi-file case keeps the reason (the model decides), drops the suggestion
+        // (nothing may auto-substitute it), and says out loud that the named
+        // replacement covers only the oversized file — a model following the reason
+        // verbatim must not silently drop the others.
         return files.length === 1
           ? decision
           : {
               action: 'deny',
-              ...(decision.reason === undefined ? {} : { reason: decision.reason }),
+              reason:
+                `${decision.reason ?? ''} Note: \`${command}\` names ` +
+                `${String(files.length)} files and the replacement above covers only ` +
+                `${path} — read the other file(s) separately (cat is fine for the ones ` +
+                `under the threshold).`,
             };
       }
     }
@@ -326,19 +371,38 @@ function decideBash(
   if ((program === 'grep' || program === 'rg') && settings.enforcement === 'rewrite') {
     const pattern = searchPattern(words);
     if (pattern === undefined) return ALLOW;
-    const wrapped = `${command} | smelt --budget ${String(settings.budgetBytes)} --focus ${shellQuote(pattern)}`;
+    // Deliberately no `--focus` on the wrap: a plain grep's every output line contains
+    // the searched pattern, so focusing on it would protect the entire output — zero
+    // elisions exactly when the output is large, plus an over-budget exit. The wrap
+    // lets smelt's lexical planner keep the head and tail and collapse the middle
+    // into retrievable markers instead.
+    const wrapped = `${command} | ${SMELT_CLI} --budget ${String(settings.budgetBytes)}`;
     return {
       action: 'deny',
       reason:
         `smelt guard (rewrite mode): \`${program}\` output size is unknowable before it runs, ` +
-        `so pipe it through smelt instead. Run exactly: ${wrapped} — the focus keeps every ` +
-        `match; elided regions leave <<smelt/v1 …>> markers, and \`smelt retrieve <hash>\` ` +
-        `prints any of them back, byte for byte.`,
+        `so pipe it through smelt instead. Run exactly: ${wrapped} — output within the ` +
+        `budget passes through untouched; past it, elided regions leave <<smelt/v1 …>> ` +
+        `markers. ${retrieveSentence(settings)}`,
       suggestion: wrapped,
     };
   }
 
   return ALLOW;
+}
+
+/**
+ * The one sentence about getting elided bytes back — honest about the store: the
+ * retrieval promise is only made when a persistent store is configured, because a
+ * memory store dies with the process and `retrieve` then refuses (`resolveStoreRun`).
+ */
+function retrieveSentence(settings: GuardSettings): string {
+  return settings.persistentStore
+    ? `\`${SMELT_CLI} retrieve <hash>\` prints any marker's bytes back, byte for byte.`
+    : `\`${SMELT_CLI} retrieve <hash>\` can print a marker's bytes back once a persistent ` +
+        `store is configured ({"store":{"kind":"directory","path":…}} in smelt.config.json — ` +
+        `\`smelt hooks install\` writes one); without it the elided bytes die with the ` +
+        `smelt process.`;
 }
 
 /** The deny everything above the threshold gets: steering text plus the exact command. */
@@ -348,7 +412,7 @@ function denyOversized(
   settings: GuardSettings,
   what: string,
 ): GuardDecision {
-  const replacement = `smelt ${shellQuote(path)} --budget ${String(settings.budgetBytes)}`;
+  const replacement = `${SMELT_CLI} ${shellQuote(path)} --budget ${String(settings.budgetBytes)}`;
   return {
     action: 'deny',
     reason:
@@ -356,8 +420,8 @@ function denyOversized(
       `threshold (smelt.config.json hooks.thresholdBytes). ${what} would spend context on bytes ` +
       `the task may not need. Run instead: ${replacement} --focus <what you are looking for> ` +
       `(repeat --focus per term; focused regions survive verbatim). Elided regions leave ` +
-      `<<smelt/v1 …>> markers — \`smelt retrieve <hash>\` prints any of them back, byte for ` +
-      `byte. A windowed read (offset/limit) of just the lines you need is also fine.`,
+      `<<smelt/v1 …>> markers — ${retrieveSentence(settings)} A windowed read (offset/limit) ` +
+      `of just the lines you need is also fine.`,
     suggestion: replacement,
   };
 }

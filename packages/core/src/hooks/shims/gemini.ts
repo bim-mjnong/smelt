@@ -44,6 +44,10 @@ export const adapter: ShimAdapter = {
         tool_input: { ...asRecord(asRecord(raw)['tool_input']), command: decision.suggestion },
       },
     })}\n`,
+    // The BeforeTool rewrite shape carries no reason field — announce on stderr.
+    stderr:
+      `smelt guard (rewrite mode): substituted the command in-flight with ` +
+      `\`${decision.suggestion ?? ''}\`. ${decision.reason ?? ''}\n`,
     exitCode: 0,
   }),
 };

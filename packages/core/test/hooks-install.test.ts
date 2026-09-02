@@ -70,6 +70,9 @@ describe('a fresh claude-code install', () => {
       join(dir, 'smelt.config.json'),
     );
     expect(config.hooks).toEqual({ thresholdBytes: 8192, enforcement: 'deny' });
+    // A directory store is written when the config had none: every deny reason and
+    // the snippet teach `smelt retrieve <hash>`, which refuses a memory store.
+    expect(config.store).toEqual({ kind: 'directory', path: '.smelt/store' });
 
     // .claude/settings.json: guard on both matchers, stats on Stop, no map (opt-in).
     const settings = readJson('.claude/settings.json');
@@ -122,6 +125,16 @@ describe('a fresh claude-code install', () => {
     expect(config.hooks).toBeDefined();
     expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toContain('--budget 4000');
   });
+
+  it("an explicit memory store is respected — the installer edits the user's choice for nobody", async () => {
+    writeFileSync(
+      join(dir, 'smelt.config.json'),
+      `${JSON.stringify({ smeltConfig: 1, store: { kind: 'memory' } })}\n`,
+    );
+    await hooks('install', 'claude-code', ['', '', '', '', '', 'yes', 'yes']);
+    const config = parseConfig(readFileSync(join(dir, 'smelt.config.json'), 'utf8'), 'x');
+    expect(config.store).toEqual({ kind: 'memory' });
+  });
 });
 
 describe("merging never clobbers other people's config", () => {
@@ -147,6 +160,55 @@ describe("merging never clobbers other people's config", () => {
     expect(
       events['PreToolUse']!.filter((entry) => JSON.stringify(entry).includes('hooks/shims/')),
     ).toHaveLength(2);
+  });
+
+  it('merging is byte-faithful outside the hooks key: 4-space indentation, escapes and number forms survive', async () => {
+    mkdirSync(join(dir, '.claude'), { recursive: true });
+    // Not the installer's own 2-space style, and with spellings JSON.stringify would
+    // normalize: re-serializing the whole file would rewrite all of it.
+    const foreign =
+      '{\n' +
+      '    "permissions": {\n' +
+      '        "allow": ["Bash(ls:*)"]\n' +
+      '    },\n' +
+      '    "env": {\n' +
+      '        "FOO": "a\\u0041b"\n' +
+      '    },\n' +
+      '    "num": 1e3\n' +
+      '}\n';
+    writeFileSync(join(dir, '.claude/settings.json'), foreign);
+
+    await hooks('install', 'claude-code', ['', '', '', '', '', 'yes', 'yes']);
+
+    const written = readFileSync(join(dir, '.claude/settings.json'), 'utf8');
+    // Every foreign byte rides through verbatim — indentation, escape, number form.
+    expect(written).toContain('    "permissions": {\n        "allow": ["Bash(ls:*)"]\n    }');
+    expect(written).toContain('"a\\u0041b"');
+    expect(written).toContain('1e3');
+    expect(written).toContain('hooks/shims/claude-code.js');
+    expect(JSON.parse(written)).toMatchObject({ num: 1000 });
+
+    // And remove restores the original bytes exactly.
+    await hooks('remove', 'claude-code', ['yes', 'yes', 'yes', 'yes']);
+    expect(readFileSync(join(dir, '.claude/settings.json'), 'utf8')).toBe(foreign);
+  });
+
+  it("a foreign hook whose command merely ends in cli/bin.js is not smelt's — remove keeps it", async () => {
+    mkdirSync(join(dir, '.claude'), { recursive: true });
+    const foreignEntry = {
+      matcher: 'Write',
+      hooks: [{ type: 'command', command: 'node /opt/other-cli/dist/cli/bin.js check' }],
+    };
+    writeFileSync(
+      join(dir, '.claude/settings.json'),
+      `${JSON.stringify({ hooks: { PreToolUse: [foreignEntry] } }, null, 2)}\n`,
+    );
+    await hooks('install', 'claude-code', ['', '', '', '', '', 'yes', 'yes']);
+    await hooks('remove', 'claude-code', ['yes', 'yes', 'yes', 'yes']);
+    const settings = readJson('.claude/settings.json');
+    // The consent shown was "remove smelt entries, keep the rest" — a generic
+    // cli/bin.js substring must not classify somebody else's hook as smelt's.
+    expect(JSON.stringify(settings['hooks'])).toContain('/opt/other-cli/dist/cli/bin.js');
   });
 
   it('a settings.json it cannot parse is SKIPPED, listed as such, and left byte-identical', async () => {

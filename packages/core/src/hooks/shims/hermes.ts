@@ -12,7 +12,8 @@ import type { ShimAdapter } from '../shim.ts';
  *  - deny: `{ "action": "block", "reason": … }`.
  *  - rewrite: `{ "action": "modify", "args": { … } }` — a **shallow merge** into the
  *    tool's arguments, so this shim sends only the `command` key and the harness
- *    keeps the rest.
+ *    keeps the rest. The modify schema has **no reason field**, so the substitution
+ *    is announced on stderr — a rewrite must never be silent.
  *
  * Carried caveat from the matrix: Hermes has a known bypass where memory tools
  * ignore `disabled_toolsets` (<https://github.com/NousResearch/hermes-agent/issues/46171>) —
@@ -40,6 +41,10 @@ export const adapter: ShimAdapter = {
       action: 'modify',
       args: { command: decision.suggestion },
     })}\n`,
+    // Hermes's modify action carries no reason field — announce on stderr instead.
+    stderr:
+      `smelt guard (rewrite mode): substituted the command in-flight with ` +
+      `\`${decision.suggestion ?? ''}\`. ${decision.reason ?? ''}\n`,
     exitCode: 0,
   }),
 };

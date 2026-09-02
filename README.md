@@ -221,7 +221,11 @@ smelt hooks remove             # takes it all back out
 
 Three hooks, individually toggleable, written into the harness's own config with the
 same discipline as `smelt init` — every file listed before a final confirm, no
-existing file ever overwritten without a per-file yes, re-runs edit toggles:
+existing file ever overwritten without a per-file yes, re-runs edit toggles, and a
+merge into an existing settings file leaves every byte outside smelt's own entries
+untouched. The install also points `smelt.config.json` at a directory store (unless
+the config already chose one), so the `smelt retrieve` the guard teaches actually
+works across processes:
 
 - **PreToolUse size-guard** (default on): a zero-dependency node script stats the
   target and refuses raw reads above a threshold (default 8192 bytes,
@@ -237,8 +241,12 @@ existing file ever overwritten without a per-file yes, re-runs edit toggles:
 Enforcement defaults to **deny-with-reason**: the transcript stays truthful and the
 model learns to run the replacement itself. `"hooks": {"enforcement": "rewrite"}`
 opts into in-flight substitution on harnesses whose hooks can modify tool input
-(grep/cat piped through smelt, focus derived from the pattern) — announced in the
-decision reason, never silent, and falling back to deny where rewrite is impossible.
+(cat of an oversized file replaced by the smelt run; grep piped through smelt, no
+`--focus` on the searched pattern — that would protect every matching line and elide
+nothing). A substitution is never silent: it is announced in the decision reason
+where the harness's rewrite schema carries one (Claude Code, Codex), on stderr where
+it does not (Gemini, Cursor, Hermes, opencode), and falls back to deny where rewrite
+is impossible.
 
 One guard core, thin per-harness shims, three honesty tiers
 (survey: [`docs/research/2026-09-02-harness-capability-matrix.md`](docs/research/2026-09-02-harness-capability-matrix.md)):
@@ -310,7 +318,8 @@ Three things that look like bugs and are not:
 - **The hooks preset** — `smelt hooks install`: a zero-dependency guard core plus thin
   shims that wire the size-guard, stats-on-stop and map-on-start into agent harnesses,
   tiered honestly (verified / experimental / advisory — see the harness guide above).
-  Deny-with-reason by default; rewrite opt-in, never silent.
+  Deny-with-reason by default; rewrite opt-in and always announced — in the decision
+  reason where the harness has one, on stderr where it does not.
 - **The honesty machinery** — fourteen guard suites that walk the real import graph, assert
   byte-exact reversibility, pin the wire format, and re-derive the attribution file; plus
   a mutation runner (`pnpm mutate`) that breaks the source on purpose — 66 mutations

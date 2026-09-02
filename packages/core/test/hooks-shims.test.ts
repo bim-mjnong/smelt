@@ -50,7 +50,7 @@ function run(
   adapter: ShimAdapter,
   raw: unknown,
   settings: GuardSettings,
-): { stdout: string; exitCode: number; json: unknown } {
+): { stdout: string; stderr?: string; exitCode: number; json: unknown } {
   const output = renderShimDecision(adapter, raw, settings, '/repo', stat);
   return {
     ...output,
@@ -112,16 +112,38 @@ describe('claude-code shim (VERIFIED)', () => {
     expect(reason).toContain('rewrote');
   });
 
-  it('rewrite mode wraps grep with the focus derived from the pattern', () => {
+  it('rewrite mode wraps grep through smelt — no --focus on the searched pattern', () => {
     const { json } = run(claudeCode, cases['bashGrep'], REWRITE);
     expect(json).toMatchObject({
       hookSpecificOutput: {
         permissionDecision: 'allow',
         updatedInput: {
-          command: 'grep -rn handleRequest src | smelt --budget 8000 --focus handleRequest',
+          command: 'grep -rn handleRequest src | smelt --budget 8000',
         },
       },
     });
+  });
+
+  it("resolves a relative Bash path against the payload's cwd, not the hook process's", () => {
+    // Claude Code's hook stdin carries `cwd` — the session's working directory. After
+    // the model `cd`s, a relative `cat` must be judged against that, not our cwd.
+    const raw = {
+      hook_event_name: 'PreToolUse',
+      cwd: '/repo',
+      tool_name: 'Bash',
+      tool_input: { command: 'cat big.ts' },
+    };
+    const denied = renderShimDecision(claudeCode, raw, DENY, '/somewhere/else', stat);
+    expect(denied.stdout).toContain('"permissionDecision":"deny"');
+    // Without the payload cwd the same call would stat /somewhere/else/big.ts: a miss.
+    const missed = renderShimDecision(
+      claudeCode,
+      { ...raw, cwd: undefined },
+      DENY,
+      '/somewhere/else',
+      stat,
+    );
+    expect(missed.stdout).toBe('');
   });
 
   it('rewrite mode still DENIES an oversized Read — updatedInput cannot turn a Read into a Bash call', () => {
@@ -169,14 +191,15 @@ describe('gemini shim (EXPERIMENTAL)', () => {
     expect(run(gemini, cases['readWindowed'], DENY).stdout).toBe('');
   });
 
-  it('rewrites run_shell_command via hookSpecificOutput.tool_input', () => {
-    const { json } = run(gemini, cases['shellCatBig'], REWRITE);
-    expect(json).toMatchObject({
+  it('rewrites run_shell_command via hookSpecificOutput.tool_input, announced on stderr', () => {
+    const output = run(gemini, cases['shellCatBig'], REWRITE);
+    expect(output.json).toMatchObject({
       hookSpecificOutput: {
         hookEventName: 'BeforeTool',
         tool_input: { command: 'smelt /repo/big.ts --budget 8000' },
       },
     });
+    expect(output.stderr).toContain('rewrite mode');
   });
 });
 
@@ -201,12 +224,16 @@ describe('hermes shim (EXPERIMENTAL)', () => {
     expect(run(hermes, cases['readBig'], DENY).json).toMatchObject({ action: 'block' });
   });
 
-  it('rewrites with {"action":"modify","args":{command}} — a shallow merge, so only command is sent', () => {
-    const { json } = run(hermes, cases['bashCatBig'], REWRITE);
-    expect(json).toEqual({
+  it('rewrites with {"action":"modify","args":{command}} and announces on stderr — the modify schema has no reason field', () => {
+    const output = run(hermes, cases['bashCatBig'], REWRITE);
+    expect(output.json).toEqual({
       action: 'modify',
       args: { command: 'smelt /repo/big.ts --budget 8000' },
     });
+    // A rewrite must never be silent (founder ruling, KOT-212): no reason channel
+    // in the schema means the substitution is announced on stderr instead.
+    expect(output.stderr).toContain('rewrite mode');
+    expect(output.stderr).toContain('smelt /repo/big.ts --budget 8000');
   });
 });
 
@@ -219,12 +246,13 @@ describe('cursor shim (EXPERIMENTAL)', () => {
     expect((json as { agentMessage: string }).agentMessage).toContain('smelt retrieve');
   });
 
-  it('rewrites via updated_input (snake_case)', () => {
-    const { json } = run(cursor, cases['terminalCatBig'], REWRITE);
-    expect(json).toMatchObject({
+  it('rewrites via updated_input (snake_case), announced on stderr', () => {
+    const output = run(cursor, cases['terminalCatBig'], REWRITE);
+    expect(output.json).toMatchObject({
       permission: 'allow',
       updated_input: { command: 'smelt /repo/big.ts --budget 8000' },
     });
+    expect(output.stderr).toContain('rewrite mode');
   });
 });
 

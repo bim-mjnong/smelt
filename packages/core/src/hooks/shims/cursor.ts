@@ -38,6 +38,10 @@ export const adapter: ShimAdapter = {
       permission: 'allow',
       updated_input: { ...asRecord(asRecord(raw)['tool_input']), command: decision.suggestion },
     })}\n`,
+    // The allow/updated_input shape carries no message field — announce on stderr.
+    stderr:
+      `smelt guard (rewrite mode): substituted the command in-flight with ` +
+      `\`${decision.suggestion ?? ''}\`. ${decision.reason ?? ''}\n`,
     exitCode: 0,
   }),
 };

@@ -132,6 +132,10 @@ describe('the Bash guard', () => {
     );
     expect(decision.action).toBe('deny');
     expect(decision.suggestion).toBeUndefined();
+    // The reason must say the replacement covers only the oversized file — a model
+    // following it verbatim must not silently drop the others.
+    expect(decision.reason).toContain('covers only /repo/big.ts');
+    expect(decision.reason).toContain('separately');
   });
 
   it('passes anything it cannot judge whole: pipelines, redirects, substitutions, small cats', () => {
@@ -169,7 +173,11 @@ describe('the Bash guard', () => {
     ).toEqual({ action: 'allow' });
   });
 
-  it('rewrite mode wraps grep/rg with the focus derived from the pattern, shell-quoted', () => {
+  it('rewrite mode wraps grep/rg through smelt — with NO --focus on the searched pattern', () => {
+    // Focusing on the pattern grep just matched would protect every output line of a
+    // plain grep (each one contains the pattern), so nothing could be elided exactly
+    // when the output is large, and the pipeline would exit over budget. The wrap
+    // must let the lexical planner cut.
     const decision = decide(
       { tool: 'Bash', input: { command: 'grep -rn handleRequest src' } },
       REWRITE,
@@ -177,9 +185,9 @@ describe('the Bash guard', () => {
       stat,
     );
     expect(decision.action).toBe('deny');
-    expect(decision.suggestion).toBe(
-      'grep -rn handleRequest src | smelt --budget 8000 --focus handleRequest',
-    );
+    expect(decision.suggestion).toBe('grep -rn handleRequest src | smelt --budget 8000');
+    expect(decision.suggestion).not.toContain('--focus');
+    expect(decision.reason).not.toContain('the focus keeps every match');
 
     const quoted = decide(
       { tool: 'Bash', input: { command: "rg -e 'foo bar' src" } },
@@ -187,7 +195,7 @@ describe('the Bash guard', () => {
       '/repo',
       stat,
     );
-    expect(quoted.suggestion).toBe("rg -e 'foo bar' src | smelt --budget 8000 --focus 'foo bar'");
+    expect(quoted.suggestion).toBe("rg -e 'foo bar' src | smelt --budget 8000");
   });
 });
 
@@ -230,6 +238,7 @@ describe('config: the guard reads smelt.config.json tolerantly, and agrees with 
       thresholdBytes: 8192,
       enforcement: 'deny',
       budgetBytes: 8000,
+      persistentStore: false,
     });
   });
 
@@ -239,7 +248,12 @@ describe('config: the guard reads smelt.config.json tolerantly, and agrees with 
       `${JSON.stringify({ smeltConfig: 1, defaultBudgetBytes: 4000, hooks: { thresholdBytes: 100, enforcement: 'rewrite' } })}\n`,
     );
     const settings = readGuardSettings(dir, () => {});
-    expect(settings).toEqual({ thresholdBytes: 100, enforcement: 'rewrite', budgetBytes: 4000 });
+    expect(settings).toEqual({
+      thresholdBytes: 100,
+      enforcement: 'rewrite',
+      budgetBytes: 4000,
+      persistentStore: false,
+    });
 
     const decision = decide(
       { tool: 'Read', input: { path: '/repo/x.ts' } },
@@ -286,9 +300,40 @@ describe('config: the guard reads smelt.config.json tolerantly, and agrees with 
 
     const strict = parseConfig(rendered, join(dir, 'smelt.config.json'));
     expect(strict.hooks).toEqual({ thresholdBytes: 12_345, enforcement: 'rewrite' });
+    // The installer writes a directory store (the retrieve promise needs one) …
+    expect(strict.store).toEqual({ kind: 'directory', path: '.smelt/store' });
 
     const guard = readGuardSettings(dir, () => {});
-    expect(guard).toEqual({ thresholdBytes: 12_345, enforcement: 'rewrite', budgetBytes: 4000 });
+    // … and the guard reads it back as the persistent store its reasons rely on.
+    expect(guard).toEqual({
+      thresholdBytes: 12_345,
+      enforcement: 'rewrite',
+      budgetBytes: 4000,
+      persistentStore: true,
+    });
+  });
+
+  it('the retrieve promise is conditioned on the store: promised with a directory store, deferred without', () => {
+    // Without a persistent store, `smelt retrieve <hash>` refuses (exit 2), so the
+    // deny reason may not promise it — it must say what to configure instead.
+    const withoutStore = decide(
+      { tool: 'Read', input: { path: '/repo/x.ts' } },
+      { ...DEFAULT_GUARD_SETTINGS, thresholdBytes: 100 },
+      '/repo',
+      stat150,
+    );
+    expect(withoutStore.reason).toContain('once a persistent store is configured');
+    expect(withoutStore.reason).not.toContain('byte for byte');
+
+    const withStore = decide(
+      { tool: 'Read', input: { path: '/repo/x.ts' } },
+      { ...DEFAULT_GUARD_SETTINGS, thresholdBytes: 100, persistentStore: true },
+      '/repo',
+      stat150,
+    );
+    expect(withStore.reason).toContain('retrieve <hash>');
+    expect(withStore.reason).toContain('byte for byte');
+    expect(withStore.reason).not.toContain('once a persistent store is configured');
   });
 });
 
@@ -331,10 +376,18 @@ describe('the built script (dist/hooks/guard-core.js) — the artifact the shims
         cwd: dir,
       });
       expect(run.status).toBe(0);
-      const decision = JSON.parse(run.stdout) as { action: string; reason?: string };
+      const decision = JSON.parse(run.stdout) as {
+        action: string;
+        reason?: string;
+        suggestion?: string;
+      };
       expect(decision.action).toBe('deny');
       expect(decision.reason).toContain(big);
-      expect(decision.reason).toContain('smelt retrieve');
+      expect(decision.reason).toContain('retrieve <hash>');
+      // From dist, the sibling cli/bin.js exists, so the suggestion is runnable on a
+      // local (non-global) install — never a bare `smelt` that would exit 127.
+      expect(decision.suggestion).toContain('cli/bin.js');
+      expect(decision.suggestion).toMatch(/^node /);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
