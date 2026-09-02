@@ -4,6 +4,8 @@ USAGE
   smelt <file> --budget <bytes> [--focus <term>]...
   smelt --budget <bytes> [--focus <term>]... < input
   smelt map <dir> --budget <bytes> [--focus <term>]... [--ignore <entry>]... [--cache <dir>]
+  smelt retrieve <hash>
+  smelt stats [--json]
   smelt --reconstruct <result.json>
   smelt --reconstruct < result.json
   smelt init
@@ -29,6 +31,27 @@ MAP
   1: a plan can come back over budget because smelt refuses to cut regions you
   asked to keep, but the map fits itself to the budget by construction — symbols
   are appended in rank order until the next line would not fit.
+
+RETRIEVE & STATS
+  Every marker carries the hash of the bytes it replaced — <<smelt/v1: … —
+  retrieve("hash")>> — and the marker's retrieve("hash") is this command:
+  smelt retrieve <hash> prints the exact original bytes on stdout, byte for
+  byte, nothing else. That closes the loop from pure shell: an agent that got a
+  marker asks for the bytes back with a command instead of a tool call, and the
+  retrieval is counted — asking for material back is exactly what the expansion
+  rate measures. An unknown hash and damaged bytes are distinct refusals (exit 3):
+  "never elided" and "the store was corrupted" call for different responses.
+
+  smelt stats prints the same store's counters, one `name value` per line —
+  elisionsStored, bytesStored, retrieveCalls, uniqueRetrieved, expansionRate,
+  allElisionsRetrieved — and reading them is NOT counted as a retrieval. --json
+  emits the RetrieveStats verbatim in its own versioned envelope.
+
+  Both need somewhere for elisions to outlive the run that made them: a
+  smelt.config.json with a directory store (`smelt init` writes one). With a
+  memory store — or no config — every run's store dies with its process, so there
+  is nothing to retrieve across runs, and that is a usage error rather than a
+  quiet empty answer.
 
 OPTIONS
   --budget <bytes>     Required, unless smelt.config.json sets defaultBudgetBytes.
@@ -65,5 +88,5 @@ EXIT CODES
   1  over budget — the plan did not fit, and the report says so. Never silent.
      map never exits 1; see MAP above.
   2  usage error
-  3  smelt refused (a SmeltError: an unbuilt planner, a missing hash)
+  3  smelt refused (a SmeltError: an unbuilt planner, an unknown hash, a corrupt store)
   4  unexpected internal error

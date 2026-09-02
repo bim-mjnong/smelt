@@ -1,9 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { EXIT, runCli } from '@guard/cli/run';
+import type { CliIo } from '@guard/cli/run';
 import { createSmelter } from '@guard/index';
 import { retrieveStats } from '@guard/stats';
 import type { RawRetrieveCounters } from '@guard/stats';
@@ -228,6 +230,63 @@ describe.each(STORES)('the expansion rate is actually counted — %s', (_name, m
 });
 
 /**
+ * The same law, through the shell. `smelt retrieve <hash>` is the marker's
+ * `retrieve("hash")` as a real command, so it must move the counter exactly the way
+ * the `smelt_retrieve` tool does — a shell-driven agent whose retrievals went
+ * uncounted would pin `expansionRate` at the same flattering zero the dropped
+ * increment would — and it must hand back the *exact* bytes, because a re-encoded
+ * or newline-appended blob is an almost-right answer wearing a retrieval's name.
+ * `smelt stats` is the observer: reading the metric must never move it.
+ *
+ * Mutations: one reverts the CLI's retrieve to the uncounted `peek()`, one appends a
+ * newline to what it prints, one makes `stats` journal a retrieval of its own — each
+ * must go red here.
+ */
+function shellIo(cwd: string, sink: { stdout: string }): CliIo {
+  return {
+    stdout: (text) => {
+      sink.stdout += text;
+    },
+    stderr: () => undefined,
+    stdin: () => '',
+    version: '0.0.0-guard',
+    cwd,
+  };
+}
+
+describe('the CLI subcommands keep the same count honest from a shell', () => {
+  it('counts `smelt retrieve` and prints the exact bytes; `smelt stats` reads without counting', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'smelt-cli-count-guard-'));
+    roots.push(cwd);
+    writeFileSync(
+      join(cwd, 'smelt.config.json'),
+      `${JSON.stringify({ smeltConfig: 1, store: { kind: 'directory', path: '.smelt-store' } })}\n`,
+    );
+    const storePath = join(cwd, '.smelt-store');
+    const content = 'shell payload with no trailing newline';
+    const hash = new DirectoryElisionStore(storePath).put(content);
+
+    const sink = { stdout: '' };
+    expect(await runCli(['retrieve', hash], shellIo(cwd, sink))).toBe(EXIT.ok);
+    expect(sink.stdout, 'retrieve re-encoded the bytes instead of writing them raw').toBe(content);
+
+    const counted = new DirectoryElisionStore(storePath).stats();
+    expect(counted.retrieveCalls, 'the CLI retrieval was not counted').toBe(1);
+    expect(counted.uniqueRetrieved).toBe(1);
+    expect(counted.expansionRate).toBe(1);
+
+    // Watching the number must never move it — twice, so even a single sneaked
+    // journal line shows up.
+    expect(await runCli(['stats'], shellIo(cwd, { stdout: '' }))).toBe(EXIT.ok);
+    expect(await runCli(['stats'], shellIo(cwd, { stdout: '' }))).toBe(EXIT.ok);
+    const observed = new DirectoryElisionStore(storePath).stats();
+    expect(observed.retrieveCalls, 'reading stats counted as a retrieval').toBe(1);
+    expect(observed.uniqueRetrieved).toBe(1);
+    expect(observed.misses).toBe(0);
+  });
+});
+
+/**
  * The breaks this guard must catch. `pnpm mutate` applies each one to a scratch copy
  * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
  */
@@ -265,5 +324,33 @@ export const MUTATIONS: GuardMutation[] = [
     find: '    expansionRate: raw.elisionsStored === 0 ? 0 : raw.uniqueRetrieved / raw.elisionsStored,',
     replace: '    expansionRate: 0,',
     why: 'the one shared derivation of the honest signal wired flat — every store now reports a flattering zero at once, and no per-store copy of the arithmetic exists to disagree',
+  },
+  {
+    id: 'cli-retrieve-not-counted',
+    file: 'cli/run.ts',
+    find: '  const content = store.retrieve(invocation.hash);',
+    replace: "  const content = store.peek(invocation.hash) ?? '';",
+    why: 'the marker-loop command reverted to the uncounted peek() — a pure-shell agent could pull every blob back while expansionRate sat at a flattering zero',
+  },
+  {
+    id: 'cli-retrieve-reencodes',
+    file: 'cli/run.ts',
+    find: '  io.stdout(content);',
+    replace: "  io.stdout(content.trimEnd() + '\\n');",
+    why: 'retrieve prints tidied-up text instead of the raw bytes — an almost-right blob handed back as a faithful retrieval, the exact silent wrongness Law 3 exists to refuse',
+  },
+  {
+    id: 'cli-stats-counts-as-retrieval',
+    file: 'cli/run.ts',
+    find: '  const stats = new DirectoryElisionStore(run.storePath).stats();',
+    replace:
+      '  const statsStore = new DirectoryElisionStore(run.storePath);\n' +
+      '  try {\n' +
+      "    statsStore.retrieve('0000000000000000');\n" +
+      '  } catch {\n' +
+      '    // the observer just journalled a miss\n' +
+      '  }\n' +
+      '  const stats = statsStore.stats();',
+    why: 'reading the stats journals a retrieval of its own — watching the metric moves it, so the count inflates with every look',
   },
 ];

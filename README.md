@@ -183,6 +183,34 @@ Prefer your own planner or a hosted reranker? `createSmelter({ planner })` accep
 `Planner` implementation, and `RerankStage` is the seam for relevance — both are yours
 to wire, in your source, with your key.
 
+### From a shell (any agent CLI)
+
+No harness code required: the whole loop is four commands. Install the CLI globally and
+give it somewhere for elisions to outlive a single command:
+
+```sh
+npm install -g @smeltjs/core
+smelt init        # choose a directory store — cross-run retrieval needs one
+```
+
+Then tell your agent about it, in whatever standing-instructions file it reads
+(`CLAUDE.md`, `AGENTS.md`, a system prompt):
+
+```md
+Reading a big file or a long tool output? Pipe it through
+`smelt <file> --budget 4000 --focus <what you are looking for>` instead of reading it
+raw. For orientation in an unfamiliar repo, `smelt map <dir> --budget 4000`. Every
+elided region leaves a marker ending in `retrieve("hash")` — when you need those exact
+bytes back, run `smelt retrieve <hash>`.
+```
+
+The marker's `retrieve("hash")` **is** that command, and it is counted like any other
+retrieval — so at the end of a session, `smelt stats` prints the same honest numbers
+(`expansionRate`, `allElisionsRetrieved`, one `name value` per line; `--json` for the
+envelope) that `smelter.stats()` gives a harness. A hooks preset that wires this into
+Claude Code automatically is coming; the instruction pattern above works today, with
+any agent that can run a command.
+
 ## Fine print on the API
 
 Three things that look like bugs and are not:
@@ -218,11 +246,11 @@ Three things that look like bugs and are not:
   tags, deterministic PageRank over the reference graph, a caller-owned disk cache.
   Modelled on [Aider's repo-map](https://aider.chat/2023/10/22/repomap.html) and credited
   as such. Every included symbol can say why it ranked.
-- **The honesty machinery** — twelve guard suites that walk the real import graph, assert
+- **The honesty machinery** — thirteen guard suites that walk the real import graph, assert
   byte-exact reversibility, pin the wire format, and re-derive the attribution file; plus
-  a mutation runner (`pnpm mutate`) that breaks the source on purpose — 56 deliberate
-  breaks, each watched going red — and fails if a guard does not notice. Every guarantee
-  in this README has a guard.
+  a mutation runner (`pnpm mutate`) that breaks the source on purpose — 64 mutations
+  across 13 guards, each watched going red — and fails if a guard does not notice. Every
+  guarantee in this README has a guard.
 
 ## Measured numbers
 

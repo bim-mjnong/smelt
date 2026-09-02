@@ -149,3 +149,48 @@ export function resolveMapRun(
     json: invocation.json,
   };
 }
+
+/**
+ * Everything `smelt retrieve` and `smelt stats` need, fully merged: the persistent
+ * store's directory, already resolved against the config file. A third sibling in
+ * this module for the same reason {@link ResolvedMapRun} is one — these commands
+ * share the *module* that owns precedence, not a struct: they have no budget, no
+ * strategy, no file leg at all, only the store leg, which is config-only.
+ */
+export interface ResolvedStoreRun {
+  /** Absolute path of the directory store, resolved against the config file. */
+  readonly storePath: string;
+}
+
+/**
+ * The store leg alone, for the two commands whose entire job is the store between
+ * runs. The refusal is the point: `retrieve` exists so the marker's
+ * `retrieve("hash")` works from a later shell — cross-run retrieval — and a memory
+ * store dies with the process that filled it, so with a memory store (or no config
+ * at all) there is nothing those commands could honestly read. Answering with
+ * `UnknownHashError` or all-zero stats instead would be the quiet wrong answer this
+ * project refuses everywhere: the hash *was* elided, the counters *did* move — in a
+ * store that no longer exists.
+ *
+ * @throws {CliUsageError} when no config exists, or the configured store is memory.
+ */
+export function resolveStoreRun(
+  command: 'retrieve' | 'stats',
+  config: LoadedConfig | undefined,
+): ResolvedStoreRun {
+  const store = resolveStore(config);
+  if (store.kind !== 'directory') {
+    const state =
+      config === undefined
+        ? `there is no ${CONFIG_FILE_NAME} here`
+        : `the ${CONFIG_FILE_NAME} at ${config.path} uses a memory store`;
+    throw new CliUsageError(
+      `${CLI_NAME}: ${command} needs a persistent store, and ${state}. Cross-run ` +
+        `retrieval is the point of the store: a memory store dies with the process ` +
+        `that made it, so a marker's hash from an earlier run names bytes this run ` +
+        `never held. Configure {"store": {"kind": "directory", "path": …}} in ` +
+        `${CONFIG_FILE_NAME} — \`${CLI_NAME} init\` writes one.`,
+    );
+  }
+  return { storePath: store.path };
+}
