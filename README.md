@@ -207,9 +207,51 @@ bytes back, run `smelt retrieve <hash>`.
 The marker's `retrieve("hash")` **is** that command, and it is counted like any other
 retrieval — so at the end of a session, `smelt stats` prints the same honest numbers
 (`expansionRate`, `allElisionsRetrieved`, one `name value` per line; `--json` for the
-envelope) that `smelter.stats()` gives a harness. A hooks preset that wires this into
-Claude Code automatically is coming; the instruction pattern above works today, with
-any agent that can run a command.
+envelope) that `smelter.stats()` gives a harness. The instruction pattern above works
+with any agent that can run a command; the hooks preset below wires it in with real
+enforcement.
+
+### The hooks preset: `smelt hooks install`
+
+```sh
+smelt hooks install            # detects installed harnesses and offers them
+smelt hooks install --harness claude-code
+smelt hooks remove             # takes it all back out
+```
+
+Three hooks, individually toggleable, written into the harness's own config with the
+same discipline as `smelt init` — every file listed before a final confirm, no
+existing file ever overwritten without a per-file yes, re-runs edit toggles:
+
+- **PreToolUse size-guard** (default on): a zero-dependency node script stats the
+  target and refuses raw reads above a threshold (default 8192 bytes,
+  `hooks.thresholdBytes` in `smelt.config.json`) with a reason naming the **exact**
+  replacement — `smelt <that file> --budget <n>` — and the `smelt retrieve` way back.
+  Windowed reads (offset/limit) always pass; so does anything the guard cannot judge
+  whole. Malformed input fails open with a warning: a guard must never brick a
+  session.
+- **stats on Stop** (default on): `smelt stats` at session end — the expansion rate
+  where the turn ends. Observation only.
+- **repo map on SessionStart** (opt-in): a budgeted `smelt map` as opening context.
+
+Enforcement defaults to **deny-with-reason**: the transcript stays truthful and the
+model learns to run the replacement itself. `"hooks": {"enforcement": "rewrite"}`
+opts into in-flight substitution on harnesses whose hooks can modify tool input
+(grep/cat piped through smelt, focus derived from the pattern) — announced in the
+decision reason, never silent, and falling back to deny where rewrite is impossible.
+
+One guard core, thin per-harness shims, three honesty tiers
+(survey: [`docs/research/2026-09-02-harness-capability-matrix.md`](docs/research/2026-09-02-harness-capability-matrix.md)):
+
+| Tier         | Harnesses                                     | What the tier means                                                                        |
+| ------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| verified     | Claude Code, Codex                            | hook schema verified against primary docs and pinned by recorded fixtures                  |
+| experimental | Gemini, Grok, Hermes, Cursor, opencode, Cline | schema mapped from the capability matrix, **not yet smoke-tested against the real binary** |
+| advisory     | KiloCode, Aider                               | no usable hook API — instructions only, and nothing enforces them                          |
+
+Every install also writes the harness's instruction file (`CLAUDE.md`, `AGENTS.md`,
+`GEMINI.md`, `CONVENTIONS.md`) with the pattern above — belt and braces, and the part
+that teaches `smelt retrieve` after a deny.
 
 ### As an MCP server
 
@@ -265,6 +307,13 @@ Three things that look like bugs and are not:
   the MCP server's stdio-local surface) that walk the real import graph, assert
   byte-exact reversibility, pin the wire format, and re-derive the attribution file; plus
   a mutation runner (`pnpm mutate`) that breaks the source on purpose — 68 mutations
+- **The hooks preset** — `smelt hooks install`: a zero-dependency guard core plus thin
+  shims that wire the size-guard, stats-on-stop and map-on-start into agent harnesses,
+  tiered honestly (verified / experimental / advisory — see the harness guide above).
+  Deny-with-reason by default; rewrite opt-in, never silent.
+- **The honesty machinery** — fourteen guard suites that walk the real import graph, assert
+  byte-exact reversibility, pin the wire format, and re-derive the attribution file; plus
+  a mutation runner (`pnpm mutate`) that breaks the source on purpose — 66 mutations
   across 14 guards, each watched going red — and fails if a guard does not notice. Every
   guarantee in this README has a guard.
 
