@@ -13,6 +13,7 @@ import {
   FORBIDDEN_PACKAGES,
 } from '@guard/net/policy';
 
+import type { GuardMutation } from './_mutations.ts';
 import {
   allSourceFiles,
   guardSrcRoot,
@@ -295,3 +296,53 @@ describe('Law 1 — zero network', () => {
     expect(assertLocalResource('/tmp/tree-sitter-rust.wasm').protocol).toBe('file:');
   });
 });
+
+/**
+ * The breaks this guard must catch. `pnpm mutate` applies each one to a scratch copy
+ * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
+ */
+export const MUTATIONS: GuardMutation[] = [
+  {
+    id: 'law1-node-https-import',
+    file: 'plan/lexical.ts',
+    find: "import { MissingMarkerPricingError } from '../errors.ts';",
+    replace: "import 'node:https';\nimport { MissingMarkerPricingError } from '../errors.ts';",
+    why: 'a network transport imported directly into the elision path',
+  },
+  {
+    id: 'law1-global-fetch',
+    file: 'store.ts',
+    find: '  put(content: string): string {',
+    replace: '  put(content: string): string {\n    void fetch;',
+    why: 'a network-capable global referenced without any import at all',
+  },
+  {
+    id: 'law1-unclassified-package',
+    file: 'retrieve.ts',
+    find: "import type { ElisionStore, RetrieveTool } from './types.ts';",
+    replace:
+      "import 'some-package-nobody-vetted';\nimport type { ElisionStore, RetrieveTool } from './types.ts';",
+    why: 'a dependency that matches no list — the case a forbidden-list alone misses',
+  },
+  {
+    id: 'law1-remote-grammar-scheme',
+    file: 'net/policy.ts',
+    find: "export const ALLOWED_URL_SCHEMES: readonly string[] = ['file:'];",
+    replace: "export const ALLOWED_URL_SCHEMES: readonly string[] = ['file:', 'https:'];",
+    why: 'widening the scheme allowlist so a grammar could be fetched over the wire',
+  },
+  {
+    id: 'law1-cli-network-import',
+    file: 'cli/args.ts',
+    find: "import { parseArgs } from 'node:util';",
+    replace: "import 'node:https';\nimport { parseArgs } from 'node:util';",
+    why: 'a transport in the CLI — the second front door, which a walk from index.ts alone would never scan',
+  },
+  {
+    id: 'law1-globalthis-fetch',
+    file: 'store.ts',
+    find: '  has(hash: string): boolean {',
+    replace: '  has(hash: string): boolean {\n    void globalThis.fetch;',
+    why: 'fetch reached through the global object — `globalThis.fetch` slips past a bare-name grep whose lookbehind rejects any `.`-prefixed match, so the guard must catch the qualified spelling too',
+  },
+];

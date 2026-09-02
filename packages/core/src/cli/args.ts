@@ -42,7 +42,7 @@ export interface MapInvocation {
   readonly focus: readonly string[];
   /** `--ignore` entries, replacing the built-in default list when non-empty. */
   readonly ignore: readonly string[];
-  /** `--cache <dir>`: only when given does the map touch disk. */
+  /** `--cache <dir>`: only when given does the map write to disk. */
   readonly cacheDir?: string;
   readonly json: boolean;
 }
@@ -281,9 +281,10 @@ MAP
   ${CLI_NAME} map <dir> renders a ranked symbol map of a whole repository — modelled
   on Aider's repo-map (aider.chat/docs/repomap.html, design by Paul Gauthier) — to
   stdout, with a short report on stderr. Local files only: symlinks are never
-  followed, binary files are skipped, and nothing touches disk unless --cache names
-  a directory. Every included symbol carries a receipt: its definition site and the
-  measured reference counts that ranked it. Unlike a smelt run, map never exits
+  followed, binary files are skipped, and the map writes nothing to disk unless
+  --cache names a directory. Every included symbol carries a receipt: its
+  definition site and the measured reference counts that ranked it. Unlike a
+  smelt run, map never exits
   1: a plan can come back over budget because ${CLI_NAME} refuses to cut regions you
   asked to keep, but the map fits itself to the budget by construction — symbols
   are appended in rank order until the next line would not fit.
@@ -306,7 +307,7 @@ OPTIONS
                        (.git, node_modules): a bare name matches any path segment,
                        an entry containing / is a root-relative prefix.
   --cache <dir>        map only. Directory for the tags cache, keyed by content
-                       hash. Only when given does the map touch disk at all.
+                       hash. Only when given does the map write to disk at all.
   --json               Print a JSON envelope on stdout instead of the text:
                        { format, result, elided } for a smelt run — \`result\` is
                        the SmeltResult verbatim, \`elided\` carries the bytes, so

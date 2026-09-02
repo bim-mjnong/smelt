@@ -101,28 +101,30 @@ trailing newline, and one 20 kB line.
 ### 3. A guard nobody has watched fail is not a guard
 
 Every guard ships with at least one **mutation**: a specific break in the source that the
-guard must catch. `pnpm mutate` copies `packages/core/src` to a scratch tree, applies one
-mutation, points the guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes
-**red**. A mutation the guard survives is reported as a hole in the _guard_.
+guard must catch, exported as `MUTATIONS` from the guard file itself — the break lives
+beside the assertions that must notice it. `pnpm mutate` copies `packages/core/src` to a
+scratch tree, applies one mutation, points the guard at the copy via `SMELT_GUARD_SRC`,
+and asserts the guard goes **red**. A mutation the guard survives is reported as a hole
+in the _guard_.
 
 ```
 $ pnpm mutate
 
 === pristine source: every guard must be green ===
 
-  PASS  test/guards/no-network.test.ts
-  PASS  test/guards/reversibility.test.ts
-  PASS  test/guards/expansion-counter.test.ts
-  PASS  test/guards/marker-format.test.ts
-  PASS  test/guards/third-party.test.ts
-  PASS  test/guards/persistent-store.test.ts
+  PASS  test/guards/bench-results.test.ts
   PASS  test/guards/cache-hygiene.test.ts
+  PASS  test/guards/expansion-counter.test.ts
+  PASS  test/guards/init-wizard.test.ts
+  PASS  test/guards/marker-format.test.ts
+  PASS  test/guards/no-network.test.ts
+  PASS  test/guards/persistent-store.test.ts
+  PASS  test/guards/planner-registry.test.ts
+  PASS  test/guards/repo-map.test.ts
+  PASS  test/guards/reversibility.test.ts
   PASS  test/guards/structural.test.ts
   PASS  test/guards/structural-totality.test.ts
-  PASS  test/guards/bench-results.test.ts
-  PASS  test/guards/repo-map.test.ts
-  PASS  test/guards/init-wizard.test.ts
-  PASS  test/guards/planner-registry.test.ts
+  PASS  test/guards/third-party.test.ts
 
 === mutations: every guard must go red ===
 
@@ -131,8 +133,11 @@ $ pnpm mutate
            guard:    test/guards/no-network.test.ts
            red on:   AssertionError: Law 1 violation: smelt v1 makes zero network calls: expected [ Array(1) ] to deeply equal []
   …
-=== 52/52 mutations caught across 12 guards ===
 ```
+
+The run ends with a `caught/total` tally, counted from the guard files themselves —
+anything short of every mutation caught exits 1. The tally is printed, never typed
+here: the runner verifies any count the docs do state and fails on drift.
 
 **Adding a guard? The convention is three steps:**
 
@@ -140,9 +145,13 @@ $ pnpm mutate
    `packages/core/vitest.config.ts` can be redirected at a broken copy. If your guard
    reads a _committed artefact_ rather than source, read it through `guardRoot()` from
    `test/guards/_source.ts` so it can be redirected too.
-2. Add an entry to `MUTATIONS` in `scripts/mutate.mjs`: the guard it must break, the
-   exact source string to change, and _why that break matters_. A guard over an artefact
-   takes `kind: 'artifact'` and its `file` is relative to `packages/core`.
+2. Export the mutations **from the guard file itself**: `export const MUTATIONS:
+GuardMutation[] = […]` (the type lives in `test/guards/_mutations.ts`), each entry
+   naming the exact source string to change and _why that break matters_ — beside the
+   assertions that must catch it, so the check and its proof-of-failure travel
+   together. Entries are literal data; a guard over an artefact takes
+   `kind: 'artifact'` and its `file` is relative to `packages/core`. The runner
+   (`scripts/mutate.mjs`) discovers guard files by name — there is no list to update.
 3. Run `pnpm mutate`. If the guard survives, the guard is wrong — fix the guard, not the
    mutation.
 
@@ -155,7 +164,7 @@ artefact mutations copy the one file into a scratch root. A runner that edited t
 files and then crashed would leave the repository broken, which is the opposite of what a
 safe-to-fail check is for.
 
-The thirteen guards today, and what each one would let through if it stopped working:
+The guards today, and what each one would let through if it stopped working:
 
 | Guard                                | If it silently stopped working                                                                                                        |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |

@@ -8,6 +8,8 @@ import { LEXICAL_PLANNER_ID } from '@guard/plan/lexical';
 import { isStrategy, PLANNERS, STRATEGIES } from '@guard/plan/planners';
 import { STRUCTURAL_PLANNER_ID } from '@guard/plan/structural';
 
+import type { GuardMutation } from './_mutations.ts';
+
 /**
  * The PLANNERS registry is the single source of the strategy names: `createSmelter`
  * builds from it, `--strategy` and `smelt.config.json` validation accept its keys, and
@@ -97,3 +99,17 @@ describe('the help text names every shipped strategy on its --strategy line', ()
     }
   });
 });
+
+/**
+ * The breaks this guard must catch. `pnpm mutate` applies each one to a scratch copy
+ * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
+ */
+export const MUTATIONS: GuardMutation[] = [
+  {
+    id: 'planner-registry-entry-dropped',
+    file: 'plan/planners.ts',
+    find: '  structural: (options: PlannerFactoryOptions): Planner =>\n    new StructuralPlanner(options.structural ?? {}),\n',
+    replace: '',
+    why: 'a shipped strategy dropped from the one PLANNERS registry — the factory, --strategy and config validation, and the help text all lose it in the same edit, and the guard must watch every face go red together',
+  },
+];

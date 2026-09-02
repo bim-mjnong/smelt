@@ -29,6 +29,8 @@ import {
   SHEBANG_TS,
 } from '../structural-fixtures.ts';
 
+import type { GuardMutation } from './_mutations.ts';
+
 /**
  * STRUCTURAL-PLANNER GUARD — the guarantees Slice 2 claims.
  *
@@ -58,8 +60,8 @@ import {
  *     small cut — and an optimizer that grows its input is worse than none.
  *
  * Plus the determinism claim: same file, same focus, byte-identical plan — asserted
- * by running it, not assumed. Mutations for all of these live in `scripts/mutate.mjs`;
- * `pnpm mutate` proves each one turns this file red.
+ * by running it, not assumed. Mutations for all of these live in the MUTATIONS
+ * export at the bottom of this file; `pnpm mutate` proves each one turns it red.
  */
 
 function inputFor(text: string, focus: readonly string[], language: PlanInput['language']) {
@@ -241,6 +243,43 @@ describe('Slice 2 — the structural planner keeps its claims', () => {
     ).toBeLessThanOrEqual(result.inputBytes);
   });
 
+  it('prices a caller-supplied marker with its own rendering, end to end through createSmelter', async () => {
+    // The shipped custom-builder path: `createSmelter` must construct the
+    // MarkerPricing seam from `config.marker` — the exact builder applyPlan will
+    // render — so a builder whose marker outweighs any candidate cut makes every
+    // elision unprofitable and the plan honestly comes back empty. Priced from the
+    // ~105-byte default instead, the planner keeps planning cuts the real marker
+    // then outgrows: output bigger than input, no error anywhere.
+    const callOptions = {
+      language: 'typescript',
+      budgetBytes: 600,
+      focus: ['handleRequest'],
+    } as const;
+
+    // Control first, or the zero-elision assertion below would be vacuous.
+    const control = await createSmelter({ strategy: 'structural' }).smelt(
+      FUNCTIONS_TS,
+      callOptions,
+    );
+    expect(
+      control.elisions.length,
+      'the default marker elides nothing here — the expensive-builder case is vacuous',
+    ).toBeGreaterThan(0);
+
+    const banner = 'X'.repeat(8_192);
+    const smelter = createSmelter({
+      strategy: 'structural',
+      marker: ({ hash }) => `// ${banner} retrieve("${hash}")`,
+    });
+    const result = await smelter.smelt(FUNCTIONS_TS, callOptions);
+    expect(
+      result.elisions,
+      'an elision was planned although the configured marker costs more than any cut',
+    ).toEqual([]);
+    expect(result.text).toBe(FUNCTIONS_TS);
+    expect(result.outputBytes).toBe(result.inputBytes);
+  });
+
   it('labels every plan it does produce as its own', async () => {
     const plan = await structuralPlan(FUNCTIONS_TS, ['handleRequest']);
     expect(plan.planner).toBe(STRUCTURAL_PLANNER_ID);
@@ -276,7 +315,7 @@ describe('Slice 2 — the structural planner keeps its claims', () => {
  * behind the language's own line-comment leader (see `markerForLanguage`), and this
  * guard *reparses the post-applyPlan survivor* of every language's fixture and
  * asserts it introduces no ERROR, missing or zero-width nodes that the original
- * parse did not have. Mutations for each of these live in `scripts/mutate.mjs`.
+ * parse did not have. Mutations for each of these live in this file's MUTATIONS export.
  */
 /**
  * Every parse issue in an independent parse of `text`: ERROR nodes, missing nodes,
@@ -663,3 +702,232 @@ describe('Slices 4 and 4b — every claimed language keeps the same claims', () 
     expect(smelter.reconstruct(result)).toBe(PHP_MIXED_HTML);
   });
 });
+
+/**
+ * The breaks this guard must catch. `pnpm mutate` applies each one to a scratch copy
+ * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
+ */
+export const MUTATIONS: GuardMutation[] = [
+  {
+    id: 'pricing-wired-to-constant',
+    file: 'apply.ts',
+    find:
+      '    costBytes: (reason, elidedBytes) =>\n' +
+      '      Buffer.byteLength(\n' +
+      '        build({\n' +
+      '          hash: PLACEHOLDER_HASH,\n' +
+      '          bytes: elidedBytes,\n' +
+      '          rule: reason.rule,\n' +
+      '          explanation: reason.explanation,\n' +
+      '        }),\n' +
+      "        'utf8',\n" +
+      '      ),',
+    replace: '    costBytes: () => 8,',
+    why: 'the MarkerPricing seam answering a constant instead of rendering the real marker — every planner now believes a ~105-byte marker costs 8 bytes, plans cuts the marker outweighs, and the output grows with no error anywhere',
+  },
+  {
+    id: 'smelter-pricing-ignores-custom-marker',
+    file: 'index.ts',
+    find: '        pricing: markerPricing(language, config.marker),',
+    replace: '        pricing: markerPricing(language),',
+    why: "createSmelter pricing built without config.marker — the planner prices the ~105-byte default while applyPlan renders the caller's far larger marker, so cuts the real marker outweighs get planned and the shipped custom-builder path grows its output with no error anywhere",
+  },
+  {
+    id: 'structural-explanation-loses-kind',
+    file: 'plan/structural.ts',
+    find: '    return `collapsed ${String(total)} sibling ${countNoun(kind, total)}`;',
+    replace: '    return `collapsed ${String(total)} lines`;',
+    why: "the sibling-collapse explanation reduced to a line count — Law 2's whole point for this planner is naming kind and count from the parse tree",
+  },
+  {
+    id: 'structural-silent-lexical-fallback',
+    file: 'plan/structural.ts',
+    find: '  throw new GrammarUnavailableError(\n    `smelt: structural planning covers ${named} in this ` +',
+    replace:
+      "  return 'typescript';\n  throw new GrammarUnavailableError(\n    `smelt: structural planning covers ${named} in this ` +",
+    why: 'the no-fallback rule broken: an unmapped language quietly parsed as typescript instead of refused — structural/v1 output nobody asked the grammar to justify',
+  },
+  {
+    id: 'structural-doc-comment-cut',
+    file: 'plan/structural.ts',
+    find: '  return (between.match(/\\n/g) ?? []).length <= 1;',
+    replace: '  return false;',
+    why: 'doc comments detached from their declarations, so a kept declaration silently loses its forty-line doc comment to the sibling collapse',
+  },
+  {
+    id: 'structural-range-crosses-node-boundary',
+    file: 'plan/structural.ts',
+    find: '      range: { start, end },',
+    replace: '      range: { start, end: end - 1 },',
+    why: 'an elision range that stops one byte inside the last collapsed declaration — output that lies about where the parse tree was cut',
+  },
+  {
+    id: 'structural-grammar-load-fallback',
+    file: 'plan/structural.ts',
+    find: '  const grammar = await loadGrammar(language);',
+    replace:
+      '  let grammar;\n' +
+      '  try {\n' +
+      '    grammar = await loadGrammar(language);\n' +
+      '  } catch {\n' +
+      "    const { planLexical } = await import('./lexical.ts');\n" +
+      '    return { ...planLexical(input), planner: STRUCTURAL_PLANNER_ID };\n' +
+      '  }',
+    why: 'a failed grammar load quietly answered with line windows labelled structural/v1 — the exact undetectable fallback the no-fallback rule forbids',
+  },
+  {
+    id: 'structural-error-node-called-declaration',
+    file: 'plan/structural.ts',
+    find: "  if (node.type === 'ERROR') return 'unparsed region';",
+    replace: "  if (node.type === 'ERROR') return 'declaration';",
+    why: 'an ERROR node labelled a declaration — the marker telling the model that broken text was code that parsed',
+  },
+  {
+    id: 'structural-marker-cost-guessed',
+    file: 'plan/structural.ts',
+    find: '    if (cutBytes <= markerBytes) return;',
+    replace: '    if (cutBytes < 128) return;',
+    why: 'the profitability check reverted to a guessed constant — a mixed-kind marker can cost more than the cut it replaces, and the output grows',
+  },
+  {
+    id: 'structural-new-language-dropped',
+    file: 'lang/registry.ts',
+    find: '  python,\n  go,\n  java,',
+    replace: '  python,\n  java,',
+    why: 'a Slice 4 language quietly dropped from the profile registry — go callers would be refused while the docs still claim it',
+  },
+  {
+    id: 'structural-bash-shebang-collapsed',
+    file: 'lang/bash.ts',
+    find:
+      "    // comment node, so it is pinned the way go's build tag is — never collapsed.\n" +
+      '    pinnedCommentPattern: /^#!/,',
+    replace: "    // comment node, so it is pinned the way go's build tag is — never collapsed.",
+    why: "the bash shebang pin removed — `#!/usr/bin/env bash` collapses into the head run and the survivor silently changes which interpreter runs it, go build tags' exact failure in a new language",
+  },
+  {
+    id: 'ruby-survivor-marker-not-a-comment',
+    file: 'lang/ruby.ts',
+    find: "  markerLeader: '# ',\n",
+    replace: '',
+    why: 'the ruby marker landing as a bare `<<smelt/v1 …>>` line — ruby reads `<<` as a heredoc operator, so the marker swallows every kept declaration after it into a string and the survivor stops being ruby at all',
+  },
+  {
+    id: 'structural-rust-function-mislabelled',
+    file: 'lang/rust.ts',
+    find: "    kindLabels: {\n      function_item: 'function',",
+    replace: "    kindLabels: {\n      function_item: 'declaration',",
+    why: "rust's node kinds unmapped in the marker — `collapsed 2 sibling declarations` where the tree says functions, Law 2 decayed to a vaguer truth",
+  },
+  {
+    id: 'structural-go-method-mislabelled',
+    file: 'lang/go.ts',
+    find: "    kindLabels: {\n      function_declaration: 'function',\n      method_declaration: 'method',",
+    replace:
+      "    kindLabels: {\n      function_declaration: 'function',\n      method_declaration: 'declaration',",
+    why: "go's method kind erased from the marker — a mixed collapse that can no longer say what it mixed",
+  },
+  {
+    id: 'python-survivor-marker-not-a-comment',
+    file: 'lang/python.ts',
+    find: "  markerLeader: '# ',\n",
+    replace: '',
+    why: 'the python marker landing as a bare `<<smelt/v1 …>>` line — significant indentation lets the ERROR node swallow the neighbouring definitions, so the survivor stops being python at all',
+  },
+  {
+    id: 'structural-rust-attribute-detached',
+    file: 'lang/rust.ts',
+    find: "    attributeTypes: new Set(['attribute_item']),",
+    replace: '    attributeTypes: new Set(),',
+    why: 'rust outer attributes treated as their own units again — a kept declaration loses its `#[inline]`, and the doc comment above it, to the sibling collapse',
+  },
+  {
+    id: 'structural-python-midline-marker-comments-out-kept-code',
+    file: 'plan/structural.ts',
+    find: '    if (markerIsLineComment && !restOfLineIsBlank(input.text, group[group.length - 1]!.end)) {\n      return;\n    }',
+    replace: '',
+    why: 'the mid-line refusal dropped — a `# `-led marker replacing the first of two semicolon-separated statements comments out the kept one, syntactically alive and semantically dead',
+  },
+  {
+    id: 'structural-go-buildtag-collapsed',
+    file: 'lang/go.ts',
+    find: '    pinnedCommentPattern: /^\\/\\/(go:build|\\s*\\+build)\\s/,',
+    replace: '',
+    why: 'the build-tag pin removed — `//go:build linux` collapses into the head run and the survivor silently loses its build constraint',
+  },
+  {
+    id: 'structural-python-shebang-collapsed',
+    file: 'lang/python.ts',
+    find:
+      '    // interpreter runs the file — pinned the way the bash and ruby shebangs are.\n' +
+      '    pinnedCommentPattern: /^#!/,',
+    replace: '    // interpreter runs the file — pinned the way the bash and ruby shebangs are.',
+    why: 'the python shebang pin removed — `#!/usr/bin/env python3` parses as a plain comment, attaches to whatever follows, and collapses into the head run: the survivor silently changes which interpreter runs it',
+  },
+  {
+    id: 'structural-ts-shebang-collapsed',
+    file: 'lang/typescript.ts',
+    find:
+      "  // law as javascript's: collapsing it changes which interpreter runs the file.\n" +
+      "  pinnedTypes: new Set(['hash_bang_line']),",
+    replace:
+      "  // law as javascript's: collapsing it changes which interpreter runs the file.\n" +
+      '  pinnedTypes: new Set(),',
+    why: 'the typescript/tsx hash_bang_line pin removed — `#!/usr/bin/env -S npx tsx` collapses into the head run, mislabelled, and the survivor silently changes which interpreter runs it',
+  },
+  {
+    id: 'structural-kotlin-shebang-collapsed',
+    file: 'lang/kotlin.ts',
+    find:
+      '    // `#!/usr/bin/env kotlin` parses as a shebang_line node; same law as the rest.\n' +
+      "    pinnedTypes: new Set(['shebang_line']),",
+    replace:
+      '    // `#!/usr/bin/env kotlin` parses as a shebang_line node; same law as the rest.\n' +
+      '    pinnedTypes: new Set(),',
+    why: 'the kotlin shebang_line pin removed — a `.kts` script loses the line that names its interpreter to a sibling collapse',
+  },
+  {
+    id: 'structural-pragma-once-collapsed',
+    file: 'lang/c.ts',
+    find:
+      '    // the file *means*, so only it is pinned — the `//go:build` law again.\n' +
+      '    pinnedPatternsByType: { preproc_call: /^#\\s*pragma\\s+once\\b/ },',
+    replace: '    // the file *means*, so only it is pinned — the `//go:build` law again.',
+    why: "c's `#pragma once` pin removed — the pragma collapses into the head run and the survivor silently changes header inclusion semantics, and the fallback labels it a declaration the tree never contained",
+  },
+  {
+    id: 'structural-kotlin-import-doc-swallowed',
+    file: 'lang/kotlin.ts',
+    find: "    trailingCommentSplitTypes: new Set(['import_list']),",
+    replace: '    trailingCommentSplitTypes: new Set(),',
+    why: 'the import_list trailing-comment split disabled — tree-sitter-kotlin extends import_list over the KDoc that follows it, so the first documented declaration after the imports loses its doc comment to the import collapse',
+  },
+  {
+    id: 'structural-ruby-heredoc-split-from-opener',
+    file: 'lang/ruby.ts',
+    find: "    ridesBackwardTypes: new Set(['heredoc_body']),",
+    replace: '    ridesBackwardTypes: new Set(),',
+    why: 'the heredoc body detached from its opener — a focus matching the opener keeps it while the body collapses, leaving an unterminated heredoc that swallows every kept declaration after it, with no ERROR node for an ERROR-only reparse to see',
+  },
+  {
+    id: 'kotlin-survivor-marker-not-a-comment',
+    file: 'lang/kotlin.ts',
+    find: "  markerLeader: '// ',\n",
+    replace: '',
+    why: 'the kotlin marker landing as a bare `<<smelt/v1 …>>` line — the reparse scatters ERROR nodes across the kept declarations, exactly the non-local breakage the leader exists to prevent',
+  },
+  {
+    id: 'php-survivor-marker-not-a-comment',
+    file: 'lang/php.ts',
+    find: "  markerLeader: '// ',\n",
+    replace: '',
+    why: "the php marker landing bare — php reads the marker's own `<<` as an operator and re-types the kept function into an expression operand, so the kept declaration is no longer a declaration in the survivor",
+  },
+  {
+    id: 'apply-default-marker-ignores-language',
+    file: 'apply.ts',
+    find: '  const buildMarker = options.marker ?? markerForLanguage(plan.language);',
+    replace: '  const buildMarker = options.marker ?? defaultMarker;',
+    why: 'bare applyPlan reverted to the bare marker — the documented planStructural → applyPlan composition would land `<<smelt/v1…>>` in a python survivor and break its parse',
+  },
+];

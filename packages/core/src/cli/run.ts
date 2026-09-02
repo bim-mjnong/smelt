@@ -222,7 +222,7 @@ async function runMap(invocation: MapInvocation, io: CliIo): Promise<number> {
   } else {
     io.stdout(map.text);
   }
-  io.stderr(formatMapReport({ map, source: run.dir }));
+  io.stderr(formatMapReport({ map, source: run.dir, budgetSource: run.budgetSource }));
 
   return EXIT.ok;
 }

@@ -7,6 +7,8 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { DirectoryElisionStore } from '@guard/store-dir';
 import { contentHash } from '@guard/hash';
 
+import type { GuardMutation } from './_mutations.ts';
+
 /**
  * PERSISTENT-STORE GUARD — Law 3, across a process boundary.
  *
@@ -171,3 +173,24 @@ describe('the persistent store keeps Law 3 across restarts', () => {
     expect(reopened.stats().elisionsStored).toBe(50);
   });
 });
+
+/**
+ * The breaks this guard must catch. `pnpm mutate` applies each one to a scratch copy
+ * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
+ */
+export const MUTATIONS: GuardMutation[] = [
+  {
+    id: 'law3-dir-store-verify-skipped',
+    file: 'store-dir.ts',
+    find: "    if (this.#hash(content) !== hash) {\n      this.#appendLogCounting('corrupt', hash);",
+    replace: "    if (false) {\n      this.#appendLogCounting('corrupt', hash);",
+    why: 'verify-on-read disabled — a torn blob would be handed back as a faithful retrieval',
+  },
+  {
+    id: 'law3-dir-store-counters-die-with-process',
+    file: 'store-dir.ts',
+    find: "    this.#appendLogCounting('hit', hash);",
+    replace: "    // this.#appendLogCounting('hit', hash);",
+    why: 'the retrieval journal never written — the expansion rate resets to a flattering zero on every restart',
+  },
+];

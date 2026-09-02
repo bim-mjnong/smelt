@@ -9,6 +9,7 @@ import { WASM_BY_LANGUAGE } from '@guard/plan/grammar';
 
 import { FIXTURE_BY_LANGUAGE } from '../structural-fixtures.ts';
 
+import type { GuardMutation } from './_mutations.ts';
 import { packageRoot } from './_source.ts';
 
 /**
@@ -121,3 +122,17 @@ describe('structural totality — every claimed language has a fixture, a snapsh
     }
   });
 });
+
+/**
+ * The breaks this guard must catch. `pnpm mutate` applies each one to a scratch copy
+ * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
+ */
+export const MUTATIONS: GuardMutation[] = [
+  {
+    id: 'structural-language-claimed-without-tests',
+    file: 'lang/registry.ts',
+    find: '  swift,\n  bash,\n};',
+    replace: "  swift,\n  bash,\n  lua: { ...bash, id: 'lua', extensions: ['lua'] },\n};",
+    why: 'a language claimed by a registry profile with no fixture, no snapshot and no doc-comment case — exactly the untested-language ship the totality guard exists to refuse',
+  },
+];

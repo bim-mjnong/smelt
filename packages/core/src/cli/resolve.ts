@@ -111,7 +111,7 @@ export interface ResolvedMapRun {
   readonly focus: readonly string[];
   /** `undefined` means "use the library's default ignore list". Flags only. */
   readonly ignore?: readonly string[];
-  /** Only when present does the map touch disk. Flags only; the config has no say. */
+  /** Only when present does the map write to disk. Flags only; the config has no say. */
   readonly cacheDir?: string;
   readonly json: boolean;
 }

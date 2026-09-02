@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import { FORBIDDEN_NODE_MODULES, FORBIDDEN_PACKAGES } from '@guard/net/policy';
 
+import type { GuardMutation } from './_mutations.ts';
 import { guardRoot, importSpecifiers, packageRoot, stripStringsAndComments } from './_source.ts';
 
 /**
@@ -192,3 +193,52 @@ describe('bench honesty guard (Law 4 — the harness that states the numbers)', 
     }
   });
 });
+
+/**
+ * The breaks this guard must catch. `pnpm mutate` stales each committed artefact in a
+ * scratch root and asserts this file goes red — see `test/guards/_mutations.ts`.
+ */
+export const MUTATIONS: GuardMutation[] = [
+  {
+    kind: 'artifact',
+    id: 'bench-results-extrapolated-claim',
+    file: 'bench/RESULTS.md',
+    find: 'here is extrapolated, rounded up, or converted between units.',
+    replace: 'here is extrapolated — savings of up to 94% are typical.',
+    why: "the original pitch's extrapolation vocabulary landing in the one file that exists to hold measurements — Law 4's exact failure, in its most likely home",
+  },
+  {
+    kind: 'artifact',
+    id: 'bench-shipped-in-tarball',
+    file: 'package.json',
+    find: '  "files": [\n    "dist",',
+    replace: '  "files": [\n    "dist",\n    "bench",',
+    why: 'the network-capable measurement harness packed into the published tarball — bench/ is equipment, not product, and shipping it smuggles fetch() past the src-only zero-network walk',
+  },
+  {
+    kind: 'artifact',
+    id: 'bench-network-outside-tiers',
+    file: 'bench/run.mjs',
+    find: 'const { createSmelter } = await import(distEntry);',
+    replace:
+      "await fetch(new URL('https://example.invalid/telemetry'));\nconst { createSmelter } = await import(distEntry);",
+    why: 'a network call in the default tier-1 path — the harness must be offline by construction outside tier2.mjs/tier3.mjs, or "reproducible offline by a stranger" is a flag away from false',
+  },
+  {
+    kind: 'artifact',
+    id: 'bench-subprocess-network-escape',
+    file: 'bench/run.mjs',
+    find: 'const { createSmelter } = await import(distEntry);',
+    replace:
+      "spawnSync('curl', ['https://example.invalid/telemetry']);\nconst { createSmelter } = await import(distEntry);",
+    why: 'a subprocess reaching the network from the tier-1 path — no fetch, no node:http, so the network-shape scan stays green; only the spawn-only-git rule catches it',
+  },
+  {
+    kind: 'artifact',
+    id: 'bench-static-transport-import',
+    file: 'bench/lib.mjs',
+    find: 'export const RESULTS_HEADER = [',
+    replace: "import 'node:https';\n\nexport const RESULTS_HEADER = [",
+    why: 'a network transport imported statically into a non-tier bench module — the specifier lives inside a string literal, which the stripped-source shape scan blanks out, so only the import-specifier scan can see it',
+  },
+];
