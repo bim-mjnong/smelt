@@ -167,6 +167,12 @@ export function countTokensRequest(model, text) {
  * retrieved every elision back is a LOSS, reported as such with its input: every
  * byte smelt hid cost a round trip and saved nothing (HANDOFF Decision 4 names
  * this the one degenerate outcome).
+ *
+ * The arithmetic here is deliberately the same formula as `retrieveStats` in
+ * `src/stats.ts` (`loss` = `allElisionsRetrieved`). This file stays import-free so
+ * the bench tests run without a built `dist/`, so the formula cannot be shared —
+ * instead `test/bench.test.ts` pins the two copies to each other, and a drift
+ * between them goes red there before RESULTS.md and a tier3-log can disagree.
  */
 export function tier3Verdict({ elisionsStored, uniqueRetrieved }) {
   if (uniqueRetrieved > elisionsStored) {

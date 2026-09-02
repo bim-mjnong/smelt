@@ -5,6 +5,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { retrieveStats } from '../src/stats.ts';
+
 /**
  * The measurement harness's own tests — the pure half.
  *
@@ -230,6 +232,28 @@ describe('tier 3 verdicts', () => {
         { elisionsStored: 5, uniqueRetrieved: 1 },
       ]),
     ).toBe(0.5);
+  });
+
+  it('agrees with src/stats.ts — lib.mjs is import-free, so this pin is what stops the two copies of the formula drifting', () => {
+    // tier3Verdict/tier3Aggregate re-derive the honesty arithmetic that
+    // `retrieveStats` owns inside src/. If they drifted, the RESULTS.md tier-3
+    // note and the committed tier3-log JSON for the same run would disagree.
+    for (const counts of [
+      { elisionsStored: 0, uniqueRetrieved: 0 },
+      { elisionsStored: 3, uniqueRetrieved: 1 },
+      { elisionsStored: 3, uniqueRetrieved: 3 },
+    ]) {
+      const derived = retrieveStats({
+        ...counts,
+        bytesStored: 0,
+        retrieveCalls: counts.uniqueRetrieved,
+        misses: 0,
+      });
+      const verdict = lib.tier3Verdict(counts);
+      expect(verdict.expansionRate).toBe(derived.expansionRate);
+      expect(verdict.loss).toBe(derived.allElisionsRetrieved);
+      expect(lib.tier3Aggregate([counts])).toBe(derived.expansionRate);
+    }
   });
 
   it('a truncated row says TRUNCATED and never claims a LOSS — the run was cut off, not measured', () => {

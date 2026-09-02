@@ -41,8 +41,10 @@ codebase-design glossary.
   bytes. Owned and built by `apply.ts`; planners never estimate independently.
 - **ResolvedRun**: the CLI's single merge of flags + config + defaults; the only place
   precedence lives.
-- **retrieveStats**: the one exported derivation of the honesty arithmetic
-  (`expansionRate`, `allElisionsRetrieved`) from a store's **RawRetrieveCounters** —
-  a free function in `src/stats.ts`, not a base class. A store implements
-  `rawCounters()` and delegates `stats()` to it; adapters supply counters, never
-  derive the metric. Consumers see only `stats()`; the seam is for adapter authors.
+- **retrieveStats**: the one exported derivation within `src/` of the honesty
+  arithmetic (`expansionRate`, `allElisionsRetrieved`) from a store's
+  **RawRetrieveCounters** — a free function in `src/stats.ts`, not a base class. A
+  store implements `rawCounters()` and delegates `stats()` to it; adapters supply
+  counters, never derive the metric. Consumers see only `stats()`; the seam is for
+  adapter authors. (`bench/lib.mjs`, deliberately import-free, re-derives the same
+  formula; `test/bench.test.ts` pins the two copies to each other.)
