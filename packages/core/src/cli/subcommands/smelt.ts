@@ -5,7 +5,7 @@ import { SUPPORTED_LANGUAGES } from '../../detect.ts';
 import { CliUsageError, SmeltError } from '../../errors.ts';
 import { createSmelter } from '../../smelter.ts';
 import type { SmeltCallOptions } from '../../smelter.ts';
-import { isStrategy, STRATEGIES } from '../../plan/planners.ts';
+import { DEFAULT_STRATEGY, isStrategy, STRATEGIES } from '../../plan/planners.ts';
 import type { Strategy } from '../../plan/planners.ts';
 import { MemoryElisionStore } from '../../store.ts';
 import { DirectoryElisionStore } from '../../store-dir.ts';
@@ -206,7 +206,7 @@ export function resolveRun(
     );
   }
 
-  const strategy = invocation.strategy ?? config?.config.strategy ?? 'lexical';
+  const strategy = invocation.strategy ?? config?.config.strategy ?? DEFAULT_STRATEGY;
 
   return {
     budgetBytes,

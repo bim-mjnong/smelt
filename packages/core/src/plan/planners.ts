@@ -39,6 +39,23 @@ export type Strategy = keyof typeof PLANNERS;
 /** The registry's keys, in declaration order, for help text and error messages. */
 export const STRATEGIES = Object.keys(PLANNERS) as readonly Strategy[];
 
+/**
+ * The strategy a caller who names none gets — the registry's own default, beside the
+ * names it defaults among.
+ *
+ * Every `?? 'lexical'` in this repository reads this constant instead: `createSmelter`,
+ * the `smelt` verb's merge, the `init` wizard's starting choice, and the MCP server's
+ * `smelt_file`. The names were already derived from {@link PLANNERS} while the default
+ * stayed hand-typed in four places across two packages — so the one fact every caller
+ * needs was the one the registry did not carry, and a changed default would have moved
+ * on some faces and not others.
+ *
+ * `'lexical'` is the default because it works on any text: `'structural'` refuses a
+ * language it has no grammar for rather than approximating (see {@link StructuralPlanner}),
+ * which is right when a caller asked for it and wrong as the answer to "no preference".
+ */
+export const DEFAULT_STRATEGY: Strategy = 'lexical';
+
 /** The one membership test `--strategy` and config validation both use. */
 export function isStrategy(value: string): value is Strategy {
   return Object.hasOwn(PLANNERS, value);
