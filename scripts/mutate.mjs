@@ -162,8 +162,8 @@ const MUTATIONS = [
     id: 'third-party-attribution-dropped',
     guard: 'test/guards/third-party.test.ts',
     file: 'THIRD-PARTY.md',
-    find: '| `tree-sitter-rust.wasm` |',
-    replace: '| `tree-sitter-omitted.wasm` |',
+    find: '| `tree-sitter-rust.wasm`',
+    replace: '| `tree-sitter-omitted.wasm`',
     why: 'a bundled grammar losing its attribution in the committed notices — redistribution without a licence',
   },
   {
@@ -198,8 +198,8 @@ const MUTATIONS = [
     file: 'cache/prefix.ts',
     find: 'export const ANTHROPIC_PROMPT_CACHE_FACTS = {',
     replace:
-      '// smelt achieves a 90% cache hit rate\nexport const ANTHROPIC_PROMPT_CACHE_FACTS = {',
-    why: "the original pitch's unsupported figure reappearing as a comment — the exact claim Law 4 was written against",
+      '// smelt keeps its consumers’ cache hit rate high\nexport const ANTHROPIC_PROMPT_CACHE_FACTS = {',
+    why: "the pitch's hit-rate claim reappearing as a comment — even figure-free, a hit rate is a frequency nothing here has measured, the exact class of claim Law 4 was written against",
   },
   {
     id: 'structural-explanation-loses-kind',
@@ -519,6 +519,66 @@ const MUTATIONS = [
     why: 'the per-file overwrite consent wired shut — `smelt init` would clobber a hand-written file after any answer, the helpful-looking break the never-overwrite rule exists to refuse',
   },
 ];
+
+/**
+ * Self-check: refuse to run over a fused MUTATIONS entry.
+ *
+ * The trap is specific and has happened three times: a rebase merges two adjacent
+ * object literals into one — the `},\n  {` between them collapses away — and
+ * JavaScript accepts the result without a murmur: the duplicated keys are legal,
+ * the later `id` wins, and one mutation silently stops running. A runner that
+ * quietly runs n−1 of its n mutations is precisely the silent failure this file
+ * exists to catch, so the check is structural: every `id:` line in the MUTATIONS
+ * source must correspond to exactly one runtime object, and every id must be
+ * unique. A fusion is a hard error naming the fused pair, before anything runs.
+ */
+function assertMutationsNotFused() {
+  const die = (message) => {
+    console.error(`mutate: MUTATIONS is malformed — ${message}`);
+    process.exit(1);
+  };
+
+  const source = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const start = source.indexOf('const MUTATIONS = [');
+  const end = source.indexOf('\n];', start);
+  if (start === -1 || end === -1) die('cannot locate the MUTATIONS literal in this file');
+  const region = source.slice(start, end);
+  const sourceIds = [...region.matchAll(/^ {4}id: '([^']+)',$/gm)].map((match) => match[1]);
+
+  const runtimeIds = MUTATIONS.map((mutation) => mutation.id);
+  const missing = MUTATIONS.filter((mutation) => typeof mutation.id !== 'string');
+  if (missing.length > 0) die(`${String(missing.length)} mutation object(s) carry no id at all`);
+
+  const seen = new Set();
+  for (const id of runtimeIds) {
+    if (seen.has(id)) die(`mutation id "${id}" appears twice — every id must be unique`);
+    seen.add(id);
+  }
+
+  if (sourceIds.length !== runtimeIds.length) {
+    // A fused object contributes two `id:` lines to the source but one object at
+    // runtime, whose later id wins — so the id that vanished is the first source
+    // id the runtime list no longer has, and its partner is the source id that
+    // follows it inside the same fused literal.
+    const runtimeSet = new Set(runtimeIds);
+    const lost = sourceIds.find((id) => !runtimeSet.has(id));
+    if (lost !== undefined) {
+      const partner = sourceIds[sourceIds.indexOf(lost) + 1] ?? '(none — trailing id)';
+      die(
+        `mutations "${lost}" and "${partner}" appear fused into one object — ` +
+          `"${lost}"'s fields were silently overwritten and its mutation no longer runs. ` +
+          `Restore the "},\\n  {" boundary between them.`,
+      );
+    }
+    die(
+      `the source declares ${String(sourceIds.length)} id lines but ${String(
+        runtimeIds.length,
+      )} mutation objects exist — two entries have merged or an id moved`,
+    );
+  }
+}
+
+assertMutationsNotFused();
 
 function runGuard(guard, guardSrc, guardRoot = corePackage) {
   return spawnSync('./node_modules/.bin/vitest', ['run', guard, '--reporter=dot'], {
