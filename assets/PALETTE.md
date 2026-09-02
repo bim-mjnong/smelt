@@ -1,10 +1,11 @@
 # smelt — palette and marks
 
 Every colour and every mark in this repo comes from one place: a **forge**. Charcoal
-ground, iron mass, a molten pour, a white-hot core. The mark is **the pour**: a tilted
-crucible, a stream that tapers as it falls, and a small dense ingot stamped with
-smelt's own marker delimiters, `<<` `>>` — the glyph the model actually sees in a
-smelted prompt. Big in, small out, nothing lost.
+ground, iron mass, molten heat, a white-hot core. The mark is **the lava block**: an
+isometric voxel cube — molten top, charcoal stone sides, ember cracks stepping down.
+Voxel-flat on purpose: chunky tiles on the iso grid, no gradients on the faces, so it
+reads at 16 px. Original geometry — an homage to blocky-game aesthetics, copying no
+one's texture.
 
 The Norse reading is _material_, not typographic — there are no runic glyphs anywhere
 in these files, and there will not be: sowilo (ᛋ) is doubled in the SS insignia and the
@@ -22,7 +23,7 @@ better than a glyph.
 | `iron-dark`     | `#2A2E34` | The unlit bottom of iron. Gradient stop, hairline rules.                        |
 | `iron-light`    | `#6E7783` | Keylines around iron, wordmark letters, muted text on either ground.            |
 | `slag`          | `#9AA1AC` | Secondary prose on dark.                                                        |
-| `ember`         | `#E4602F` | **The accent.** One accent, used as heat: the melt, the stream, the seam.       |
+| `ember`         | `#E4602F` | **The accent.** One accent, used as heat: the melt tiles, the cracks, the glow. |
 | `forge`         | `#F5893A` | Ember's lit edge. Gradient stop and hover state only — never a fill on its own. |
 | `white-hot`     | `#FFF1D9` | The hottest 5% of any composition. Highlights, the core of the mouth.           |
 | `ash`           | `#EFEBE5` | Type on charcoal; light-mode ground.                                            |
@@ -59,7 +60,7 @@ canonical artefact for that one.
 
 The mark's geometry is duplicated in `smelt-mark.svg`, `smelt-wordmark.svg`,
 `smelt-icon.svg` and `smelt-social.svg`, because each has to stand alone as a single
-file. Change the pour and you change four files. That is the trade for
+file. Change the block and you change four files. That is the trade for
 self-containment; the alternative is a build step for four static images.
 
 ## Regenerating the PNGs
