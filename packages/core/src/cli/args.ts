@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 
 import { SUPPORTED_LANGUAGES } from '../detect.ts';
 import { CliUsageError } from '../errors.ts';
+import { HARNESS_IDS } from '../harness/registry.ts';
 import { isStrategy, STRATEGIES } from '../plan/planners.ts';
 import type { Strategy } from '../plan/planners.ts';
 import { STRUCTURAL_LANGUAGES } from '../plan/structural.ts';
@@ -68,8 +69,9 @@ export interface StatsInvocation {
 /**
  * `smelt hooks install` / `smelt hooks remove` — the harness-hooks installer. Like
  * `init`, the subcommand is interactive; the only flag is `--harness`, which skips
- * the selection step. Validation of the id happens in `cli/hooks.ts`, where the
- * harness registry lives.
+ * the selection step. Validation of the id happens in `cli/hooks.ts`, against the
+ * harness registry in `src/harness/` — which this module also reads for the help
+ * text's id list.
  */
 export interface HooksInvocation {
   readonly mode: 'hooks';
@@ -406,6 +408,33 @@ function strategy(raw: string | undefined): Strategy | undefined {
   return raw;
 }
 
+/**
+ * A comma-separated list under an OPTIONS entry's hanging indent, wrapped where the
+ * hand-typed version wrapped. `--strategy` and `--language` render their registries on
+ * one line because they fit; the harness ids do not, and a list long enough to wrap is
+ * exactly the list nobody keeps in sync by hand.
+ */
+function optionList(items: readonly string[], indent: string, width: number): string {
+  const lines: string[] = [];
+  let line = '';
+  items.forEach((item, index) => {
+    const word = index === items.length - 1 ? `${item}.` : `${item},`;
+    const candidate = line === '' ? `${indent}${word}` : `${line} ${word}`;
+    if (line !== '' && candidate.length > width) {
+      lines.push(line);
+      line = `${indent}${word}`;
+    } else {
+      line = candidate;
+    }
+  });
+  lines.push(line);
+  return lines.join('\n');
+}
+
+/** The column an OPTIONS entry's description starts at, and the width it wraps within. */
+const OPTION_INDENT = ' '.repeat(23);
+const OPTION_WIDTH = 88;
+
 /** The help text. Also the closest thing the CLI has to documentation. */
 export function cliUsage(): string {
   return `${CLI_NAME} — shrink text for a model, without lying about what was removed.
@@ -501,8 +530,7 @@ OPTIONS
   --cache <dir>        map only. Directory for the tags cache, keyed by content
                        hash. Only when given does the map write to disk at all.
   --harness <id>       hooks only. Skip harness detection and target one id:
-                       claude-code, codex, gemini, grok, hermes, cursor, opencode,
-                       cline, kilocode, aider.
+${optionList(HARNESS_IDS, OPTION_INDENT, OPTION_WIDTH)}
   --json               Print a JSON envelope on stdout instead of the text:
                        { format, result, elided } for a smelt run — \`result\` is
                        the SmeltResult verbatim, \`elided\` carries the bytes, so

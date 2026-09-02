@@ -4,13 +4,15 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import process from 'node:process';
 
 /**
- * The guard core — one zero-dependency node script, shared by every harness shim.
+ * The guard core — one zero-dependency node module, shared by every harness shim.
  *
- * Contract: stdin carries one JSON request
- * `{ tool, input: { path?, command?, offsetLimited? } }`, stdout answers with one
- * JSON decision `{ action: "allow" | "deny", reason?, suggestion? }`, and the exit
- * code is always 0 — the decision lives in the JSON, and each shim translates it
- * into its harness's own schema (exit 2, `permissionDecision`, `cancel:true`, …).
+ * Contract: a caller hands `decide` a {@link GuardRequest}
+ * (`{ tool, input: { path?, command?, offsetLimited? } }`) with the settings
+ * {@link readGuardSettings} read, and gets one {@link GuardDecision} back —
+ * `{ action: "allow" | "deny", reason?, suggestion? }`. Each shim translates that into
+ * its harness's own schema (exit 2, `permissionDecision`, `cancel:true`, …), and the
+ * opencode plugin — the one harness whose hook API is JavaScript — imports this module
+ * at hook time and calls the same two functions.
  *
  * Two properties are load-bearing and guarded:
  *
@@ -233,7 +235,12 @@ export function findGuardConfigFile(cwd: string): string | undefined {
   }
 }
 
-/** Parse one stdin request. `undefined` means malformed — the caller allows and warns. */
+/**
+ * Parse one {@link GuardRequest} *document* — the request shape as JSON, for an
+ * adapter that receives it over a pipe rather than building it in-process.
+ * `undefined` means malformed, and a caller that gets it allows and warns: the same
+ * fail-open rule the rest of this module lives under.
+ */
 export function parseGuardRequest(text: string): GuardRequest | undefined {
   let parsed: unknown;
   try {
@@ -536,7 +543,7 @@ export function shellQuote(value: string): string {
 }
 
 /* ------------------------------------------------------------------------------------
- * The script half: `node dist/hooks/guard-core.js` — stdin request, stdout decision.
+ * Process plumbing, for the shims that run as one
  * ---------------------------------------------------------------------------------- */
 
 /** True when this module is the file node was asked to run, not an import. */
@@ -573,37 +580,3 @@ export function readAllOfStdin(): string {
   }
   return Buffer.concat(chunks).toString('utf8');
 }
-
-/**
- * Run the guard over stdin and print the decision. Exit code 0 in every case —
- * including every failure, which becomes an allow with a stderr warning. A guard
- * subprocess that exits non-zero on its own bug would look like a policy decision
- * to some harnesses, and "my hook crashed" must never read as "denied".
- */
-export function runGuardMain(): void {
-  let decision: GuardDecision = ALLOW;
-  try {
-    const raw = readAllOfStdin();
-    const request = parseGuardRequest(raw);
-    if (request === undefined) {
-      process.stderr.write(
-        `smelt guard: stdin was not a {tool, input} JSON request — allowing the call. ` +
-          `A malformed hook wiring must never brick the session; fix the shim, not the model.\n`,
-      );
-    } else {
-      const settings = readGuardSettings(process.cwd(), (text) =>
-        process.stderr.write(`${text}\n`),
-      );
-      decision = decide(request, settings, process.cwd());
-    }
-  } catch (error) {
-    process.stderr.write(
-      `smelt guard: unexpected error — allowing the call. ` +
-        `${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
-    );
-    decision = ALLOW;
-  }
-  process.stdout.write(`${JSON.stringify(decision)}\n`);
-}
-
-if (isMainModule(import.meta.url)) runGuardMain();

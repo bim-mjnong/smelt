@@ -1,0 +1,233 @@
+import { describe, expect, it } from 'vitest';
+
+// Through @guard, so the mutation runner can point these at a deliberately broken copy
+// of `src` and watch them go red. See scripts/mutate.mjs.
+import { cliUsage } from '@guard/cli/args';
+import { planInstall } from '@guard/cli/hooks';
+import { hasShim, shimAdapterOf } from '@guard/harness/profile';
+import { GUARD_ONLY_FILES, HARNESSES, JSON_HOOK_FILES } from '@guard/harness/registry';
+import { DEFAULT_GUARD_SETTINGS } from '@guard/hooks/guard-core';
+import {
+  renderShimDecision,
+  REWRITE_ANNOUNCEMENT_JOIN,
+  DENIED_WITHOUT_REASON,
+  REWRITE_ANNOUNCEMENT_OPENING,
+  rewriteAnnouncement,
+} from '@guard/hooks/shim';
+
+import { FIXTURE_BY_HARNESS, harnessPayloads, valueAt } from '../hooks-fixtures.ts';
+
+import type { GuardMutation } from './_mutations.ts';
+
+/**
+ * HARNESS TOTALITY GUARD — a harness cannot be claimed without tests, and the one
+ * announcement cannot quietly become two.
+ *
+ * The HarnessProfile registry made adding a harness cheap: one file in `src/harness/`
+ * carrying the hook schema, the detection paths and the install steps, and the
+ * installer, the wizard, the managed event list and the `--harness` help text all
+ * follow. That is exactly when the tests stop keeping up — the shim compiles, the
+ * schema looks plausible, and the new harness ships with no recorded payload and no
+ * proof that its deny reaches the model at all. Six months later a deny lands in a
+ * field that harness ignores, silently, and every oversized read sails through.
+ *
+ * So this guard closes the loops the type system cannot. For **every** profile the
+ * registry claims:
+ *
+ *   1. it is rendered where a user would look for it — the `--harness` list in the
+ *      help text (derived from this registry, which is why the registry may not
+ *      import `cli/`) and the tier paragraph above it;
+ *   2. if it ships a shim, it has an entry in `FIXTURE_BY_HARNESS` and a recorded
+ *      payload file citing the matrix row it came from — `test/hooks-shims.test.ts`
+ *      then *is* its schema test, because that suite loops over this same registry;
+ *   3. its declared install steps are consistent with what it ships: a harness that
+ *      wires a JSON hook command must have a shim script for that command to run.
+ *
+ * And the announcement a rewrite makes exists exactly once: three shims and the
+ * *generated* opencode plugin — JavaScript this installer writes as text, where a
+ * hand-typed copy could drift with nothing to notice — all render the same constants.
+ *
+ * The fixture table lives in test-land on purpose: the mutation runner redirects only
+ * the library (`@guard`), so a mutant that claims a new harness, drops one, or retypes
+ * the announcement is measured against the real, committed tests. `pnpm mutate` proves
+ * it.
+ */
+
+const stat = (path: string): { size: number; isFile: boolean } | undefined =>
+  path === '/repo/big.ts' ? { size: 20_000, isFile: true } : undefined;
+
+describe('harness totality — every claimed harness is rendered, tested, and internally consistent', () => {
+  it('claims at least the ten shipped harnesses, or the guard is vacuous', () => {
+    expect(HARNESSES.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('every claimed harness reaches the help text — the id list and the tier paragraph', () => {
+    const usage = cliUsage();
+    for (const profile of HARNESSES) {
+      expect(
+        usage,
+        `${profile.id}: claimed by the registry but absent from the --harness list — ` +
+          `the list is derived; a harness missing from it means the derivation broke`,
+      ).toContain(profile.id);
+      // The HOOKS paragraph is prose, and prose calls them by their short names
+      // ("Codex", not "Codex CLI"), so the check is on the name's first word: a
+      // harness nobody mentions there ships with no tier a reader of --help can see.
+      const shortName = profile.name.split(' ')[0]!;
+      expect(
+        usage,
+        `${profile.name}: claimed by the registry but named nowhere in the HOOKS ` +
+          `section, so nobody reading --help learns the tier it ships at`,
+      ).toContain(shortName);
+    }
+  });
+
+  it('every harness that ships a shim has a cited fixture, and the fixtures claim nothing else', () => {
+    const shimmed = HARNESSES.filter(hasShim);
+    expect(
+      shimmed.length,
+      'no harness ships a shim — the fixture loop would be vacuous',
+    ).toBeGreaterThanOrEqual(7);
+    for (const profile of shimmed) {
+      const fixture = FIXTURE_BY_HARNESS[profile.id];
+      expect(
+        fixture,
+        `${profile.id}: ships a shim but has no entry in FIXTURE_BY_HARNESS — add a ` +
+          `recorded payload and its expectations before claiming the harness`,
+      ).toBeDefined();
+      // Cites the matrix row it was recorded from, or throws.
+      const payloads = harnessPayloads(profile.id);
+      for (const name of [fixture!.readBigCase, fixture!.catCase, ...fixture!.passCases]) {
+        expect(payloads[name], `${profile.id}.json has no case "${name}"`).toBeDefined();
+      }
+    }
+    const claimed = shimmed.map((profile) => profile.id);
+    for (const id of Object.keys(FIXTURE_BY_HARNESS)) {
+      expect(
+        claimed,
+        `${id}: has a shim fixture but no profile in the registry ships that shim — ` +
+          `dead test data, or a harness dropped without its tests`,
+      ).toContain(id);
+    }
+  });
+
+  it('a harness that wires a hook command ships the shim that command runs', () => {
+    for (const profile of HARNESSES) {
+      const wiresCommand = profile.install.some((step) => step.kind === 'json-hooks');
+      if (!wiresCommand) continue;
+      expect(
+        hasShim(profile),
+        `${profile.id}: declares a JSON hook file but carries neither a hook schema nor ` +
+          `a hand-written adapter — the installed command would name a script the ` +
+          `build never produced`,
+      ).toBe(true);
+    }
+  });
+
+  it('the derived file lists cover every harness that persists something to read back', () => {
+    for (const profile of HARNESSES) {
+      for (const step of profile.install) {
+        if (step.kind === 'json-hooks') expect(JSON_HOOK_FILES).toContain(step.file);
+        if (step.kind === 'own-file' && step.guardOnly) {
+          expect(GUARD_ONLY_FILES).toContain(step.file);
+        }
+      }
+    }
+  });
+});
+
+describe('one announcement — a rewrite says the same sentence everywhere it can be seen', () => {
+  const rewriting = HARNESSES.filter(hasShim).filter(
+    (profile) => FIXTURE_BY_HARNESS[profile.id]?.rewrite?.announce === 'stderr',
+  );
+
+  it('is used by every shim whose rewrite document has no reason channel', () => {
+    expect(
+      rewriting.length,
+      'no stderr-announcing shim — this check would be vacuous',
+    ).toBeGreaterThanOrEqual(3);
+    for (const profile of rewriting) {
+      const fixture = FIXTURE_BY_HARNESS[profile.id]!;
+      const raw = harnessPayloads(profile.id)[fixture.catCase];
+      const adapter = shimAdapterOf(profile);
+      // The same call twice: once in deny mode, for the reason the guard would have
+      // shown the model, and once in rewrite mode. The announcement must carry that
+      // exact reason — a substitution announced without its why is half an answer.
+      const denied = renderShimDecision(adapter, raw, DEFAULT_GUARD_SETTINGS, '/repo', stat);
+      const reason = valueAt(JSON.parse(denied.stdout) as unknown, fixture.reasonKeyPath);
+      const output = renderShimDecision(
+        adapter,
+        raw,
+        { ...DEFAULT_GUARD_SETTINGS, enforcement: 'rewrite' },
+        '/repo',
+        stat,
+      );
+      const suggestion = valueAt(
+        JSON.parse(output.stdout) as unknown,
+        fixture.rewrite!.commandKeyPath,
+      );
+      expect(typeof suggestion).toBe('string');
+      expect(
+        output.stderr,
+        `${profile.id}: announces a rewrite in words of its own — the one constant is ` +
+          `what keeps four copies of this sentence identical`,
+      ).toBe(`${rewriteAnnouncement(suggestion as string, reason as string)}\n`);
+    }
+  });
+
+  it('is spliced into the generated opencode plugin, not hand-typed inside it', () => {
+    // The fourth copy used to live inside a JavaScript string template, where nothing
+    // could see it drift from the three shims'. Now the template splices the same
+    // constants in, and this is what says so.
+    const plan = planInstall('/repo', {
+      harnesses: HARNESSES.filter((profile) => profile.id === 'opencode'),
+      guard: true,
+      statsOnStop: false,
+      mapOnStart: false,
+      enforcement: 'rewrite',
+      thresholdBytes: 8192,
+    });
+    const plugin = plan.files.find((file) => file.name.endsWith('smelt-guard.js'));
+    expect(plugin, 'the opencode plugin was not planned').toBeDefined();
+    expect(plugin!.content).toContain(JSON.stringify(REWRITE_ANNOUNCEMENT_OPENING));
+    expect(plugin!.content).toContain(JSON.stringify(REWRITE_ANNOUNCEMENT_JOIN));
+    // The reasonless deny is the plugin's other spliced sentence, and it drifts the
+    // same way: a hand-typed replacement reads correctly while saying something the
+    // shims never say.
+    expect(plugin!.content).toContain(JSON.stringify(DENIED_WITHOUT_REASON));
+  });
+});
+
+/**
+ * The breaks this guard must catch. `pnpm mutate` applies each one to a scratch copy
+ * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
+ */
+export const MUTATIONS: GuardMutation[] = [
+  {
+    id: 'harness-dropped-from-registry',
+    file: 'harness/registry.ts',
+    find: '  cursor,\n  opencode,',
+    replace: '  opencode,',
+    why: 'a harness dropped from the registry — the id vanishes from the --harness help list, the wizard and the installer while its fixture, its shim script and its published export all stay, which is the silent half-removal a registry is supposed to make impossible',
+  },
+  {
+    id: 'harness-shim-claimed-without-fixture',
+    file: 'harness/registry.ts',
+    find: '  kilocode,\n  aider,\n};',
+    replace: "  kilocode,\n  aider,\n  zed: { ...cursor, id: 'zed' },\n};",
+    why: 'a harness claiming a shim with no recorded payload and no expectations — exactly the untested-schema ship the totality guard exists to refuse',
+  },
+  {
+    id: 'harness-rewrite-announcement-hand-typed',
+    file: 'harness/opencode.ts',
+    find: '        ${JSON.stringify(REWRITE_ANNOUNCEMENT_OPENING)} +',
+    replace: "        'smelt guard: rewrote the command with ' +",
+    why: 'the generated opencode plugin announcing a rewrite in words of its own — a fourth copy of the sentence, inside a JavaScript string template where nothing can see it drift from the three shims that print it',
+  },
+  {
+    id: 'harness-deny-fallback-hand-typed',
+    file: 'harness/opencode.ts',
+    find: '${JSON.stringify(DENIED_WITHOUT_REASON)}',
+    replace: "'blocked by smelt'",
+    why: 'the generated opencode plugin refusing in words of its own — the deny sentence spliced from the same constant the shims use, hand-typed instead, inside a template where nothing can see it drift',
+  },
+];

@@ -321,11 +321,17 @@ describe('the other tiers write what their matrix row supports', () => {
 
   it('opencode: the plugin file carries the matrix caveat and imports the guard core', async () => {
     const { output } = await hooks('install', 'opencode', DEFAULT_ANSWERS);
-    const plugin = readFileSync(join(dir, '.opencode/plugin/smelt-guard.js'), 'utf8');
+    const pluginPath = join(dir, '.opencode/plugin/smelt-guard.js');
+    const plugin = readFileSync(pluginPath, 'utf8');
     expect(plugin).toContain('tool.execute.before');
     expect(plugin).toContain('hooks/guard-core.js');
     expect(plugin).toContain('sst/opencode#2319');
     expect(output).toContain('sst/opencode#2319'); // caveat carried into installer output
+    // It is generated JavaScript, spliced from constants — so it is also the one file
+    // here that a template typo turns into a syntax error at somebody's session start.
+    const { spawnSync } = await import('node:child_process');
+    const checked = spawnSync(process.execPath, ['--check', pluginPath], { encoding: 'utf8' });
+    expect(checked.status, checked.stderr).toBe(0);
   });
 
   it('cline: the hook wrapper is executable and execs the cline shim', async () => {

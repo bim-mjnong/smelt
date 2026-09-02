@@ -1,0 +1,72 @@
+import type { HarnessHookSchema } from '../hooks/shim.ts';
+
+import type { ShimmedHarnessProfile } from './profile.ts';
+
+/**
+ * Claude Code — VERIFIED tier. Schema, install and removal, end to end.
+ *
+ * Schema per <https://code.claude.com/docs/en/hooks> (verified 2026-09-02; the deep
+ * dive is docs/research/2026-09-02-agent-enforcement.md § 1):
+ *
+ *  - stdin: `{ hook_event_name: "PreToolUse", tool_name, tool_input, cwd }`. For
+ *    `Read`, `tool_input.file_path` is already absolute and `offset`/`limit` mark a
+ *    windowed read; for `Bash`, `tool_input.command` is the full command string, and
+ *    a relative path in it resolves against the payload's `cwd` — the *session's*
+ *    working directory, which after the model `cd`s differs from the hook process's
+ *    own cwd.
+ *  - deny: `hookSpecificOutput.permissionDecision: "deny"` with
+ *    `permissionDecisionReason` — which is **shown to the model**, so the guard's
+ *    reason (the exact replacement command, the `smelt retrieve` contract) lands in
+ *    the transcript as steering.
+ *  - rewrite (opt-in, `hooks.enforcement: "rewrite"`): `updatedInput` replaces the
+ *    entire input object of the *same* tool (v2.0.10+), so a Bash command can be
+ *    substituted but a Read can never become a Bash call — Reads deny in every mode.
+ */
+const HOOKS: HarnessHookSchema = {
+  readTools: ['Read'],
+  bashTools: ['Bash'],
+  toolNameKeys: ['tool_name'],
+  toolInputKeys: ['tool_input'],
+  cwdKey: 'cwd',
+  deny: (reason) => ({
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: reason,
+    },
+  }),
+  rewrite: {
+    document: ({ input, announcement }) => ({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        permissionDecisionReason: announcement,
+        // updatedInput replaces the whole input object — unchanged fields ride along.
+        updatedInput: input,
+      },
+    }),
+    announce: 'reason',
+  },
+};
+
+export const claudeCode: ShimmedHarnessProfile = {
+  id: 'claude-code',
+  name: 'Claude Code',
+  tier: 'verified',
+  detect: ['.claude'],
+  detectHome: ['.claude'],
+  instructionFile: 'CLAUDE.md',
+  instructions: 'snippet',
+  caveats: [],
+  hooks: HOOKS,
+  install: [
+    {
+      kind: 'json-hooks',
+      file: '.claude/settings.json',
+      event: 'PreToolUse',
+      matchers: ['Read', 'Bash'],
+      entry: 'command-list',
+      lifecycle: true,
+    },
+  ],
+};
