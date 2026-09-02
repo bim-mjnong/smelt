@@ -9,7 +9,7 @@ import {
   budgetFault,
   budgetMalformed,
   budgetRequired,
-  BUILT_IN_STRATEGY,
+  DEFAULT_STRATEGY,
   openStore,
   readBlob,
   readTree,
@@ -123,13 +123,13 @@ describe('the strategy law', () => {
       source: 'config',
     });
     expect(resolveStrategy(undefined, undefined)).toEqual({
-      strategy: BUILT_IN_STRATEGY,
+      strategy: DEFAULT_STRATEGY,
       source: 'builtin',
     });
   });
 
   it('names the built-in once, so promoting a planner is one edit', () => {
-    expect(BUILT_IN_STRATEGY).toBe('lexical');
+    expect(DEFAULT_STRATEGY).toBe('lexical');
   });
 });
 

@@ -8,7 +8,7 @@ import {
   budgetFault,
   budgetMalformed,
   budgetRequired,
-  BUILT_IN_STRATEGY,
+  DEFAULT_STRATEGY,
   readTree,
   resolveStrategy,
 } from '@guard/ops/inputs';
@@ -99,18 +99,22 @@ describe('the ops seam — each law is stated once', () => {
     // so the check stays a partition: `createSmelter`'s own default is the
     // programmatic contract the seam itself calls through, and the `init` wizard's is
     // a value *proposed to the user* for a config file, not a run being resolved.
-    const NOT_A_FRONT_DOOR: readonly string[] = ['smelter.ts', 'cli/init.ts'];
+    // Both shapes a restatement takes: the `??` fallback a caller writes, and the
+    // literal a resolver returns. `plan/planners.ts` is the constant's own home and
+    // its doc names the pattern it replaced — prose, not a fallback.
+    const RESTATES_THE_DEFAULT = /\?\?\s*'lexical'|strategy:\s*'lexical'/;
+    const NOT_A_FRONT_DOOR: readonly string[] = ['smelter.ts', 'cli/init.ts', 'plan/planners.ts'];
     const fallbacks = sources
-      .filter((source) => /\?\?\s*'lexical'/.test(source.text))
+      .filter((source) => RESTATES_THE_DEFAULT.test(source.text))
       .map((source) => source.file)
       .filter((file) => !NOT_A_FRONT_DOOR.includes(file));
     expect(
       fallbacks,
       'a strategy fallback written inline in a front door. The built-in is ' +
-        'BUILT_IN_STRATEGY in ops/inputs.ts, and resolveStrategy is the only thing ' +
+        'DEFAULT_STRATEGY in plan/planners.ts, and resolveStrategy is the only thing ' +
         'that applies it.',
     ).toEqual([]);
-    expect(BUILT_IN_STRATEGY).toBe('lexical');
+    expect(DEFAULT_STRATEGY).toBe('lexical');
   });
 });
 
@@ -179,7 +183,7 @@ describe('the ops seam — the CLI serves the law it is given', () => {
       strategy: 'structural',
       source: 'config',
     });
-    expect(resolveStrategy(undefined, undefined).strategy).toBe(BUILT_IN_STRATEGY);
+    expect(resolveStrategy(undefined, undefined).strategy).toBe(DEFAULT_STRATEGY);
   });
 
   it('keeps a zero or fractional budget out, wherever it came from', () => {
@@ -217,9 +221,9 @@ export const MUTATIONS: GuardMutation[] = [
   },
   {
     id: 'ops-builtin-strategy-changed',
-    file: 'ops/inputs.ts',
-    find: "export const BUILT_IN_STRATEGY: Strategy = 'lexical';",
-    replace: "export const BUILT_IN_STRATEGY: Strategy = 'structural';",
+    file: 'plan/planners.ts',
+    find: "export const DEFAULT_STRATEGY: Strategy = 'lexical';",
+    replace: "export const DEFAULT_STRATEGY: Strategy = 'structural';",
     why: 'the built-in strategy changed in the one place it is named — every run with no --strategy and no config would start parsing, and refuse outright on any file without a bundled grammar',
   },
   {
@@ -237,5 +241,12 @@ export const MUTATIONS: GuardMutation[] = [
       "          knob: '--budget is required, in UTF-8 bytes. Ignore the rest',\n" +
       "          stake: 'the map to leave out',",
     why: "a verb writing the law's own words into its own file again — the exact fork this seam removed, and it must go red on the *stated once* half even though the sentence it produces still reads plausibly",
+  },
+  {
+    id: 'ops-default-strategy-restated-inline',
+    file: 'ops/inputs.ts',
+    find: "return { strategy: DEFAULT_STRATEGY, source: 'builtin' };",
+    replace: "return { strategy: 'lexical', source: 'builtin' };",
+    why: 'the built-in restated inline at the one site that applies it — the value is right today, so nothing fails until a planner is promoted to the default and this site silently keeps the old one. The precedence resolver moved into the operations seam; the law it carries did not.',
   },
 ];

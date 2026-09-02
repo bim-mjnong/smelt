@@ -37,7 +37,6 @@ export {
   budgetFault,
   budgetMalformed,
   budgetRequired,
-  DEFAULT_STRATEGY,
   openStore,
   readBlob,
   readTree,
