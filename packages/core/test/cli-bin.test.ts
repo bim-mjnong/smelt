@@ -1,5 +1,13 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -34,6 +42,8 @@ const binPath = join(packageRoot(), 'dist', 'cli', 'bin.js');
 interface Finished {
   readonly code: number | null;
   readonly stdout: string;
+  /** stdout as raw bytes, for the byte-compare cases where encoding must not intrude. */
+  readonly stdoutBytes: Buffer;
   readonly stderr: string;
 }
 
@@ -41,17 +51,22 @@ interface Finished {
 function runBin(
   args: readonly string[],
   stdin?: { readonly bytes: Uint8Array; readonly delayMs: number },
+  cwd?: string,
 ): Promise<Finished> {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(process.execPath, [binPath, ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(cwd === undefined ? {} : { cwd }),
     });
-    let stdout = '';
+    const stdoutChunks: Buffer[] = [];
     let stderr = '';
-    child.stdout.setEncoding('utf8').on('data', (chunk: string) => (stdout += chunk));
+    child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
     child.on('error', rejectPromise);
-    child.on('close', (code) => resolvePromise({ code, stdout, stderr }));
+    child.on('close', (code) => {
+      const stdoutBytes = Buffer.concat(stdoutChunks);
+      resolvePromise({ code, stdout: stdoutBytes.toString('utf8'), stdoutBytes, stderr });
+    });
     if (stdin === undefined) {
       child.stdin.end();
     } else {
@@ -129,6 +144,49 @@ describe('the built binary, as a real process', () => {
     expect(stdout).toContain('readSettings');
     expect(stderr).toContain('smelt map  ');
     expect(stderr).toMatch(/bytes used [\d,]+ of 10,000 budget/);
+  }, 15_000);
+
+  it('closes the marker loop from a real shell: pipe → retrieve → cmp says byte-identical', async () => {
+    // The retrieve/stats smoke case — everything else is proven in-process
+    // (test/cli-retrieve-stats.test.ts, test/guards/expansion-counter.test.ts). Here a
+    // real file goes through a real pipe with a directory store configured, a hash from
+    // the envelope comes back through `smelt retrieve`, and `cmp` — not this test's own
+    // string handling — attests the bytes are identical.
+    const shellDir = join(scratch, 'shell-loop');
+    mkdirSync(shellDir, { recursive: true });
+    writeFileSync(
+      join(shellDir, 'smelt.config.json'),
+      `${JSON.stringify({ smeltConfig: 1, store: { kind: 'directory', path: '.smelt-store' } })}\n`,
+    );
+    const source = readFileSync(join(packageRoot(), 'src', 'plan', 'lexical.ts'));
+
+    const smelted = await runBin(
+      ['--budget', '900', '--json'],
+      { bytes: source, delayMs: 0 },
+      shellDir,
+    );
+    expect(smelted.code, smelted.stderr).toBe(EXIT.ok);
+    const envelope = JSON.parse(smelted.stdout) as {
+      result: { elisions: readonly { hash: string }[] };
+      elided: Readonly<Record<string, string>>;
+    };
+    expect(envelope.result.elisions.length).toBeGreaterThan(0);
+    const hash = envelope.result.elisions[0]!.hash;
+
+    const retrieved = await runBin(['retrieve', hash], undefined, shellDir);
+    expect(retrieved.code, retrieved.stderr).toBe(EXIT.ok);
+
+    const expectedPath = join(shellDir, 'expected.bin');
+    const retrievedPath = join(shellDir, 'retrieved.bin');
+    writeFileSync(expectedPath, Buffer.from(envelope.elided[hash]!, 'utf8'));
+    writeFileSync(retrievedPath, retrieved.stdoutBytes);
+    const cmp = spawnSync('cmp', [expectedPath, retrievedPath], { encoding: 'utf8' });
+    expect(cmp.status, `cmp says the retrieved bytes differ: ${cmp.stdout}${cmp.stderr}`).toBe(0);
+
+    const stats = await runBin(['stats'], undefined, shellDir);
+    expect(stats.code).toBe(EXIT.ok);
+    expect(stats.stdout).toContain('retrieveCalls 1');
+    expect(stats.stdout).toContain('uniqueRetrieved 1');
   }, 15_000);
 });
 

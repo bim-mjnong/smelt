@@ -239,7 +239,7 @@ const totalMutations = MUTATIONS_BY_GUARD.reduce((sum, entry) => sum + entry.mut
  * a number nobody measured, which is this repository's own Law 4 pointed at itself.
  */
 function assertProseCountsCurrent() {
-  const PROSE = ['docs/HANDOFF.md', 'CONTRIBUTING.md', 'scripts/mutate.mjs'];
+  const PROSE = ['docs/HANDOFF.md', 'CONTRIBUTING.md', 'README.md', 'scripts/mutate.mjs'];
   const PATTERN = /(\d+)\s+mutations\s+across\s+(?:the\s+)?(\d+)\s+guards/gi;
   for (const relative of PROSE) {
     const text = readFileSync(join(repoRoot, relative), 'utf8');

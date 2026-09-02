@@ -25,7 +25,9 @@ codebase-design glossary.
 - **Store**: content-addressed home of elided bytes (`ElisionStore`). No eviction: a
   store that can forget turns "reversible" into "reversible, usually".
 - **Expansion rate**: retrieved-back fraction of what smelt hid — the honest signal of
-  over-pruning. Measured, never thresholded.
+  over-pruning. Measured, never thresholded. The marker's `retrieve("hash")` is a real
+  command — `smelt retrieve <hash>` — so the rate moves (and is measurable, via
+  `smelt stats`) from pure shell, not only through the `smelt_retrieve` tool.
 - **Guard**: a test that pins a law or guarantee, proven non-vacuous by mutations.
 - **Mutation**: a deliberate minimal break that its guard must catch (`pnpm mutate`).
 - **The four laws**: zero network · every elision explainable · every elision reversible

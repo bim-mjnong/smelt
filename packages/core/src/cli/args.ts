@@ -47,8 +47,26 @@ export interface MapInvocation {
   readonly json: boolean;
 }
 
+/**
+ * `smelt retrieve <hash>` — the marker's `retrieve("hash")` as a real command, parsed.
+ * A {@link MapInvocation}-style sibling: nothing but the hash, because the command's
+ * whole contract is "hash in, exact bytes out" — the same contract as the
+ * `smelt_retrieve` tool, reachable from a shell.
+ */
+export interface RetrieveInvocation {
+  readonly mode: 'retrieve';
+  /** The hash exactly as the marker printed it. Validated by the store, not here. */
+  readonly hash: string;
+}
+
+/** `smelt stats` — the store's counters, read without touching them. */
+export interface StatsInvocation {
+  readonly mode: 'stats';
+  readonly json: boolean;
+}
+
 /** Everything `parseSmeltArgs` can return. Narrow on `mode`. */
-export type CliInvocation = SmeltInvocation | MapInvocation;
+export type CliInvocation = SmeltInvocation | MapInvocation | RetrieveInvocation | StatsInvocation;
 
 /**
  * Argument parsing on `node:util.parseArgs` — stable since Node 20, which `engines`
@@ -112,6 +130,15 @@ export function parseSmeltArgs(argv: readonly string[]): CliInvocation {
   if (positionals[0] === 'map') {
     // `smelt map` is a subcommand, so a file literally named `map` needs `./map`.
     return parseMapArgs(values, positionals);
+  }
+
+  if (positionals[0] === 'retrieve') {
+    // A subcommand, like map and init — a file literally named `retrieve` needs `./retrieve`.
+    return parseRetrieveArgs(values, positionals);
+  }
+
+  if (positionals[0] === 'stats') {
+    return parseStatsArgs(values, positionals);
   }
 
   // These two belong to `smelt map` alone; silently ignoring a flag the user typed
@@ -215,6 +242,59 @@ function parseMapArgs(values: MapFlagValues, positionals: readonly string[]): Ma
 }
 
 /**
+ * `retrieve` takes the hash and nothing else. Every flag is refused rather than
+ * ignored — the command prints the exact original bytes on stdout and nothing more,
+ * so a flag that changed the output would break the one contract it has, and a flag
+ * silently dropped would be a setting the user believed was in force. In particular
+ * there is no `--json`: the bytes ARE the output, and wrapping them would re-encode
+ * what the command exists to hand back verbatim.
+ */
+function parseRetrieveArgs(
+  values: Record<string, unknown>,
+  positionals: readonly string[],
+): RetrieveInvocation {
+  const flags = Object.entries(values).filter(([, value]) => value !== undefined);
+  if (flags.length > 0) {
+    throw new CliUsageError(
+      `${CLI_NAME}: retrieve takes no flags (got --${flags.map(([name]) => name).join(', --')}). ` +
+        `It prints the exact original bytes for one hash, nothing else — even --json ` +
+        `would wrap what must come back verbatim.`,
+    );
+  }
+  if (positionals.length !== 2) {
+    throw new CliUsageError(
+      `${CLI_NAME}: retrieve needs exactly one hash — the one a marker printed.\n` +
+        `  ${CLI_NAME} retrieve 84998967370f38bc`,
+    );
+  }
+  return { mode: 'retrieve', hash: positionals[1]! };
+}
+
+/** `stats` reads counters; `--json` is its only flag, everything else is refused. */
+function parseStatsArgs(
+  values: Record<string, unknown>,
+  positionals: readonly string[],
+): StatsInvocation {
+  if (positionals.length > 1) {
+    throw new CliUsageError(
+      `${CLI_NAME}: stats takes no further arguments, got ` +
+        `${positionals.slice(1).join(', ')}. It reports on the one configured store.`,
+    );
+  }
+  const flags = Object.entries(values).filter(
+    ([name, value]) => value !== undefined && name !== 'json',
+  );
+  if (flags.length > 0) {
+    throw new CliUsageError(
+      `${CLI_NAME}: stats takes only --json ` +
+        `(got --${flags.map(([name]) => name).join(', --')}). It reads counters; there ` +
+        `is nothing to budget, focus or plan.`,
+    );
+  }
+  return { mode: 'stats', json: values['json'] === true };
+}
+
+/**
  * `--budget` has no built-in default, for the same reason `smelt()` has none: a budget
  * smelt invented would be smelt deciding how much of the caller's context to throw
  * away, silently, at a number nobody chose. A *missing* flag is not an error here,
@@ -263,6 +343,8 @@ USAGE
   ${CLI_NAME} <file> --budget <bytes> [--focus <term>]...
   ${CLI_NAME} --budget <bytes> [--focus <term>]... < input
   ${CLI_NAME} map <dir> --budget <bytes> [--focus <term>]... [--ignore <entry>]... [--cache <dir>]
+  ${CLI_NAME} retrieve <hash>
+  ${CLI_NAME} stats [--json]
   ${CLI_NAME} --reconstruct <result.json>
   ${CLI_NAME} --reconstruct < result.json
   ${CLI_NAME} init
@@ -288,6 +370,27 @@ MAP
   1: a plan can come back over budget because ${CLI_NAME} refuses to cut regions you
   asked to keep, but the map fits itself to the budget by construction — symbols
   are appended in rank order until the next line would not fit.
+
+RETRIEVE & STATS
+  Every marker carries the hash of the bytes it replaced — <<smelt/v1: … —
+  retrieve("hash")>> — and the marker's retrieve("hash") is this command:
+  ${CLI_NAME} retrieve <hash> prints the exact original bytes on stdout, byte for
+  byte, nothing else. That closes the loop from pure shell: an agent that got a
+  marker asks for the bytes back with a command instead of a tool call, and the
+  retrieval is counted — asking for material back is exactly what the expansion
+  rate measures. An unknown hash and damaged bytes are distinct refusals (exit 3):
+  "never elided" and "the store was corrupted" call for different responses.
+
+  ${CLI_NAME} stats prints the same store's counters, one \`name value\` per line —
+  elisionsStored, bytesStored, retrieveCalls, uniqueRetrieved, expansionRate,
+  allElisionsRetrieved — and reading them is NOT counted as a retrieval. --json
+  emits the RetrieveStats verbatim in its own versioned envelope.
+
+  Both need somewhere for elisions to outlive the run that made them: a
+  smelt.config.json with a directory store (\`${CLI_NAME} init\` writes one). With a
+  memory store — or no config — every run's store dies with its process, so there
+  is nothing to retrieve across runs, and that is a usage error rather than a
+  quiet empty answer.
 
 OPTIONS
   --budget <bytes>     Required, unless smelt.config.json sets defaultBudgetBytes.
@@ -324,7 +427,7 @@ EXIT CODES
   1  over budget — the plan did not fit, and the report says so. Never silent.
      map never exits 1; see MAP above.
   2  usage error
-  3  smelt refused (a SmeltError: an unbuilt planner, a missing hash)
+  3  smelt refused (a SmeltError: an unbuilt planner, an unknown hash, a corrupt store)
   4  unexpected internal error
 `;
 }

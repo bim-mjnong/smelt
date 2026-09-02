@@ -139,7 +139,10 @@ describe('--budget is required, and its absence is an error', () => {
   });
 
   it('parses a good budget into bytes', () => {
-    expect(parseSmeltArgs(['--budget', '4000']).budgetBytes).toBe(4000);
+    const invocation = parseSmeltArgs(['--budget', '4000']);
+    expect(invocation.mode).toBe('smelt');
+    if (invocation.mode !== 'smelt') throw new Error('unreachable');
+    expect(invocation.budgetBytes).toBe(4000);
   });
 });
 

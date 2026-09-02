@@ -9,22 +9,33 @@ import { buildRepoMap } from '../repomap/map.ts';
 import type { RepoMap } from '../repomap/map.ts';
 import { MemoryElisionStore } from '../store.ts';
 import { DirectoryElisionStore } from '../store-dir.ts';
-import type { ElisionStore, SmeltResult } from '../types.ts';
+import type { ElisionStore, RetrieveStats, SmeltResult } from '../types.ts';
 
 import { CLI_NAME, cliUsage, parseSmeltArgs } from './args.ts';
-import type { MapInvocation, SmeltInvocation } from './args.ts';
+import type {
+  MapInvocation,
+  RetrieveInvocation,
+  SmeltInvocation,
+  StatsInvocation,
+} from './args.ts';
 import { loadNearestConfig } from './config.ts';
 import { runInit } from './init.ts';
 import { formatMapReport, formatReport } from './report.ts';
-import { resolveMapRun, resolveRun } from './resolve.ts';
+import { resolveMapRun, resolveRun, resolveStoreRun } from './resolve.ts';
 import type { ResolvedRun } from './resolve.ts';
 
 export { CLI_NAME, cliUsage, parseSmeltArgs } from './args.ts';
-export type { CliInvocation, MapInvocation, SmeltInvocation } from './args.ts';
+export type {
+  CliInvocation,
+  MapInvocation,
+  RetrieveInvocation,
+  SmeltInvocation,
+  StatsInvocation,
+} from './args.ts';
 export { formatMapReport, formatReport } from './report.ts';
 export type { MapReportInput, ReportInput } from './report.ts';
-export { resolveMapRun, resolveRun } from './resolve.ts';
-export type { ResolvedMapRun, ResolvedRun } from './resolve.ts';
+export { resolveMapRun, resolveRun, resolveStoreRun } from './resolve.ts';
+export type { ResolvedMapRun, ResolvedRun, ResolvedStoreRun } from './resolve.ts';
 
 /**
  * Exit codes, and why there are five of them.
@@ -57,6 +68,20 @@ export const CLI_JSON_FORMAT = 'smelt-cli/v1';
  * a map envelope has no elided bytes to carry, since a map elides nothing.
  */
 export const CLI_MAP_JSON_FORMAT = 'smelt-map-cli/v1';
+
+/**
+ * The `smelt stats --json` envelope format. Its own version line for the same reason
+ * `smelt map` has one: the two envelopes carry different structures and must move
+ * independently.
+ */
+export const CLI_STATS_JSON_FORMAT = 'smelt-stats-cli/v1';
+
+/** What `smelt stats --json` prints: the {@link RetrieveStats} verbatim, versioned. */
+export interface CliStatsJsonEnvelope {
+  readonly format: string;
+  /** The {@link RetrieveStats} exactly as the store's `stats()` returned them. */
+  readonly stats: RetrieveStats;
+}
 
 /** What `smelt map --json` prints: the {@link RepoMap} verbatim, versioned. */
 export interface CliMapJsonEnvelope {
@@ -139,6 +164,10 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         return await runSmelt(invocation, io);
       case 'map':
         return await runMap(invocation, io);
+      case 'retrieve':
+        return runRetrieve(invocation, io);
+      case 'stats':
+        return runStats(invocation, io);
     }
   } catch (error) {
     if (error instanceof CliUsageError) {
@@ -254,6 +283,64 @@ function assertDirectory(dir: string): void {
 function storeFor(run: ResolvedRun): ElisionStore | undefined {
   if (run.store.kind === 'memory') return undefined;
   return new DirectoryElisionStore(run.store.path);
+}
+
+/**
+ * `smelt retrieve <hash>` — the marker's `retrieve("hash")`, as a real command.
+ *
+ * The exact original bytes go to stdout and **nothing else does**: no report, no
+ * trailing newline the store did not hold, no re-encoding. Trailing-newline fidelity
+ * is not pedantry — the retrieved bytes get spliced back into reasoning about the
+ * original, and an almost-right blob is the silent wrong answer this project refuses.
+ *
+ * The retrieval IS counted — that is the point. `store.retrieve()` journals the hit,
+ * so an agent working from pure shell moves the same `expansionRate` a tool-calling
+ * consumer moves, and over-pruning stays visible whichever loop is in use. Errors are
+ * the store's own, verbatim: `UnknownHashError` for a hash never elided,
+ * `StoreCorruptionError` for bytes that no longer hash to their name — distinct
+ * texts, both exiting {@link EXIT.refused}.
+ */
+function runRetrieve(invocation: RetrieveInvocation, io: CliIo): number {
+  const run = resolveStoreRun('retrieve', loadNearestConfig(io.cwd ?? process.cwd()));
+  const store = new DirectoryElisionStore(run.storePath);
+  const content = store.retrieve(invocation.hash);
+  io.stdout(content);
+  return EXIT.ok;
+}
+
+/**
+ * `smelt stats` — the store's counters, without touching them.
+ *
+ * Reading stats does NOT count as a retrieval: `stats()` folds the journal and scans
+ * the blobs, journaling nothing, so watching the expansion rate can never move it —
+ * an observer that inflated its own metric would make the honest signal dishonest.
+ *
+ * The plain form is one `name value` per line, greppable and stable; `--json` emits
+ * the {@link RetrieveStats} verbatim in its own versioned envelope
+ * ({@link CLI_STATS_JSON_FORMAT}), like every other machine-read surface here.
+ */
+function runStats(invocation: StatsInvocation, io: CliIo): number {
+  const run = resolveStoreRun('stats', loadNearestConfig(io.cwd ?? process.cwd()));
+  const stats = new DirectoryElisionStore(run.storePath).stats();
+
+  if (invocation.json) {
+    const statsEnvelope: CliStatsJsonEnvelope = { format: CLI_STATS_JSON_FORMAT, stats };
+    io.stdout(`${JSON.stringify(statsEnvelope, null, 2)}\n`);
+    return EXIT.ok;
+  }
+
+  io.stdout(
+    [
+      `elisionsStored ${String(stats.elisionsStored)}`,
+      `bytesStored ${String(stats.bytesStored)}`,
+      `retrieveCalls ${String(stats.retrieveCalls)}`,
+      `uniqueRetrieved ${String(stats.uniqueRetrieved)}`,
+      `expansionRate ${String(stats.expansionRate)}`,
+      `allElisionsRetrieved ${String(stats.allElisionsRetrieved)}`,
+      '',
+    ].join('\n'),
+  );
+  return EXIT.ok;
 }
 
 /**
