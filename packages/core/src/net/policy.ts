@@ -76,6 +76,7 @@ export const ALLOWED_NODE_BUILTINS: readonly string[] = [
   'node:module', // web-tree-sitter's own loader shim needs createRequire
   'node:util', // parseArgs, for the CLI. Argument parsing with zero dependencies.
   'node:process', // argv, stdin/stdout/stderr and the exit code, for the CLI
+  'node:os', // homedir(), for `smelt hooks install` harness detection — reads a path, opens nothing
   'node:readline/promises', // line-by-line answers for `smelt init` — reads streams it is handed, opens nothing
   'node:tty', // isatty(0) for the CLI's TTY check — a plain syscall, no stream, no socket
 ];

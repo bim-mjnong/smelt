@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import { CliUsageError } from '../errors.ts';
+import { ENFORCEMENT_MODES } from '../hooks/guard-core.ts';
+import type { EnforcementMode } from '../hooks/guard-core.ts';
 import { isStrategy, STRATEGIES } from '../plan/planners.ts';
 import type { Strategy } from '../plan/planners.ts';
 
@@ -39,6 +41,26 @@ export type SmeltConfigStore =
       readonly path: string;
     };
 
+/**
+ * The `hooks` block — settings for the harness guard (`smelt hooks install`).
+ *
+ * Parsed strictly here, like every other key: the CLI refuses a malformed config.
+ * The guard core (`src/hooks/guard-core.ts`) reads the same file with its own
+ * *tolerant* reader — a guard running inside somebody's session fails open where the
+ * CLI correctly refuses — and `test/hooks-guard-core.test.ts` pins the two readers to
+ * the same key names and defaults so they cannot drift apart.
+ */
+export interface SmeltConfigHooks {
+  /** Reads at or under this many bytes pass the guard untouched. Default 8192. */
+  readonly thresholdBytes?: number;
+  /**
+   * `'deny'` (default): oversized raw reads are refused with a reason naming the
+   * exact replacement command. `'rewrite'`: on harnesses whose hooks can modify tool
+   * input, the command is substituted instead (never silently — the reason says so).
+   */
+  readonly enforcement?: EnforcementMode;
+}
+
 /** The parsed shape of `smelt.config.json`. Every field beyond the version is optional. */
 export interface SmeltConfig {
   readonly smeltConfig: typeof CONFIG_VERSION;
@@ -48,6 +70,8 @@ export interface SmeltConfig {
   readonly strategy?: Strategy;
   /** Used for every run; there is no store flag. Defaults to memory when absent. */
   readonly store?: SmeltConfigStore;
+  /** Settings for the harness guard. See {@link SmeltConfigHooks}. */
+  readonly hooks?: SmeltConfigHooks;
 }
 
 /** A config plus where it was found — the path matters for resolving `store.path`. */
@@ -123,7 +147,7 @@ export function parseConfig(text: string, path: string): SmeltConfig {
     );
   }
 
-  const known = ['smeltConfig', 'defaultBudgetBytes', 'strategy', 'store'];
+  const known = ['smeltConfig', 'defaultBudgetBytes', 'strategy', 'store', 'hooks'];
   const unknown = Object.keys(fields).filter((key) => !known.includes(key));
   if (unknown.length > 0) {
     throw bad(
@@ -150,12 +174,14 @@ export function parseConfig(text: string, path: string): SmeltConfig {
   }
 
   const store = parseStore(fields['store'], bad);
+  const hooks = parseHooks(fields['hooks'], bad);
 
   return {
     smeltConfig: CONFIG_VERSION,
     ...(budget === undefined ? {} : { defaultBudgetBytes: budget }),
     ...(strategy === undefined ? {} : { strategy }),
     ...(store === undefined ? {} : { store }),
+    ...(hooks === undefined ? {} : { hooks }),
   };
 }
 
@@ -184,6 +210,47 @@ function parseStore(
     return { kind: 'directory', path };
   }
   throw bad(`"store".kind must be "memory" or "directory", got ${JSON.stringify(kind)}.`);
+}
+
+function parseHooks(
+  value: unknown,
+  bad: (why: string) => CliUsageError,
+): SmeltConfigHooks | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw bad(`"hooks" must be an object like {"thresholdBytes":8192,"enforcement":"deny"}.`);
+  }
+  const fields = value as Record<string, unknown>;
+  const extra = Object.keys(fields).filter(
+    (key) => key !== 'thresholdBytes' && key !== 'enforcement',
+  );
+  if (extra.length > 0) {
+    throw bad(
+      `"hooks" takes only "thresholdBytes" and "enforcement", ` +
+        `got ${extra.map((k) => `"${k}"`).join(', ')}.`,
+    );
+  }
+  const threshold = fields['thresholdBytes'];
+  if (
+    threshold !== undefined &&
+    (typeof threshold !== 'number' || !Number.isInteger(threshold) || threshold <= 0)
+  ) {
+    throw bad(`"hooks".thresholdBytes must be a whole number of bytes greater than zero.`);
+  }
+  const enforcement = fields['enforcement'];
+  if (
+    enforcement !== undefined &&
+    !(ENFORCEMENT_MODES as readonly unknown[]).includes(enforcement)
+  ) {
+    throw bad(
+      `"hooks".enforcement must be ${ENFORCEMENT_MODES.map((m) => `"${m}"`).join(' or ')}, ` +
+        `got ${JSON.stringify(enforcement)}.`,
+    );
+  }
+  return {
+    ...(threshold === undefined ? {} : { thresholdBytes: threshold as number }),
+    ...(enforcement === undefined ? {} : { enforcement: enforcement as EnforcementMode }),
+  };
 }
 
 /** `store.path` is relative to the config file, so the config works from any cwd. */
