@@ -68,6 +68,7 @@
     "web-tree-sitter": "~0.25.10"
   },
   "devDependencies": {
+    "@smelt/guard-kit": "workspace:*",
     "@types/node": "^26.4.0",
     "tree-sitter-wasms": "^0.1.13",
     "typescript": "^7.0.2",
