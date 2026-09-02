@@ -148,7 +148,9 @@ here: the runner verifies any count the docs do state and fails on drift.
 1. Import the library through `@guard/…` rather than a relative path, so the alias in
    the owning package's `vitest.config.ts` can be redirected at a broken copy. If your
    guard reads a _committed artefact_ rather than source, read it through `guardRoot()`
-   from `test/guards/_source.ts` so it can be redirected too.
+   from `test/guards/_source.ts` so it can be redirected too. That file is the package's
+   anchor — it binds the shared helpers in `packages/guard-kit` (test-only, `private`,
+   never published) to this package's own root.
 2. Export the mutations **from the guard file itself**: `export const MUTATIONS:
 GuardMutation[] = […]` (the type lives in `test/guards/_mutations.ts`), each entry
    naming the exact source string to change and _why that break matters_ — beside the
@@ -321,6 +323,11 @@ Two independent assertions caught it — the import walk and the global scan —
 named the offending file. **Then the change was reverted and the guard went green again**
 (7 passed), which is the other half of the exercise: a check that fails on clean source
 is just as useless as one that passes on broken source.
+
+That transcript is a recording, not a template: it is left byte-for-byte as it printed.
+The walk has since moved into `packages/guard-kit` so both packages share it, which
+renamed two of those assertions and moved their line numbers — the two failures, and
+what they name, are unchanged.
 
 Note what the run _does not_ say: nothing about `example.invalid` being unreachable, no
 DNS error, no timeout. The guard is static. It fails on the _capability_, not on the
