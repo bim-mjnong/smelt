@@ -1,4 +1,13 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,7 +52,9 @@ import type { GuardMutation } from './_mutations.ts';
  *  5. **A corrupt cache entry is discarded loudly, never trusted.** Trusting one
  *     silently drops symbols from the map with no error anywhere.
  *  6. **The walk stays inside the root**: symlinks are never followed, binary files
- *     are skipped, the ignore list is honored.
+ *     are skipped, the ignore list is honored — and without a `cacheDir` the map
+ *     **writes nothing to disk at all**: the tree it reads stays byte-for-byte and
+ *     mtime-identical, and no file appears anywhere in it.
  *  7. **The `smelt map` report tells the truth.** The stderr "bytes used" figure is
  *     the byte count of what actually landed on stdout, read off the RepoMap —
  *     never a second tally, never the budget dressed up as a measurement.
@@ -229,6 +240,63 @@ describe('Slice 7 — the repo map keeps its claims', () => {
     expect(names).toContain('insideTheRoot');
     expect(names, 'a symlink was followed out of the root').not.toContain('leakedSecretToken');
     expect(map.text).not.toContain('leakedSecretToken');
+  });
+
+  it('writes nothing to disk without a cacheDir — the tree it reads stays untouched', async () => {
+    // The help text promises "the map writes nothing to disk unless --cache names a
+    // directory". `cache === undefined` on the result is not that promise — it says
+    // no *counts* were kept, not that no bytes landed. So this pins the claim at the
+    // filesystem: every path, every byte, every mtime in the scanned tree identical
+    // before and after, and no file created anywhere in it.
+    const root = scratch('smelt-repomap-readonly-');
+    mkdirSync(join(root, 'lib'));
+    writeFileSync(
+      join(root, 'main.ts'),
+      "import { helper } from './lib/helper.ts';\n\nexport function entry(): number {\n  return helper();\n}\n",
+    );
+    writeFileSync(
+      join(root, 'lib', 'helper.ts'),
+      'export function helper(): number {\n  return 41;\n}\n',
+    );
+
+    interface TreeRecord {
+      readonly path: string;
+      readonly kind: 'dir' | 'file';
+      readonly mtimeMs: number;
+      readonly content?: string;
+    }
+    const snapshotTree = (dir: string, prefix = ''): TreeRecord[] => {
+      const records: TreeRecord[] = [];
+      for (const entry of readdirSync(dir).toSorted()) {
+        const full = join(dir, entry);
+        const rel = prefix === '' ? entry : `${prefix}/${entry}`;
+        const stat = statSync(full);
+        if (stat.isDirectory()) {
+          records.push({ path: rel, kind: 'dir', mtimeMs: stat.mtimeMs });
+          records.push(...snapshotTree(full, rel));
+        } else {
+          records.push({
+            path: rel,
+            kind: 'file',
+            mtimeMs: stat.mtimeMs,
+            content: readFileSync(full, 'utf8'),
+          });
+        }
+      }
+      return records;
+    };
+
+    const before = snapshotTree(root);
+    const map = await buildRepoMap({ root, budgetBytes: BUDGET });
+    expect(
+      map.entries.length,
+      'nothing mapped — the untouched-tree check is vacuous',
+    ).toBeGreaterThan(0);
+    expect(map.cache).toBeUndefined();
+    expect(
+      snapshotTree(root),
+      'the scanned tree changed — a file was created, rewritten or touched with no cacheDir given',
+    ).toEqual(before);
   });
 
   it('skips binary files and honors the caller-supplied ignore list', async () => {

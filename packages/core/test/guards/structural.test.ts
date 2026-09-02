@@ -243,6 +243,43 @@ describe('Slice 2 — the structural planner keeps its claims', () => {
     ).toBeLessThanOrEqual(result.inputBytes);
   });
 
+  it('prices a caller-supplied marker with its own rendering, end to end through createSmelter', async () => {
+    // The shipped custom-builder path: `createSmelter` must construct the
+    // MarkerPricing seam from `config.marker` — the exact builder applyPlan will
+    // render — so a builder whose marker outweighs any candidate cut makes every
+    // elision unprofitable and the plan honestly comes back empty. Priced from the
+    // ~105-byte default instead, the planner keeps planning cuts the real marker
+    // then outgrows: output bigger than input, no error anywhere.
+    const callOptions = {
+      language: 'typescript',
+      budgetBytes: 600,
+      focus: ['handleRequest'],
+    } as const;
+
+    // Control first, or the zero-elision assertion below would be vacuous.
+    const control = await createSmelter({ strategy: 'structural' }).smelt(
+      FUNCTIONS_TS,
+      callOptions,
+    );
+    expect(
+      control.elisions.length,
+      'the default marker elides nothing here — the expensive-builder case is vacuous',
+    ).toBeGreaterThan(0);
+
+    const banner = 'X'.repeat(8_192);
+    const smelter = createSmelter({
+      strategy: 'structural',
+      marker: ({ hash }) => `// ${banner} retrieve("${hash}")`,
+    });
+    const result = await smelter.smelt(FUNCTIONS_TS, callOptions);
+    expect(
+      result.elisions,
+      'an elision was planned although the configured marker costs more than any cut',
+    ).toEqual([]);
+    expect(result.text).toBe(FUNCTIONS_TS);
+    expect(result.outputBytes).toBe(result.inputBytes);
+  });
+
   it('labels every plan it does produce as its own', async () => {
     const plan = await structuralPlan(FUNCTIONS_TS, ['handleRequest']);
     expect(plan.planner).toBe(STRUCTURAL_PLANNER_ID);
@@ -687,6 +724,13 @@ export const MUTATIONS: GuardMutation[] = [
       '      ),',
     replace: '    costBytes: () => 8,',
     why: 'the MarkerPricing seam answering a constant instead of rendering the real marker — every planner now believes a ~105-byte marker costs 8 bytes, plans cuts the marker outweighs, and the output grows with no error anywhere',
+  },
+  {
+    id: 'smelter-pricing-ignores-custom-marker',
+    file: 'index.ts',
+    find: '        pricing: markerPricing(language, config.marker),',
+    replace: '        pricing: markerPricing(language),',
+    why: "createSmelter pricing built without config.marker — the planner prices the ~105-byte default while applyPlan renders the caller's far larger marker, so cuts the real marker outweighs get planned and the shipped custom-builder path grows its output with no error anywhere",
   },
   {
     id: 'structural-explanation-loses-kind',
