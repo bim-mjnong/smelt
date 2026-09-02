@@ -146,7 +146,7 @@ export {
   budgetFault,
   budgetMalformed,
   budgetRequired,
-  BUILT_IN_STRATEGY,
+  DEFAULT_STRATEGY,
   mapTree,
   openStore,
   readBlob,

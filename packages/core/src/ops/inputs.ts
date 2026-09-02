@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 
 import type { ConfiguredStore } from '../cli/config.ts';
+import { DEFAULT_STRATEGY } from '../plan/planners.ts';
 import type { Strategy } from '../plan/planners.ts';
 import { MemoryElisionStore } from '../store.ts';
 import { DirectoryElisionStore } from '../store-dir.ts';
@@ -117,8 +118,13 @@ export function budgetMalformed(fault: BudgetFault, knob: string, got: unknown):
     : `${knob} must be greater than zero, got ${JSON.stringify(got)}.`;
 }
 
-/** The strategy a run falls back to when neither the caller nor a config names one. */
-export const BUILT_IN_STRATEGY: Strategy = 'lexical';
+/**
+ * The strategy a run falls back to when neither the caller nor a config names one.
+ *
+ * Re-exported rather than restated: {@link DEFAULT_STRATEGY} is the planner registry's
+ * own fact, and a second spelling here would be the fork this seam exists to close.
+ */
+export { DEFAULT_STRATEGY } from '../plan/planners.ts';
 
 /** Where a resolved strategy came from — the receipt {@link resolveStrategy} returns. */
 export type StrategySource = 'flag' | 'config' | 'builtin';
@@ -147,7 +153,7 @@ export function resolveStrategy(
 ): ResolvedStrategy {
   if (chosen !== undefined) return { strategy: chosen, source: 'flag' };
   if (configured !== undefined) return { strategy: configured, source: 'config' };
-  return { strategy: BUILT_IN_STRATEGY, source: 'builtin' };
+  return { strategy: DEFAULT_STRATEGY, source: 'builtin' };
 }
 
 /**

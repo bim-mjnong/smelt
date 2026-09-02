@@ -1,5 +1,6 @@
 import { CliUsageError } from '../../errors.ts';
-import { DirectoryElisionStore } from '../../store-dir.ts';
+import { openStore } from '../../ops/inputs.ts';
+import { retrieveBytes } from '../../ops/verbs.ts';
 import { CONFIG_FILE_NAME, configuredStore } from '../config.ts';
 import type { LoadedConfig } from '../config.ts';
 import { CLI_NAME, EXIT } from '../shell.ts';
@@ -103,8 +104,8 @@ export const retrieveCommand: Subcommand<RetrieveInvocation, ResolvedRetrieveRun
   },
 
   run(resolved: ResolvedRetrieveRun, io: CliIo): number {
-    const store = new DirectoryElisionStore(resolved.store.storePath);
-    io.stdout(store.retrieve(resolved.hash));
+    const store = openStore({ kind: 'directory', path: resolved.store.storePath });
+    io.stdout(retrieveBytes({ store, hash: resolved.hash }));
     return EXIT.ok;
   },
 };
@@ -118,6 +119,16 @@ export const retrieveCommand: Subcommand<RetrieveInvocation, ResolvedRetrieveRun
  * `UnknownHashError` or all-zero stats instead would be the quiet wrong answer this
  * project refuses everywhere: the hash *was* elided, the counters *did* move — in a
  * store that no longer exists.
+ *
+ * **This is a policy, not a law, which is why it stays here and is not exported.** The
+ * shared half — a config's store decision (`configuredStore`) and opening it
+ * (`openStore` in `ops/inputs.ts`) — is what every consumer needs and now what every
+ * consumer imports. This function is the CLI's ruling *on top of* that decision, and
+ * the MCP server deliberately rules the other way: it accepts a memory store, serves
+ * the whole session from it, and says how to get persistence at the moment an unknown
+ * hash makes the difference visible. Exporting this would offer that server the CLI's
+ * refusal wearing the name of a shared law — the fork this seam exists to end, running
+ * in the other direction.
  *
  * @throws {CliUsageError} when no config exists, or the configured store is memory.
  */

@@ -1,14 +1,11 @@
-import { readFileSync } from 'node:fs';
-
 import { reconstruct } from '../../apply.ts';
 import { SUPPORTED_LANGUAGES } from '../../detect.ts';
 import { CliUsageError, SmeltError } from '../../errors.ts';
-import { createSmelter } from '../../smelter.ts';
-import type { SmeltCallOptions } from '../../smelter.ts';
-import { DEFAULT_STRATEGY, isStrategy, STRATEGIES } from '../../plan/planners.ts';
+import { budgetRequired, openStore, readBlob, resolveStrategy } from '../../ops/inputs.ts';
+import { smeltBlob } from '../../ops/verbs.ts';
+import { isStrategy, STRATEGIES } from '../../plan/planners.ts';
 import type { Strategy } from '../../plan/planners.ts';
 import { MemoryElisionStore } from '../../store.ts';
-import { DirectoryElisionStore } from '../../store-dir.ts';
 import type { DetectedLanguage, ElisionStore, SmeltResult } from '../../types.ts';
 import { CONFIG_FILE_NAME, configuredStore } from '../config.ts';
 import type { ConfiguredStore, LoadedConfig } from '../config.ts';
@@ -198,26 +195,25 @@ export function resolveRun(
   const budgetBytes = invocation.budgetBytes ?? config?.config.defaultBudgetBytes;
   if (budgetBytes === undefined) {
     throw new CliUsageError(
-      `${CLI_NAME}: --budget is required, in UTF-8 bytes. There is no default, because ` +
-        `a budget smelt invented would silently decide how much of your context to ` +
-        `throw away. Pass --budget, or set defaultBudgetBytes in ${CONFIG_FILE_NAME} ` +
-        `(\`${CLI_NAME} init\` writes one).\n` +
-        `  ${CLI_NAME} src/server.ts --budget 4000 --focus handleRequest`,
+      `${CLI_NAME}: ` +
+        budgetRequired({
+          knob: '--budget',
+          stake: 'your context to throw away',
+          advice:
+            `Pass --budget, or set defaultBudgetBytes in ${CONFIG_FILE_NAME} ` +
+            `(\`${CLI_NAME} init\` writes one).\n` +
+            `  ${CLI_NAME} src/server.ts --budget 4000 --focus handleRequest`,
+        }),
     );
   }
 
-  const strategy = invocation.strategy ?? config?.config.strategy ?? DEFAULT_STRATEGY;
+  const strategy = resolveStrategy(invocation.strategy, config?.config.strategy);
 
   return {
     budgetBytes,
     budgetSource: invocation.budgetBytes !== undefined ? 'flag' : 'config',
-    strategy,
-    strategySource:
-      invocation.strategy !== undefined
-        ? 'flag'
-        : config?.config.strategy !== undefined
-          ? 'config'
-          : 'builtin',
+    strategy: strategy.strategy,
+    strategySource: strategy.source,
     store: configuredStore(config),
     ...(invocation.file === undefined ? {} : { file: invocation.file }),
     focus: invocation.focus,
@@ -227,48 +223,37 @@ export function resolveRun(
 }
 
 /**
- * One smelt run, executed straight-line over a {@link ResolvedRun}.
+ * One smelt run: read the input, hand the resolved values to {@link smeltBlob}, render.
  *
  * All merging — flags versus `smelt.config.json` versus built-ins, including the
  * budget-required refusal — happens in {@link resolveRun}, which is the only place
  * precedence lives. This function reads the resolved object and never consults a flag
- * or a config field directly.
+ * or a config field directly. The cut itself belongs to no front door: `smeltBlob` in
+ * `ops/verbs.ts` builds the smelter and returns the values this function prints, and
+ * the `smelt_file` tool calls the same op with its own arguments.
  */
 async function runSmelt(run: ResolvedRun, io: CliIo): Promise<number> {
   const inputText = readInput(run.file, io);
-  const source = run.file ?? '<stdin>';
 
-  const store = storeFor(run);
-  const smelter = createSmelter({
-    strategy: run.strategy,
-    ...(store === undefined ? {} : { store }),
-  });
-  const options: SmeltCallOptions = {
+  const outcome = await smeltBlob({
+    text: inputText,
+    source: run.file ?? '<stdin>',
     budgetBytes: run.budgetBytes,
+    strategy: run.strategy,
+    store: openStore(run.store),
     ...(run.file === undefined ? {} : { path: run.file }),
     ...(run.language === undefined ? {} : { language: run.language }),
-    ...(run.focus.length === 0 ? {} : { focus: run.focus }),
-  };
-  const result = await smelter.smelt(inputText, options);
+    focus: run.focus,
+  });
 
   if (run.json) {
-    io.stdout(`${JSON.stringify(envelope(result, smelter.store), null, 2)}\n`);
+    io.stdout(`${JSON.stringify(envelope(outcome.result, outcome.store), null, 2)}\n`);
   } else {
-    io.stdout(result.text);
+    io.stdout(outcome.result.text);
   }
-  io.stderr(formatReport({ result, source, budgetBytes: run.budgetBytes, inputText }));
+  io.stderr(formatReport(outcome));
 
-  return result.outputBytes > run.budgetBytes ? EXIT.overBudget : EXIT.ok;
-}
-
-/**
- * Construct the store a {@link ResolvedRun} decided on, or `undefined` for the
- * library's own default (a fresh in-memory store). Pure construction — the decision,
- * including path resolution, was already made in {@link resolveRun}.
- */
-function storeFor(run: ResolvedRun): ElisionStore | undefined {
-  if (run.store.kind === 'memory') return undefined;
-  return new DirectoryElisionStore(run.store.path);
+  return outcome.result.outputBytes > run.budgetBytes ? EXIT.overBudget : EXIT.ok;
 }
 
 /**
@@ -391,16 +376,16 @@ function parseEnvelope(text: string): CliJsonEnvelope {
   };
 }
 
+/**
+ * The blob to work on: stdin when no file was named, otherwise the file — read
+ * through the ops law, so "cannot read X" says the same thing here and in the
+ * `smelt_file` tool. Only the stdin leg is the CLI's own; a tool has no stdin.
+ */
 function readInput(file: string | undefined, io: CliIo): string {
   if (file === undefined) return io.stdin();
-  try {
-    return readFileSync(file, 'utf8');
-  } catch (cause) {
-    throw new CliUsageError(
-      `${CLI_NAME}: cannot read "${file}": ` +
-        `${cause instanceof Error ? cause.message : String(cause)}`,
-    );
-  }
+  const read = readBlob(file, file);
+  if (!read.ok) throw new CliUsageError(`${CLI_NAME}: ${read.refusal}`);
+  return read.value;
 }
 
 function parseLanguage(raw: string): DetectedLanguage {

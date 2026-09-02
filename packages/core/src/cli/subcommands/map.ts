@@ -1,7 +1,6 @@
-import { statSync } from 'node:fs';
-
 import { CliUsageError } from '../../errors.ts';
-import { buildRepoMap } from '../../repomap/map.ts';
+import { budgetRequired, readTree } from '../../ops/inputs.ts';
+import { mapTree } from '../../ops/verbs.ts';
 import type { RepoMap } from '../../repomap/map.ts';
 import { CONFIG_FILE_NAME } from '../config.ts';
 import type { LoadedConfig } from '../config.ts';
@@ -160,11 +159,15 @@ export function resolveMapRun(
   const budgetBytes = invocation.budgetBytes ?? config?.config.defaultBudgetBytes;
   if (budgetBytes === undefined) {
     throw new CliUsageError(
-      `${CLI_NAME}: --budget is required, in UTF-8 bytes. There is no default, because ` +
-        `a budget ${CLI_NAME} invented would silently decide how much of the map to ` +
-        `leave out. Pass --budget, or set defaultBudgetBytes in ${CONFIG_FILE_NAME} ` +
-        `(\`${CLI_NAME} init\` writes one).\n` +
-        `  ${CLI_NAME} map src --budget 4000 --focus handleRequest`,
+      `${CLI_NAME}: ` +
+        budgetRequired({
+          knob: '--budget',
+          stake: 'the map to leave out',
+          advice:
+            `Pass --budget, or set defaultBudgetBytes in ${CONFIG_FILE_NAME} ` +
+            `(\`${CLI_NAME} init\` writes one).\n` +
+            `  ${CLI_NAME} map src --budget 4000 --focus handleRequest`,
+        }),
     );
   }
 
@@ -180,16 +183,24 @@ export function resolveMapRun(
 }
 
 /**
- * One `smelt map` run, executed straight-line over a {@link ResolvedMapRun} the same
- * way the smelt verb executes its {@link ResolvedRun} — the merge, including the
- * budget-required refusal, lives in {@link resolveMapRun}.
+ * One `smelt map` run: prove the target is a tree, hand it to {@link mapTree}, render.
+ *
+ * The merge, including the budget-required refusal, lives in {@link resolveMapRun} —
+ * the same arrangement the smelt verb uses over its {@link ResolvedRun}. The walk
+ * itself belongs to no front door: the `repo_map` tool calls the same op, and refuses
+ * a file with the same sentence in its own vocabulary.
  */
 async function runMap(run: ResolvedMapRun, io: CliIo): Promise<number> {
-  assertDirectory(run.dir);
-  const map = await buildRepoMap({
-    root: run.dir,
+  const tree = readTree(run.dir, run.dir, {
+    tree: 'map',
+    file: `\`${CLI_NAME} <file>\``,
+  });
+  if (!tree.ok) throw new CliUsageError(`${CLI_NAME}: ${tree.refusal}`);
+
+  const map = await mapTree({
+    root: tree.value,
     budgetBytes: run.budgetBytes,
-    ...(run.focus.length === 0 ? {} : { focus: run.focus }),
+    focus: run.focus,
     ...(run.ignore === undefined ? {} : { ignore: run.ignore }),
     ...(run.cacheDir === undefined ? {} : { cacheDir: run.cacheDir }),
   });
@@ -203,23 +214,4 @@ async function runMap(run: ResolvedMapRun, io: CliIo): Promise<number> {
   io.stderr(formatMapReport({ map, source: run.dir, budgetSource: run.budgetSource }));
 
   return EXIT.ok;
-}
-
-/** A directory the walk can start from, or a usage error naming what is wrong. */
-function assertDirectory(dir: string): void {
-  let isDirectory: boolean;
-  try {
-    isDirectory = statSync(dir).isDirectory();
-  } catch (cause) {
-    throw new CliUsageError(
-      `${CLI_NAME}: cannot read directory "${dir}": ` +
-        `${cause instanceof Error ? cause.message : String(cause)}`,
-    );
-  }
-  if (!isDirectory) {
-    throw new CliUsageError(
-      `${CLI_NAME}: "${dir}" is not a directory. map reads a whole tree; for one ` +
-        `file, use \`${CLI_NAME} <file>\`.`,
-    );
-  }
 }
