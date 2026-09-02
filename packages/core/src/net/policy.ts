@@ -41,13 +41,20 @@ export const FORBIDDEN_PACKAGES: readonly string[] = [
   'eventsource',
 ];
 
-/** Globals that reach the network without an import. Grepped for by the guard. */
+/**
+ * Globals that reach the network without an import. Grepped for by the guard — both
+ * bare (`fetch(…)`) and qualified through a global object (`globalThis.fetch(…)`),
+ * which is why `globalThis` and `global` are themselves on the list: an access
+ * routed through the global object is the escape hatch around a bare-name grep.
+ */
 export const FORBIDDEN_GLOBALS: readonly string[] = [
   'fetch',
   'XMLHttpRequest',
   'WebSocket',
   'EventSource',
   'navigator',
+  'globalThis',
+  'global',
 ];
 
 /**
@@ -70,6 +77,7 @@ export const ALLOWED_NODE_BUILTINS: readonly string[] = [
   'node:util', // parseArgs, for the CLI. Argument parsing with zero dependencies.
   'node:process', // argv, stdin/stdout/stderr and the exit code, for the CLI
   'node:readline/promises', // line-by-line answers for `smelt init` — reads streams it is handed, opens nothing
+  'node:tty', // isatty(0) for the CLI's TTY check — a plain syscall, no stream, no socket
 ];
 
 /** Third-party packages any smelt module may import. Keep this list boring and short. */
