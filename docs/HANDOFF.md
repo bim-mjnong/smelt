@@ -12,7 +12,7 @@ versus what is yours to build, and the order to build it in.
 (Slice 1, plus `smelt init` and `smelt.config.json`), the structural planner for
 fifteen languages (Slices 2, 4 and 4b), the measurement harness (Slice 3 — tiers 1
 and 2 runnable, tier 3 built but deliberately not run), the persistent store
-(Slice 5), cache-prefix hygiene (Slice 6) and the repo-map planner (Slice 7).
+(Slice 5), cache-prefix hygiene (Slice 6) and the repo map (Slice 7).
 Nothing has been published to npm; publishing is a founder action. The eight
 questions this document used to end with are answered, in "Decisions the founder has
 made" below.
@@ -198,7 +198,7 @@ a failed grammar load throws `GrammarUnavailableError`, because output labelled
   once and commits its log. Until then the only numbers smelt owns are tier-1
   bytes and elision counts.
 - Cross-file reasoning inside `smelt()` itself. The repo map (**Slice 7**, shipped)
-  covers the whole-tree shape as its own planner, but `smelt()` still sees one
+  covers the whole-tree shape as its own surface, but `smelt()` still sees one
   blob at a time.
 
 ---
@@ -479,7 +479,7 @@ Anthropic's docs and the date they were verified. Guarded by
 - [x] Warnings only. No automatic rewriting of anybody's prompt — an optimizer that silently edits a prefix to help a cache is exactly the class of magic this library refuses. `detectCacheBreakers()` names each silent breaker (system-prompt timestamps and UUIDs, unsorted JSON keys, a tool set that varies between calls) with the `ElisionReason`-style rule id + explanation pair; the guard asserts on frozen inputs that nothing is ever mutated or "fixed".
 - [x] No claim about cache hit rates anywhere. See Law 4; this is the specific claim that was wrong in the original pitch. The guard scans every source file for the phrase and a mutation proves the scan can go red.
 
-### Slice 7 — the repo-map planner (cross-file) — **SHIPPED**
+### Slice 7 — the repo map (cross-file) — **SHIPPED**
 
 smelt sees one blob. Aider's repo-map is the proven prior art for the other shape: whole
 repository, tree-sitter tags, PageRank over the reference graph, a token budget, and a

@@ -102,6 +102,12 @@ export interface MapReportInput {
   readonly map: RepoMap;
   /** The directory named on the command line, exactly as the user wrote it. */
   readonly source: string;
+  /**
+   * Where the budget came from — the `ResolvedMapRun.budgetSource` receipt, printed
+   * beside the budget so a surprising number can be traced to the flag or the config
+   * file that set it without re-deriving the precedence by hand.
+   */
+  readonly budgetSource: 'flag' | 'config';
 }
 
 /**
@@ -113,7 +119,7 @@ export interface MapReportInput {
  * `test/guards/repo-map.test.ts` asserts the printed figure equals the actual byte
  * length of what landed on stdout, and a mutation proves the assertion can go red.
  */
-export function formatMapReport({ map, source }: MapReportInput): string {
+export function formatMapReport({ map, source, budgetSource }: MapReportInput): string {
   const lines: string[] = [];
 
   lines.push([`${CLI_NAME} map`, source, map.id].join('  '));
@@ -129,8 +135,8 @@ export function formatMapReport({ map, source }: MapReportInput): string {
         : ` + ${group(map.pathOnly.length)} of ${group(map.pathOnlyTotal)} path-only files`),
   );
   lines.push(
-    `bytes used ${group(map.outputBytes)} of ${group(map.budgetBytes)} budget — the map ` +
-      `fits itself to the budget by construction, so there is no over-budget exit`,
+    `bytes used ${group(map.outputBytes)} of ${group(map.budgetBytes)} budget (${budgetSource}) ` +
+      `— the map fits itself to the budget by construction, so there is no over-budget exit`,
   );
 
   if (map.cache !== undefined) {

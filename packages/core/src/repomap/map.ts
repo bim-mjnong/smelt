@@ -105,8 +105,8 @@ export interface RepoMapOptions {
    */
   readonly ignore?: readonly string[];
   /**
-   * Directory for the tags cache. **Only** when this is passed does anything touch
-   * disk — smelt never writes outside a store or cache it was explicitly handed.
+   * Directory for the tags cache. **Only** when this is passed is anything written
+   * to disk — smelt never writes outside a store or cache it was explicitly handed.
    */
   readonly cacheDir?: string;
 }

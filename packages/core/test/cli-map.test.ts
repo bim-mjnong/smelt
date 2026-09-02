@@ -11,7 +11,7 @@ import { CLI_MAP_JSON_FORMAT, cliUsage, EXIT, runCli } from '../src/cli/run.ts';
 import type { CliIo } from '../src/cli/run.ts';
 
 /**
- * `smelt map` — the repo-map planner's front door, end to end and in-process (the
+ * `smelt map` — the repo map's front door, end to end and in-process (the
  * `runCli` pattern from `test/cli.test.ts`). The report-honesty half — the stderr
  * figures matching what actually landed on stdout — lives in
  * `test/guards/repo-map.test.ts`, where a mutation proves it can go red; this file
@@ -63,6 +63,9 @@ describe('smelt map renders the ranked symbol map', () => {
     expect(stderr).toContain('files scanned');
     expect(stderr).toContain('symbols ranked');
     expect(stderr).toMatch(/bytes used [\d,]+ of [\d,]+ budget/);
+    // The budget line carries its provenance — the ResolvedMapRun.budgetSource
+    // receipt — so a surprising budget is traceable without re-deriving precedence.
+    expect(stderr).toContain('budget (flag)');
   });
 
   it('matches the committed snapshot on the fixture repo, so a map change is a reviewable diff', async () => {
@@ -127,7 +130,7 @@ describe('smelt map renders the ranked symbol map', () => {
     expect(stdout).toContain('readSettings');
   });
 
-  it('touches disk only through --cache, and reports the counts', async () => {
+  it('writes to disk only through --cache, and reports the counts', async () => {
     const cacheDir = join(dir, 'tags-cache');
     const cold = await run(['map', fixtureRoot, '--budget', '10000', '--cache', cacheDir]);
     expect(cold.stderr).toMatch(/cache {2}0 hits, [\d,]+ misses, 0 discarded/);
@@ -148,16 +151,17 @@ describe('smelt map owns its errors the way every mode does', () => {
     expect(stderr).toMatch(/how much of the map to leave out/);
   });
 
-  it('takes the budget from smelt.config.json when the flag is absent', async () => {
+  it('takes the budget from smelt.config.json when the flag is absent — and says so', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'smelt-map-config-'));
     try {
       writeFileSync(
         join(cwd, 'smelt.config.json'),
         `${JSON.stringify({ smeltConfig: 1, defaultBudgetBytes: 10_000 })}\n`,
       );
-      const { code, stdout } = await run(['map', fixtureRoot], cwd);
+      const { code, stdout, stderr } = await run(['map', fixtureRoot], cwd);
       expect(code).toBe(EXIT.ok);
       expect(stdout).toContain('readSettings');
+      expect(stderr).toContain('budget (config)');
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
