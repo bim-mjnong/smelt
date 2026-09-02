@@ -158,6 +158,75 @@ describe('detectCacheBreakers', () => {
     expect(warnings[0]!.explanation).toContain('same tools, different order');
   });
 
+  it('detects a definition change under an unchanged name — content, not names', () => {
+    const edited = { ...cleanTool, description: 'returns the exact elided bytes' };
+    const warnings = detectCacheBreakers({ tools: [edited] }, { tools: [cleanTool] });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.rule).toBe(CACHE_BREAKER_RULES.toolSetVaries);
+    expect(warnings[0]!.explanation).toContain('definition of "smelt_retrieve" changed');
+    expect(warnings[0]!.explanation).toContain('name unchanged');
+  });
+
+  it('compares content canonically — key enumeration order alone is not a change', () => {
+    // Same content, keys written in a different order: the canonical comparison
+    // must treat these as equal. Whether either call's own keys are unsorted is
+    // unsorted-json-keys' concern, checked per call, not a tool-set change.
+    const sortedKeys = { description: 'finds things', name: 'search' };
+    const sameContent = { name: 'search', description: 'finds things' };
+    const warnings = detectCacheBreakers({ tools: [sameContent] }, { tools: [sortedKeys] });
+    expect(warnings.map((w) => w.rule)).not.toContain(CACHE_BREAKER_RULES.toolSetVaries);
+  });
+
+  it('describes a removed duplicate truthfully, never as "same tools, different order"', () => {
+    const warnings = detectCacheBreakers({ tools: [cleanTool] }, { tools: [cleanTool, cleanTool] });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.rule).toBe(CACHE_BREAKER_RULES.toolSetVaries);
+    expect(warnings[0]!.explanation).toContain('removed a duplicate of "smelt_retrieve"');
+    expect(warnings[0]!.explanation).not.toContain('different order');
+  });
+
+  it('describes an added duplicate truthfully', () => {
+    const warnings = detectCacheBreakers({ tools: [cleanTool, cleanTool] }, { tools: [cleanTool] });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.explanation).toContain('added a duplicate of "smelt_retrieve"');
+  });
+
+  it('states the serialization order from the cited constant, not a hardcoded string', () => {
+    const warnings = detectCacheBreakers({ tools: [] }, { tools: [cleanTool] });
+    expect(warnings[0]!.explanation).toContain(
+      ANTHROPIC_PROMPT_CACHE_FACTS.prefixOrder.join(' → '),
+    );
+  });
+
+  it('does not flag integer-like keys, whose order JavaScript fixes numerically', () => {
+    // {"2": …, "10": …} enumerates as "2","10" no matter how it is written — no
+    // serializer can emit these differently between calls, and "2" > "10"
+    // lexicographically, so a naive sorted-order check would flag an order the
+    // caller cannot change.
+    const warnings = detectCacheBreakers({
+      tools: [{ input_schema: { 10: 'ten', 2: 'two' }, name: 'lookup' }],
+    });
+    expect(warnings).toEqual([]);
+  });
+
+  it('still flags unsorted string keys sitting after integer-like keys', () => {
+    const warnings = detectCacheBreakers({
+      tools: [{ input_schema: { 10: 'ten', 2: 'two', b: 1, a: 2 }, name: 'lookup' }],
+    });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.rule).toBe(CACHE_BREAKER_RULES.unsortedJsonKeys);
+    expect(warnings[0]!.explanation).toContain('"b" before "a"');
+  });
+
+  it('still recurses into values held under integer-like keys', () => {
+    const warnings = detectCacheBreakers({
+      tools: [{ input_schema: { 1: { b: 1, a: 2 } }, name: 'lookup' }],
+    });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.rule).toBe(CACHE_BREAKER_RULES.unsortedJsonKeys);
+    expect(warnings[0]!.explanation).toContain('input_schema.1');
+  });
+
   it('emits no tool-set warning without a previous call to compare against', () => {
     const warnings = detectCacheBreakers({ tools: [cleanTool] });
     expect(warnings).toEqual([]);

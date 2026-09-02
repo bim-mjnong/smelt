@@ -65,6 +65,12 @@ export interface CacheWarning {
   readonly explanation: string;
 }
 
+/**
+ * The provider's serialization order, rendered as prose from the cited constant
+ * above — so the sentence in a warning can never drift from the fact it cites.
+ */
+const PREFIX_ORDER_PROSE = ANTHROPIC_PROMPT_CACHE_FACTS.prefixOrder.join(' → ');
+
 /** The stable rule ids this module can emit. Additive over time, never renamed. */
 export const CACHE_BREAKER_RULES = {
   /** A timestamp-shaped value in the system prompt. */
@@ -219,6 +225,13 @@ interface UnsortedKeys {
   readonly after: string;
 }
 
+/**
+ * Keys that JavaScript treats as array indices. Their enumeration position is
+ * fixed by the language (ascending numeric, ahead of every string key), so they
+ * are not "reorderable" in any sense a serializer could act on.
+ */
+const INTEGER_LIKE_KEY = /^(?:0|[1-9]\d*)$/;
+
 /** The first object (depth-first) whose own keys are not in sorted order. Read-only walk. */
 function findUnsortedKeys(value: unknown, path: string): UnsortedKeys | undefined {
   if (Array.isArray(value)) {
@@ -231,8 +244,17 @@ function findUnsortedKeys(value: unknown, path: string): UnsortedKeys | undefine
   if (typeof value !== 'object' || value === null) return undefined;
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record);
-  for (let i = 1; i < keys.length; i += 1) {
-    if (keys[i - 1]! > keys[i]!) return { path, before: keys[i - 1]!, after: keys[i]! };
+  // Array-index-like keys are excluded from the order check: JavaScript enumerates
+  // them first, in ascending numeric order, regardless of how they were written or
+  // inserted — so no serializer walking the object can emit them differently
+  // between calls, and their fixed numeric order ("2" before "10") is exactly what
+  // a lexicographic check would flag. A warning about an order the caller cannot
+  // change would be a warning nobody can act on.
+  const reorderable = keys.filter((key) => !INTEGER_LIKE_KEY.test(key));
+  for (let i = 1; i < reorderable.length; i += 1) {
+    if (reorderable[i - 1]! > reorderable[i]!) {
+      return { path, before: reorderable[i - 1]!, after: reorderable[i]! };
+    }
   }
   for (const key of keys) {
     const found = findUnsortedKeys(record[key], `${path}.${key}`);
@@ -262,29 +284,110 @@ function scanToolKeyOrder(tools: readonly PromptTool[]): readonly CacheWarning[]
 const quoteNames = (names: readonly string[]): string =>
   names.map((name) => `"${name}"`).join(', ');
 
+/**
+ * Stable canonical serialization of one value, for comparing tool definitions
+ * between calls the way the cache experiences them: by content. Keys are sorted at
+ * every depth, so the comparison is independent of enumeration order — an
+ * *ordering* a serializer might vary is `unsorted-json-keys`' concern — while any
+ * content change at all (a description edit, a schema tweak, a new field) compares
+ * different even when every tool name is unchanged.
+ */
+function canonicalize(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalize(item)).join(',')}]`;
+  if (typeof value === 'object' && value !== null) {
+    const record = value as Record<string, unknown>;
+    const body = Object.keys(record)
+      .toSorted()
+      .map((key) => `${JSON.stringify(key)}:${canonicalize(record[key])}`)
+      .join(',');
+    return `{${body}}`;
+  }
+  return JSON.stringify(value) ?? 'undefined';
+}
+
+/** How many times each tool name appears — duplicates are counted, not collapsed. */
+function countByName(tools: readonly PromptTool[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const tool of tools) counts.set(tool.name, (counts.get(tool.name) ?? 0) + 1);
+  return counts;
+}
+
+/**
+ * Describe a count change for one name truthfully. When the name also exists on
+ * the other side, what changed is the number of copies — saying `added "x"` about
+ * a duplicate, or claiming "same tools" when a duplicate went away, would
+ * misstate what the cache saw.
+ */
+function describeCopies(name: string, delta: number, otherSideHasIt: boolean): string {
+  if (!otherSideHasIt) return delta === 1 ? `"${name}"` : `${String(delta)} copies of "${name}"`;
+  return delta === 1 ? `a duplicate of "${name}"` : `${String(delta)} duplicates of "${name}"`;
+}
+
 function compareToolSets(
   previous: readonly PromptTool[],
   current: readonly PromptTool[],
 ): CacheWarning | undefined {
-  const previousNames = previous.map((tool) => tool.name);
-  const currentNames = current.map((tool) => tool.name);
-  const sameOrder =
-    previousNames.length === currentNames.length &&
-    previousNames.every((name, i) => name === currentNames[i]);
-  if (sameOrder) return undefined;
+  // Content comparison, not name comparison: the cache matches serialized bytes,
+  // so a rewritten description under an unchanged name breaks it just as surely as
+  // a renamed tool does.
+  const previousCanonical = previous.map((tool) => canonicalize(tool));
+  const currentCanonical = current.map((tool) => canonicalize(tool));
+  const identical =
+    previousCanonical.length === currentCanonical.length &&
+    previousCanonical.every((tool, i) => tool === currentCanonical[i]);
+  if (identical) return undefined;
 
-  const added = currentNames.filter((name) => !previousNames.includes(name));
-  const removed = previousNames.filter((name) => !currentNames.includes(name));
+  const previousCounts = countByName(previous);
+  const currentCounts = countByName(current);
+  const added: string[] = [];
+  for (const [name, count] of currentCounts) {
+    const delta = count - (previousCounts.get(name) ?? 0);
+    if (delta > 0) added.push(describeCopies(name, delta, previousCounts.has(name)));
+  }
+  const removed: string[] = [];
+  for (const [name, count] of previousCounts) {
+    const delta = count - (currentCounts.get(name) ?? 0);
+    if (delta > 0) removed.push(describeCopies(name, delta, currentCounts.has(name)));
+  }
+
   const changes: string[] = [];
-  if (added.length > 0) changes.push(`added ${quoteNames(added)}`);
-  if (removed.length > 0) changes.push(`removed ${quoteNames(removed)}`);
-  if (changes.length === 0) changes.push('same tools, different order');
+  if (added.length > 0) changes.push(`added ${added.join(', ')}`);
+  if (removed.length > 0) changes.push(`removed ${removed.join(', ')}`);
+
+  if (changes.length === 0) {
+    // Every name appears the same number of times on both sides, so what differs
+    // is order, content, or both.
+    const sameNameOrder =
+      previous.length === current.length &&
+      previous.every((tool, i) => tool.name === current[i]!.name);
+    const sameContent =
+      previousCanonical.toSorted().join(' ') === currentCanonical.toSorted().join(' ');
+    if (!sameNameOrder) {
+      changes.push(
+        sameContent
+          ? 'same tools, different order'
+          : 'same tool names in a different order, with definitions changed',
+      );
+    } else {
+      const changed = [
+        ...new Set(
+          current
+            .filter((_tool, i) => currentCanonical[i] !== previousCanonical[i])
+            .map((tool) => tool.name),
+        ),
+      ];
+      const plural = changed.length === 1 ? '' : 's';
+      changes.push(
+        `definition${plural} of ${quoteNames(changed)} changed with the name${plural} unchanged`,
+      );
+    }
+  }
 
   return {
     rule: CACHE_BREAKER_RULES.toolSetVaries,
     explanation:
       `tool set changed between calls (${changes.join('; ')}); tools serialize first in ` +
-      `the cached prefix (tools → system → messages), so this invalidates the entire ` +
+      `the cached prefix (${PREFIX_ORDER_PROSE}), so this invalidates the entire ` +
       `cache including the system prompt and every message`,
   };
 }
@@ -297,7 +400,9 @@ function compareToolSets(
  * - `system-timestamp` — a timestamp-shaped value in the system prompt
  * - `system-uuid` — a UUID in the system prompt
  * - `unsorted-json-keys` — a tool-definition object whose keys are not sorted
- * - `tool-set-varies` — the tool set differs from the previous call's
+ * - `tool-set-varies` — the tools differ from the previous call's, by content:
+ *   an added, removed or duplicated tool, a reorder, or a definition rewritten
+ *   under an unchanged name
  *
  * Pure and read-only: inputs are never mutated, and the return value is warnings
  * only — never a corrected prompt. Deciding what to do about a warning is the
