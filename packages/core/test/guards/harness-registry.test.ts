@@ -10,6 +10,7 @@ import { DEFAULT_GUARD_SETTINGS } from '@guard/hooks/guard-core';
 import {
   renderShimDecision,
   REWRITE_ANNOUNCEMENT_JOIN,
+  DENIED_WITHOUT_REASON,
   REWRITE_ANNOUNCEMENT_OPENING,
   rewriteAnnouncement,
 } from '@guard/hooks/shim';
@@ -189,6 +190,10 @@ describe('one announcement — a rewrite says the same sentence everywhere it ca
     expect(plugin, 'the opencode plugin was not planned').toBeDefined();
     expect(plugin!.content).toContain(JSON.stringify(REWRITE_ANNOUNCEMENT_OPENING));
     expect(plugin!.content).toContain(JSON.stringify(REWRITE_ANNOUNCEMENT_JOIN));
+    // The reasonless deny is the plugin's other spliced sentence, and it drifts the
+    // same way: a hand-typed replacement reads correctly while saying something the
+    // shims never say.
+    expect(plugin!.content).toContain(JSON.stringify(DENIED_WITHOUT_REASON));
   });
 });
 
@@ -217,5 +222,12 @@ export const MUTATIONS: GuardMutation[] = [
     find: '        ${JSON.stringify(REWRITE_ANNOUNCEMENT_OPENING)} +',
     replace: "        'smelt guard: rewrote the command with ' +",
     why: 'the generated opencode plugin announcing a rewrite in words of its own — a fourth copy of the sentence, inside a JavaScript string template where nothing can see it drift from the three shims that print it',
+  },
+  {
+    id: 'harness-deny-fallback-hand-typed',
+    file: 'harness/opencode.ts',
+    find: '${JSON.stringify(DENIED_WITHOUT_REASON)}',
+    replace: "'blocked by smelt'",
+    why: 'the generated opencode plugin refusing in words of its own — the deny sentence spliced from the same constant the shims use, hand-typed instead, inside a template where nothing can see it drift',
   },
 ];
