@@ -81,7 +81,7 @@ working implementation with nothing to say, and someone will ship it.
 ```ts
 throw new NotImplementedError(
   'reranking',
-  'docs/ARCHITECTURE.md § "Explicitly out of v1" — implement `RerankStage` in your own ' +
+  'docs/ARCHITECTURE.md § "Explicitly out of scope" — implement `RerankStage` in your own ' +
     'code, with your own key, so the network call is visible in your source',
 );
 ```

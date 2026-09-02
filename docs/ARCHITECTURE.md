@@ -33,7 +33,7 @@ unless they understand why they are there.
 
 ### Law 1 — zero network
 
-**v1 makes no external calls. Code never leaves the machine.** Scoring is structural
+**smelt makes no external calls. Code never leaves the machine.** Scoring is structural
 (tree-sitter WASM) and lexical. Reranking exists as a _pluggable stage interface_ that a
 consumer wires its own key into — never a default, never bundled.
 
@@ -678,10 +678,10 @@ outside a store it was handed, or require a key.
 
 ---
 
-## Explicitly out of v1
+## Explicitly out of scope
 
 **The external reranker.** A hosted reranker would improve relevance and is exactly why
-`RerankStage` exists as an interface. It is out because a _default_ reranker breaks Law 1
+`RerankStage` exists as an interface. It is out of scope because a _default_ reranker breaks Law 1
 for every consumer at once, including the ones who never read the changelog. A consumer
 who wants one implements the interface in their own code, with their own key, so that the
 outbound call is visible in their own source and their own review. There is no
