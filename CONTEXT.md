@@ -71,3 +71,15 @@ codebase-design glossary.
   `SmelterConfig` wins over any strategy name.
 - **retrieveStats**: the one shared derivation of expansion-rate arithmetic from a
   store's raw counters; adapters supply counters, never derive the metric.
+- **RepoMap**: the ranked whole-tree symbol map `buildRepoMap` returns — deliberately
+  **not** an `ElisionPlan` and its builder deliberately not a Planner: nothing is
+  elided, stored, or reversible, so the Planner interface would claim laws the map
+  cannot honour. Its CLI front door is the `smelt map` subcommand, never a
+  `--strategy` name; the map fits itself to its byte budget by construction, so
+  `map` has no over-budget exit.
+- **ResolvedMapRun**: `smelt map`'s single merge of flags + config + built-ins
+  (`resolveMapRun` in `src/cli/resolve.ts`) — ResolvedRun's sibling, sharing the
+  module that owns precedence and the budget-required refusal, not the struct.
+- **Focus promotion** (repo map): a focus term moves matching symbols to the front
+  of the map's fill order with a `focus-match` receipt naming the term; the measured
+  rank and reference counts are never altered.

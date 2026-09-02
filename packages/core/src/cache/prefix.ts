@@ -1,6 +1,33 @@
 /**
  * Cache-prefix hygiene — Slice 6. **Detect and warn, never rewrite.**
  *
+ * **This module is a consumer-facing surface**, exported from the package
+ * entrypoint and stable in intent: hand it your prompt structure, get warnings
+ * back, decide for yourself. It composes with nothing else in smelt — no planner
+ * calls it, no store holds its output — because cache hygiene is a property of the
+ * *request* a consumer assembles, which smelt never sees or intercepts. Use it
+ * from your own send path:
+ *
+ * ```ts
+ * // Both functions come from the package entrypoint:
+ * //   detectCacheBreakers, findPrefixDivergence
+ *
+ * // Before sending: name the silent cache-breakers in what you are about to send.
+ * const warnings = detectCacheBreakers(
+ *   { tools, system },           // this call
+ *   { tools: previousTools },    // optional: the previous call, for tool-set drift
+ * );
+ * // → [{ rule: 'system-timestamp', explanation: 'system prompt contains …' }, …]
+ *
+ * // Between calls: where exactly did the cached prefix stop matching, and what
+ * // did the change cost? `undefined` means intact (identical, or a pure append).
+ * const divergence = findPrefixDivergence(previousPrefix, nextPrefix);
+ * // → { byteOffset, invalidatedBytes, description } | undefined
+ * ```
+ *
+ * Nothing is ever rewritten on your behalf, and no rate is ever claimed — the
+ * paragraphs below say why both refusals are load-bearing.
+ *
  * Provider prompt caches match the request prefix byte for byte, so a context
  * optimizer that reorders or rewrites a prompt prefix to "help" a cache can cost
  * more than it saves — and worse, a reordering that changes model behaviour is an

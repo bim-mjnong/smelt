@@ -183,7 +183,7 @@ a failed grammar load throws `GrammarUnavailableError`, because output labelled
 | `packages/core/test/guards/init-wizard.test.ts`         | `smelt init`'s one hard rule: an existing file is never overwritten without an explicit per-file yes.                                                                                                                                             |
 | `packages/core/test/guards/planner-registry.test.ts`    | The strategy seam. The `PLANNERS` registry carries exactly the shipped strategies, and the factory, `--strategy`/config validation and the help text all serve its keys — a dropped entry goes red on every face at once.                         |
 | `packages/core/test/guards/_source.ts`                  | Shared source-walking helpers: `guardSrcRoot()`, `guardRoot()`, and the string/comment stripper that stops `net/policy.ts` reporting its own word list.                                                                                           |
-| `scripts/mutate.mjs`                                    | **The meta-guard.** Fifty-seven mutations across the thirteen guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                          |
+| `scripts/mutate.mjs`                                    | **The meta-guard.** Fifty-nine mutations across the thirteen guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                           |
 | `scripts/bundle-grammars.mjs`                           | Copies the grammars `WASM_BY_LANGUAGE` names into the package, so they ship. Reads the built map rather than keeping a second list.                                                                                                               |
 | `scripts/generate-third-party.mjs`                      | Generates `THIRD-PARTY.md`. The grammar ↔ provenance mapping is a partition: an unattributed grammar throws.                                                                                                                                      |
 | `scripts/check-fresh-clone.sh`                          | Installs and verifies from `git archive` output — tracked files only.                                                                                                                                                                             |
@@ -502,6 +502,36 @@ never trusted. Guarded by `test/guards/repo-map.test.ts`, with four mutations pr
 the budget, the tie-break, cache invalidation and the corrupt-entry discard can each go
 red.
 
+**The front door: `smelt map`.** The repo map used to be exported and composed by
+nothing; it now has its own CLI subcommand:
+
+```sh
+smelt map src --budget 4000 --focus handleRequest --ignore vendor --cache .smelt-tags
+```
+
+The ranked map goes to stdout, a short report (files scanned, symbols ranked, bytes
+used against the budget, cache counts) to stderr, and `--json` emits the `RepoMap`
+verbatim in its own versioned envelope (`smelt-map-cli/v1`). `--budget` follows the
+same philosophy as everywhere else — required, no built-in default,
+`defaultBudgetBytes` from `smelt.config.json` accepted, the refusal owned by
+`resolveMapRun` in `src/cli/resolve.ts` (`ResolvedRun`'s sibling, not a contortion of
+it — the two commands share only the budget leg, so they share the module that owns
+precedence rather than a struct). `--focus` promotes matching symbols to the front of
+the fill order with a `focus-match` receipt naming the term; ranks and counts are
+never altered. One exit-code difference, documented in `--help`: **`map` never exits
+1** — a smelt plan can come back over budget because smelt refuses to cut regions the
+caller asked to keep, but the map fits itself to the budget by construction, so no
+over-budget outcome exists to report. The report's "bytes used" figure is read off
+`RepoMap.outputBytes` and guard-pinned to the actual stdout byte count, with mutation
+`repomap-map-report-bytes-invented` proving the pin can go red.
+
+**Deliberately NOT a planner strategy.** `buildRepoMap` returns a `RepoMap`, not an
+`ElisionPlan` — nothing is elided, nothing is stored under a hash, nothing is
+reversible — so it does not implement `Planner` and does not appear in the `PLANNERS`
+registry. Forcing that interface would claim Law 3 about output that has no bytes to
+give back; the module doc comment on `src/repomap/map.ts` states the same decision.
+(A wizard step for map defaults was considered and deferred — follow-up, not scope.)
+
 **Acceptance criteria**
 
 - [x] Reads a repo, emits a ranked symbol map inside a byte budget. The budget is respected by construction — symbols are appended in rank order until the next line would not fit — and `outputBytes` is measured off the rendered text.
@@ -534,7 +564,7 @@ pnpm mutate
 ```
 
 It copies `packages/core/src` to a scratch tree, applies one deliberate break, points the
-guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Fifty-seven
+guard at the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. Fifty-nine
 mutations across thirteen guards; a survivor is reported as a hole in the guard, not in the
 mutation.
 
@@ -602,9 +632,31 @@ const smelter = createSmelter({
 // → result.measured = { measure, unit, input, output }
 ```
 
+**Also stable to consume: cache-prefix hygiene.** `src/cache/prefix.ts` is a
+consumer-facing surface in its own right — pure functions, exported from the
+entrypoint, composed with nothing else in smelt on purpose: cache hygiene is a
+property of the request _you_ assemble, which smelt never sees or intercepts. Use it
+from your own send path:
+
+```ts
+import { detectCacheBreakers, findPrefixDivergence } from '@smeltjs/core';
+
+const warnings = detectCacheBreakers({ tools, system }, { tools: previousTools });
+// → CacheWarning[]: a rule id + sentence per silent cache-breaker (a system-prompt
+//   timestamp or UUID, unsorted tool JSON keys, a tool set that varies between
+//   calls). Warnings only — your prompt is never rewritten, and no hit rate is
+//   ever claimed.
+
+const divergence = findPrefixDivergence(previousPrefix, nextPrefix);
+// → undefined when the cached prefix survived (identical, or a pure append), else
+//   { byteOffset, invalidatedBytes, description } — where it broke and what it cost.
+```
+
 **Also available:** the `smelt` binary, for seeing all of the above from a shell without
 writing a script. `smelt <file> --budget <bytes> --focus <term>` prints the text on stdout
-and the report on stderr; `--json` and `--reconstruct` round-trip through a file.
+and the report on stderr; `--json` and `--reconstruct` round-trip through a file; and
+`smelt map <dir> --budget <bytes>` renders the whole-tree ranked symbol map (Slice 7)
+with the same stdout/stderr split.
 
 **Guarantees a consumer may rely on:**
 

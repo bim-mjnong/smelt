@@ -136,6 +136,11 @@ export {
 export type { LanguageProfile, LanguageStructure, RepoMapFacts } from './lang/profile.ts';
 export { resolveRun } from './cli/resolve.ts';
 export type { ResolvedRun } from './cli/resolve.ts';
+export { REPO_MAP_FOCUS_RULE } from './repomap/map.ts';
+export { CLI_MAP_JSON_FORMAT, formatMapReport, resolveMapRun } from './cli/run.ts';
+export type { CliInvocation, CliMapJsonEnvelope, MapInvocation } from './cli/run.ts';
+export type { MapReportInput } from './cli/report.ts';
+export type { ResolvedMapRun } from './cli/resolve.ts';
 
 /**
  * Which planner a smelter uses, named by string. The names, their factories, and this

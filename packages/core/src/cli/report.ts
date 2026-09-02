@@ -1,3 +1,4 @@
+import type { RepoMap } from '../repomap/map.ts';
 import type { SmeltResult } from '../types.ts';
 
 import { CLI_NAME } from './args.ts';
@@ -96,6 +97,55 @@ export function formatReport({ result, source, budgetBytes, inputText }: ReportI
   return `${lines.join('\n')}\n`;
 }
 
+/** What `smelt map` prints to stderr. */
+export interface MapReportInput {
+  readonly map: RepoMap;
+  /** The directory named on the command line, exactly as the user wrote it. */
+  readonly source: string;
+}
+
+/**
+ * The map report, for stderr — same law as {@link formatReport}: every number is
+ * read straight off the {@link RepoMap} the library returned. In particular the
+ * "bytes used" figure is `map.outputBytes`, which the library measured off the
+ * rendered text — the CLI counts nothing itself, because a report that keeps its
+ * own tally is a report that can disagree with the map it describes.
+ * `test/guards/repo-map.test.ts` asserts the printed figure equals the actual byte
+ * length of what landed on stdout, and a mutation proves the assertion can go red.
+ */
+export function formatMapReport({ map, source }: MapReportInput): string {
+  const lines: string[] = [];
+
+  lines.push([`${CLI_NAME} map`, source, map.id].join('  '));
+  lines.push(
+    `files scanned ${group(map.filesScanned)}` +
+      (map.binarySkipped === 0 ? '' : ` (${count(map.binarySkipped, 'binary file')} skipped)`) +
+      `   symbols ranked ${group(map.definitionsTotal)}`,
+  );
+  lines.push(
+    `included ${group(map.entries.length)} of ${group(map.definitionsTotal)} symbols` +
+      (map.pathOnlyTotal === 0
+        ? ''
+        : ` + ${group(map.pathOnly.length)} of ${group(map.pathOnlyTotal)} path-only files`),
+  );
+  lines.push(
+    `bytes used ${group(map.outputBytes)} of ${group(map.budgetBytes)} budget — the map ` +
+      `fits itself to the budget by construction, so there is no over-budget exit`,
+  );
+
+  if (map.cache !== undefined) {
+    lines.push(
+      `cache  ${count(map.cache.hits, 'hit')}, ${count(map.cache.misses, 'miss', 'es')}, ` +
+        `${group(map.cache.discarded)} discarded`,
+    );
+  }
+  for (const warning of map.warnings) {
+    lines.push(`warning  ${warning.rule}: ${warning.explanation}`);
+  }
+
+  return `${lines.join('\n')}\n`;
+}
+
 /** How many lines a byte range covers in the input. Derived, never tallied separately. */
 function lineSpan(text: string, start: number, end: number): number {
   const slice = Buffer.from(text, 'utf8').subarray(start, end).toString('utf8');
@@ -120,8 +170,8 @@ function delta(inputBytes: number, outputBytes: number): string {
   return `${sign}${percent.toFixed(1)}%`;
 }
 
-function count(n: number, noun: string): string {
-  return `${group(n)} ${noun}${n === 1 ? '' : 's'}`;
+function count(n: number, noun: string, pluralSuffix = 's'): string {
+  return `${group(n)} ${noun}${n === 1 ? '' : pluralSuffix}`;
 }
 
 function clip(text: string, max: number): string {

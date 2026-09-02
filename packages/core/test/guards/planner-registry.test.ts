@@ -45,7 +45,12 @@ describe('--strategy validation accepts exactly the registry keys', () => {
   it('accepts every shipped name, through the flag and through isStrategy', () => {
     for (const name of SHIPPED_NAMES) {
       expect(isStrategy(name), name).toBe(true);
-      expect(parseSmeltArgs(['--strategy', name]).strategy, name).toBe(name);
+      // parseSmeltArgs returns the CliInvocation union; only the 'smelt' arm carries
+      // a strategy, so the assertion pins the mode too.
+      expect(parseSmeltArgs(['--strategy', name]), name).toMatchObject({
+        mode: 'smelt',
+        strategy: name,
+      });
     }
   });
 

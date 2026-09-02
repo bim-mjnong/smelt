@@ -1,28 +1,30 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import process from 'node:process';
 
 import { reconstruct } from '../apply.ts';
 import { CliUsageError, SmeltError } from '../errors.ts';
 import { createSmelter } from '../index.ts';
 import type { SmeltCallOptions } from '../index.ts';
+import { buildRepoMap } from '../repomap/map.ts';
+import type { RepoMap } from '../repomap/map.ts';
 import { MemoryElisionStore } from '../store.ts';
 import { DirectoryElisionStore } from '../store-dir.ts';
 import type { ElisionStore, SmeltResult } from '../types.ts';
 
 import { CLI_NAME, cliUsage, parseSmeltArgs } from './args.ts';
-import type { SmeltInvocation } from './args.ts';
+import type { MapInvocation, SmeltInvocation } from './args.ts';
 import { loadNearestConfig } from './config.ts';
 import { runInit } from './init.ts';
-import { formatReport } from './report.ts';
-import { resolveRun } from './resolve.ts';
+import { formatMapReport, formatReport } from './report.ts';
+import { resolveMapRun, resolveRun } from './resolve.ts';
 import type { ResolvedRun } from './resolve.ts';
 
 export { CLI_NAME, cliUsage, parseSmeltArgs } from './args.ts';
-export type { SmeltInvocation } from './args.ts';
-export { formatReport } from './report.ts';
-export type { ReportInput } from './report.ts';
-export { resolveRun } from './resolve.ts';
-export type { ResolvedRun } from './resolve.ts';
+export type { CliInvocation, MapInvocation, SmeltInvocation } from './args.ts';
+export { formatMapReport, formatReport } from './report.ts';
+export type { MapReportInput, ReportInput } from './report.ts';
+export { resolveMapRun, resolveRun } from './resolve.ts';
+export type { ResolvedMapRun, ResolvedRun } from './resolve.ts';
 
 /**
  * Exit codes, and why there are five of them.
@@ -48,6 +50,20 @@ export const EXIT = {
  * silent.
  */
 export const CLI_JSON_FORMAT = 'smelt-cli/v1';
+
+/**
+ * The `smelt map --json` envelope format. Its own version line, because the two
+ * envelopes carry different structures and must be able to move independently —
+ * a map envelope has no elided bytes to carry, since a map elides nothing.
+ */
+export const CLI_MAP_JSON_FORMAT = 'smelt-map-cli/v1';
+
+/** What `smelt map --json` prints: the {@link RepoMap} verbatim, versioned. */
+export interface CliMapJsonEnvelope {
+  readonly format: string;
+  /** The {@link RepoMap} exactly as `buildRepoMap` returned it. */
+  readonly map: RepoMap;
+}
 
 /**
  * What `--json` prints, and what `--reconstruct` reads back.
@@ -121,6 +137,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       }
       case 'smelt':
         return await runSmelt(invocation, io);
+      case 'map':
+        return await runMap(invocation, io);
     }
   } catch (error) {
     if (error instanceof CliUsageError) {
@@ -170,6 +188,62 @@ async function runSmelt(invocation: SmeltInvocation, io: CliIo): Promise<number>
   io.stderr(formatReport({ result, source, budgetBytes: run.budgetBytes, inputText }));
 
   return result.outputBytes > run.budgetBytes ? EXIT.overBudget : EXIT.ok;
+}
+
+/**
+ * One `smelt map` run, executed straight-line over a {@link ResolvedMapRun} the same
+ * way {@link runSmelt} executes its {@link ResolvedRun} — the merge, including the
+ * budget-required refusal, lives in {@link resolveMapRun}.
+ *
+ * The map is deliberately **not** served through a planner strategy: `buildRepoMap`
+ * returns a {@link RepoMap}, not an `ElisionPlan` — nothing is elided, stored, or
+ * reversible — so it gets its own subcommand and its own envelope instead of a
+ * `--strategy` name that would lie about what comes back. And the exit code is
+ * {@link EXIT.ok} on every successful build: `EXIT.overBudget` exists because a smelt
+ * plan may refuse to cut kept regions and come back too big, while the map fits
+ * itself to the budget by construction — an over-budget map cannot happen, so no
+ * exit code pretends it can.
+ */
+async function runMap(invocation: MapInvocation, io: CliIo): Promise<number> {
+  const run = resolveMapRun(invocation, loadNearestConfig(io.cwd ?? process.cwd()));
+
+  assertDirectory(run.dir);
+  const map = await buildRepoMap({
+    root: run.dir,
+    budgetBytes: run.budgetBytes,
+    ...(run.focus.length === 0 ? {} : { focus: run.focus }),
+    ...(run.ignore === undefined ? {} : { ignore: run.ignore }),
+    ...(run.cacheDir === undefined ? {} : { cacheDir: run.cacheDir }),
+  });
+
+  if (run.json) {
+    const mapEnvelope: CliMapJsonEnvelope = { format: CLI_MAP_JSON_FORMAT, map };
+    io.stdout(`${JSON.stringify(mapEnvelope, null, 2)}\n`);
+  } else {
+    io.stdout(map.text);
+  }
+  io.stderr(formatMapReport({ map, source: run.dir }));
+
+  return EXIT.ok;
+}
+
+/** A directory the walk can start from, or a usage error naming what is wrong. */
+function assertDirectory(dir: string): void {
+  let isDirectory: boolean;
+  try {
+    isDirectory = statSync(dir).isDirectory();
+  } catch (cause) {
+    throw new CliUsageError(
+      `${CLI_NAME}: cannot read directory "${dir}": ` +
+        `${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  }
+  if (!isDirectory) {
+    throw new CliUsageError(
+      `${CLI_NAME}: "${dir}" is not a directory. map reads a whole tree; for one ` +
+        `file, use \`${CLI_NAME} <file>\`.`,
+    );
+  }
 }
 
 /**

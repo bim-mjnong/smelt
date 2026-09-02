@@ -28,6 +28,29 @@ export interface SmeltInvocation {
 }
 
 /**
+ * `smelt map <dir>` — the repo-map subcommand, parsed. A separate shape rather than
+ * more optional fields on {@link SmeltInvocation}, because the two commands share
+ * almost nothing: a map has a directory instead of a file/stdin, an ignore list and
+ * a cache directory instead of a language and a strategy.
+ */
+export interface MapInvocation {
+  readonly mode: 'map';
+  /** The repository root to map. Always present — `map` without a directory is a usage error. */
+  readonly dir: string;
+  /** `undefined` means the flag was not given — the config default may apply. */
+  readonly budgetBytes?: number;
+  readonly focus: readonly string[];
+  /** `--ignore` entries, replacing the built-in default list when non-empty. */
+  readonly ignore: readonly string[];
+  /** `--cache <dir>`: only when given does the map touch disk. */
+  readonly cacheDir?: string;
+  readonly json: boolean;
+}
+
+/** Everything `parseSmeltArgs` can return. Narrow on `mode`. */
+export type CliInvocation = SmeltInvocation | MapInvocation;
+
+/**
  * Argument parsing on `node:util.parseArgs` — stable since Node 20, which `engines`
  * already requires.
  *
@@ -37,7 +60,7 @@ export interface SmeltInvocation {
  *
  * @throws {CliUsageError} on anything the user got wrong. Never guesses.
  */
-export function parseSmeltArgs(argv: readonly string[]): SmeltInvocation {
+export function parseSmeltArgs(argv: readonly string[]): CliInvocation {
   let parsed;
   try {
     parsed = parseArgs({
@@ -49,6 +72,8 @@ export function parseSmeltArgs(argv: readonly string[]): SmeltInvocation {
         focus: { type: 'string', multiple: true },
         language: { type: 'string' },
         strategy: { type: 'string' },
+        ignore: { type: 'string', multiple: true },
+        cache: { type: 'string' },
         json: { type: 'boolean' },
         reconstruct: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
@@ -84,6 +109,20 @@ export function parseSmeltArgs(argv: readonly string[]): SmeltInvocation {
     return { mode: 'init', focus: [], json: false };
   }
 
+  if (positionals[0] === 'map') {
+    // `smelt map` is a subcommand, so a file literally named `map` needs `./map`.
+    return parseMapArgs(values, positionals);
+  }
+
+  // These two belong to `smelt map` alone; silently ignoring a flag the user typed
+  // would be a setting they believed was in force.
+  if (values.ignore !== undefined || values.cache !== undefined) {
+    throw new CliUsageError(
+      `${CLI_NAME}: --ignore and --cache belong to \`${CLI_NAME} map\`. A single-blob ` +
+        `run reads one file or stdin; there is no tree to walk and nothing to cache.`,
+    );
+  }
+
   if (positionals.length > 1) {
     throw new CliUsageError(
       `${CLI_NAME}: expected at most one file, got ${String(positionals.length)} ` +
@@ -116,6 +155,61 @@ export function parseSmeltArgs(argv: readonly string[]): SmeltInvocation {
     focus: values.focus ?? [],
     ...(values.language === undefined ? {} : { language: language(values.language) }),
     ...(chosenStrategy === undefined ? {} : { strategy: chosenStrategy }),
+    json: values.json === true,
+  };
+}
+
+/** What `smelt map` may see from the shared parse. Flags only — no file, no stdin. */
+interface MapFlagValues {
+  readonly budget?: string;
+  readonly focus?: readonly string[];
+  readonly language?: string;
+  readonly strategy?: string;
+  readonly ignore?: readonly string[];
+  readonly cache?: string;
+  readonly json?: boolean;
+  readonly reconstruct?: boolean;
+}
+
+/**
+ * The `map` subcommand's own validation: exactly one directory, the map-only flags,
+ * and the same budget rules as everything else — a missing `--budget` is not an
+ * error *here* (the config may carry `defaultBudgetBytes`), a malformed one always is.
+ */
+function parseMapArgs(values: MapFlagValues, positionals: readonly string[]): MapInvocation {
+  if (positionals.length < 2) {
+    throw new CliUsageError(
+      `${CLI_NAME}: map needs the directory to read.\n` +
+        `  ${CLI_NAME} map <dir> --budget <bytes> [--focus <term>]...`,
+    );
+  }
+  if (positionals.length > 2) {
+    throw new CliUsageError(
+      `${CLI_NAME}: map takes exactly one directory, got ` +
+        `${String(positionals.length - 1)} (${positionals.slice(1).join(', ')}).`,
+    );
+  }
+  if (values.reconstruct === true) {
+    throw new CliUsageError(
+      `${CLI_NAME}: --reconstruct makes no sense with map. A map elides nothing, so ` +
+        `there is nothing to put back.`,
+    );
+  }
+  if (values.language !== undefined || values.strategy !== undefined) {
+    throw new CliUsageError(
+      `${CLI_NAME}: --language and --strategy apply to single-blob runs. map reads a ` +
+        `whole tree, detects each file's language itself, and is not a planner ` +
+        `strategy — it returns a map, not an elision plan.`,
+    );
+  }
+  const budgetBytes = parseBudget(values.budget);
+  return {
+    mode: 'map',
+    dir: positionals[1]!,
+    ...(budgetBytes === undefined ? {} : { budgetBytes }),
+    focus: values.focus ?? [],
+    ignore: values.ignore ?? [],
+    ...(values.cache === undefined ? {} : { cacheDir: values.cache }),
     json: values.json === true,
   };
 }
@@ -168,6 +262,7 @@ export function cliUsage(): string {
 USAGE
   ${CLI_NAME} <file> --budget <bytes> [--focus <term>]...
   ${CLI_NAME} --budget <bytes> [--focus <term>]... < input
+  ${CLI_NAME} map <dir> --budget <bytes> [--focus <term>]... [--ignore <entry>]... [--cache <dir>]
   ${CLI_NAME} --reconstruct <result.json>
   ${CLI_NAME} --reconstruct < result.json
   ${CLI_NAME} init
@@ -182,29 +277,51 @@ CONFIG
   only — budget, strategy, store. An explicit flag always wins, and a malformed config
   is a usage error, never silently ignored.
 
+MAP
+  ${CLI_NAME} map <dir> renders a ranked symbol map of a whole repository — modelled
+  on Aider's repo-map (aider.chat/docs/repomap.html, design by Paul Gauthier) — to
+  stdout, with a short report on stderr. Local files only: symlinks are never
+  followed, binary files are skipped, and nothing touches disk unless --cache names
+  a directory. Every included symbol carries a receipt: its definition site and the
+  measured reference counts that ranked it. Unlike a smelt run, map never exits
+  1: a plan can come back over budget because ${CLI_NAME} refuses to cut regions you
+  asked to keep, but the map fits itself to the budget by construction — symbols
+  are appended in rank order until the next line would not fit.
+
 OPTIONS
   --budget <bytes>     Required, unless smelt.config.json sets defaultBudgetBytes.
-                       Soft ceiling for the output, in UTF-8 bytes. No built-in
-                       default: a budget smelt invented would decide for you.
+                       Soft ceiling for the output, in UTF-8 bytes (for map: a hard
+                       ceiling, met by construction). No built-in default: a budget
+                       ${CLI_NAME} invented would decide for you.
   --focus <term>       What you were looking for. Repeatable. Matching regions and
-                       their context survive; the runs between them collapse.
+                       their context survive; the runs between them collapse. For
+                       map: symbols matching a term (by name or path) are promoted
+                       to the front of the fill order, ranks unchanged.
   --language <id>      Override detection. One of: ${[...SUPPORTED_LANGUAGES, 'unknown'].join(', ')}.
   --strategy <id>      ${STRATEGIES.join(' or ')}. Defaults to lexical, unless
                        smelt.config.json says otherwise. structural parses
                        ${STRUCTURAL_LANGUAGES.join(', ')};
                        any other language is refused, never approximated.
-  --json               Print a JSON envelope on stdout instead of the smelted text:
-                       { format, result, elided }. \`result\` is the SmeltResult
-                       verbatim; \`elided\` carries the bytes, so the envelope can be
-                       reconstructed. Feed it back with --reconstruct.
+  --ignore <entry>     map only. Repeatable. Replaces the default ignore list
+                       (.git, node_modules): a bare name matches any path segment,
+                       an entry containing / is a root-relative prefix.
+  --cache <dir>        map only. Directory for the tags cache, keyed by content
+                       hash. Only when given does the map touch disk at all.
+  --json               Print a JSON envelope on stdout instead of the text:
+                       { format, result, elided } for a smelt run — \`result\` is
+                       the SmeltResult verbatim, \`elided\` carries the bytes, so
+                       the envelope can be reconstructed; feed it back with
+                       --reconstruct. For map: { format, map }, the RepoMap
+                       structure verbatim.
   --reconstruct        Read a --json envelope and print the original text, byte for
                        byte. This is Law 3 you can run from a shell.
   -h, --help           This text.
   --version            The package version.
 
 EXIT CODES
-  0  under budget
+  0  under budget (map is always under budget by construction)
   1  over budget — the plan did not fit, and the report says so. Never silent.
+     map never exits 1; see MAP above.
   2  usage error
   3  smelt refused (a SmeltError: an unbuilt planner, a missing hash)
   4  unexpected internal error

@@ -3,7 +3,7 @@ import type { Strategy } from '../plan/planners.ts';
 import type { DetectedLanguage } from '../types.ts';
 
 import { CLI_NAME } from './args.ts';
-import type { SmeltInvocation } from './args.ts';
+import type { MapInvocation, SmeltInvocation } from './args.ts';
 import { CONFIG_FILE_NAME, resolveStorePath } from './config.ts';
 import type { LoadedConfig } from './config.ts';
 
@@ -93,4 +93,59 @@ function resolveStore(config: LoadedConfig | undefined): ResolvedRun['store'] {
     return { kind: 'memory' };
   }
   return { kind: 'directory', path: resolveStorePath(config, config.config.store.path) };
+}
+
+/**
+ * Everything one `smelt map` run needs, fully merged — {@link ResolvedRun}'s sibling,
+ * not a contortion of it. The two commands share exactly one merged value (the
+ * budget), so they share the *module* that owns precedence and the budget-required
+ * refusal, not a struct whose fields would mostly be lies for one of them: a map has
+ * no store, no strategy, no stdin, and its ignore/cache legs mean nothing to a
+ * single-blob run.
+ */
+export interface ResolvedMapRun {
+  readonly budgetBytes: number;
+  /** Where the budget came from. A missing budget never gets here — it throws. */
+  readonly budgetSource: 'flag' | 'config';
+  readonly dir: string;
+  readonly focus: readonly string[];
+  /** `undefined` means "use the library's default ignore list". Flags only. */
+  readonly ignore?: readonly string[];
+  /** Only when present does the map touch disk. Flags only; the config has no say. */
+  readonly cacheDir?: string;
+  readonly json: boolean;
+}
+
+/**
+ * Merge one `'map'`-mode invocation with the loaded config and the built-ins. The
+ * config contributes exactly what it contributes to a smelt run — `defaultBudgetBytes`,
+ * a default the user chose explicitly — and nothing else: the store and strategy legs
+ * are single-blob concerns, and the map ignores them rather than reinterpreting them.
+ *
+ * @throws {CliUsageError} when neither `--budget` nor the config names a budget.
+ */
+export function resolveMapRun(
+  invocation: MapInvocation,
+  config: LoadedConfig | undefined,
+): ResolvedMapRun {
+  const budgetBytes = invocation.budgetBytes ?? config?.config.defaultBudgetBytes;
+  if (budgetBytes === undefined) {
+    throw new CliUsageError(
+      `${CLI_NAME}: --budget is required, in UTF-8 bytes. There is no default, because ` +
+        `a budget ${CLI_NAME} invented would silently decide how much of the map to ` +
+        `leave out. Pass --budget, or set defaultBudgetBytes in ${CONFIG_FILE_NAME} ` +
+        `(\`${CLI_NAME} init\` writes one).\n` +
+        `  ${CLI_NAME} map src --budget 4000 --focus handleRequest`,
+    );
+  }
+
+  return {
+    budgetBytes,
+    budgetSource: invocation.budgetBytes !== undefined ? 'flag' : 'config',
+    dir: invocation.dir,
+    focus: invocation.focus,
+    ...(invocation.ignore.length === 0 ? {} : { ignore: invocation.ignore }),
+    ...(invocation.cacheDir === undefined ? {} : { cacheDir: invocation.cacheDir }),
+    json: invocation.json,
+  };
 }

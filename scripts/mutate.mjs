@@ -595,6 +595,15 @@ const MUTATIONS = [
     replace: '',
     why: 'a shipped strategy dropped from the one PLANNERS registry — the factory, --strategy and config validation, and the help text all lose it in the same edit, and the guard must watch every face go red together',
   },
+  {
+    id: 'repomap-map-report-bytes-invented',
+    guard: 'test/guards/repo-map.test.ts',
+    file: 'cli/report.ts',
+    find: '    `bytes used ${group(map.outputBytes)} of ${group(map.budgetBytes)} budget — the map ` +',
+    replace:
+      '    `bytes used ${group(map.budgetBytes)} of ${group(map.budgetBytes)} budget — the map ` +',
+    why: "the map report's bytes-used figure wired to the budget — a budget-fitting report that always claims the budget spent, so the one number a human reads off `smelt map` stops being a measurement",
+  },
 ];
 
 /**

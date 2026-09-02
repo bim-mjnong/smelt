@@ -3,6 +3,7 @@ smelt — shrink text for a model, without lying about what was removed.
 USAGE
   smelt <file> --budget <bytes> [--focus <term>]...
   smelt --budget <bytes> [--focus <term>]... < input
+  smelt map <dir> --budget <bytes> [--focus <term>]... [--ignore <entry>]... [--cache <dir>]
   smelt --reconstruct <result.json>
   smelt --reconstruct < result.json
   smelt init
@@ -17,29 +18,51 @@ CONFIG
   only — budget, strategy, store. An explicit flag always wins, and a malformed config
   is a usage error, never silently ignored.
 
+MAP
+  smelt map <dir> renders a ranked symbol map of a whole repository — modelled
+  on Aider's repo-map (aider.chat/docs/repomap.html, design by Paul Gauthier) — to
+  stdout, with a short report on stderr. Local files only: symlinks are never
+  followed, binary files are skipped, and nothing touches disk unless --cache names
+  a directory. Every included symbol carries a receipt: its definition site and the
+  measured reference counts that ranked it. Unlike a smelt run, map never exits
+  1: a plan can come back over budget because smelt refuses to cut regions you
+  asked to keep, but the map fits itself to the budget by construction — symbols
+  are appended in rank order until the next line would not fit.
+
 OPTIONS
   --budget <bytes>     Required, unless smelt.config.json sets defaultBudgetBytes.
-                       Soft ceiling for the output, in UTF-8 bytes. No built-in
-                       default: a budget smelt invented would decide for you.
+                       Soft ceiling for the output, in UTF-8 bytes (for map: a hard
+                       ceiling, met by construction). No built-in default: a budget
+                       smelt invented would decide for you.
   --focus <term>       What you were looking for. Repeatable. Matching regions and
-                       their context survive; the runs between them collapse.
+                       their context survive; the runs between them collapse. For
+                       map: symbols matching a term (by name or path) are promoted
+                       to the front of the fill order, ranks unchanged.
   --language <id>      Override detection. One of: typescript, tsx, javascript, rust, python, go, java, c, cpp, c_sharp, ruby, php, kotlin, swift, bash, unknown.
   --strategy <id>      lexical or structural. Defaults to lexical, unless
                        smelt.config.json says otherwise. structural parses
                        typescript, tsx, javascript, rust, python, go, java, c, cpp, c_sharp, ruby, php, kotlin, swift, bash;
                        any other language is refused, never approximated.
-  --json               Print a JSON envelope on stdout instead of the smelted text:
-                       { format, result, elided }. `result` is the SmeltResult
-                       verbatim; `elided` carries the bytes, so the envelope can be
-                       reconstructed. Feed it back with --reconstruct.
+  --ignore <entry>     map only. Repeatable. Replaces the default ignore list
+                       (.git, node_modules): a bare name matches any path segment,
+                       an entry containing / is a root-relative prefix.
+  --cache <dir>        map only. Directory for the tags cache, keyed by content
+                       hash. Only when given does the map touch disk at all.
+  --json               Print a JSON envelope on stdout instead of the text:
+                       { format, result, elided } for a smelt run — `result` is
+                       the SmeltResult verbatim, `elided` carries the bytes, so
+                       the envelope can be reconstructed; feed it back with
+                       --reconstruct. For map: { format, map }, the RepoMap
+                       structure verbatim.
   --reconstruct        Read a --json envelope and print the original text, byte for
                        byte. This is Law 3 you can run from a shell.
   -h, --help           This text.
   --version            The package version.
 
 EXIT CODES
-  0  under budget
+  0  under budget (map is always under budget by construction)
   1  over budget — the plan did not fit, and the report says so. Never silent.
+     map never exits 1; see MAP above.
   2  usage error
   3  smelt refused (a SmeltError: an unbuilt planner, a missing hash)
   4  unexpected internal error
