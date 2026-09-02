@@ -7,7 +7,7 @@ import type { EnforcementMode } from '../hooks/guard-core.ts';
 import { isStrategy, STRATEGIES } from '../plan/planners.ts';
 import type { Strategy } from '../plan/planners.ts';
 
-import { CLI_NAME } from './args.ts';
+import { CLI_NAME } from './shell.ts';
 
 /**
  * `smelt.config.json` — CLI defaults, and nothing more.
@@ -256,4 +256,27 @@ function parseHooks(
 /** `store.path` is relative to the config file, so the config works from any cwd. */
 export function resolveStorePath(loaded: LoadedConfig, path: string): string {
   return resolve(dirname(loaded.path), path);
+}
+
+/**
+ * The store decision a config carries, with `path` already resolved against the config
+ * file's directory — one config serves every subdirectory it covers without scattering
+ * store roots. `'memory'` is the built-in default: a fresh in-memory store per run.
+ */
+export type ConfiguredStore =
+  { readonly kind: 'memory' } | { readonly kind: 'directory'; readonly path: string };
+
+/**
+ * The store leg of every merge, read once here rather than in each verb that needs it.
+ *
+ * There is no store flag, so this leg is config-or-built-in only — which is exactly
+ * why it belongs to the config module and not to a verb: `smelt` builds a store from
+ * it, and `retrieve`/`stats` refuse when it is not a directory (see `resolveStoreRun`
+ * in `subcommands/retrieve.ts`). Three verbs, one reading of the same key.
+ */
+export function configuredStore(config: LoadedConfig | undefined): ConfiguredStore {
+  if (config?.config.store === undefined || config.config.store.kind === 'memory') {
+    return { kind: 'memory' };
+  }
+  return { kind: 'directory', path: resolveStorePath(config, config.config.store.path) };
 }

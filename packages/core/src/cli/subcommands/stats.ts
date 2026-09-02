@@ -1,0 +1,113 @@
+import { CliUsageError } from '../../errors.ts';
+import { DirectoryElisionStore } from '../../store-dir.ts';
+import type { RetrieveStats } from '../../types.ts';
+import { CLI_NAME, EXIT } from '../shell.ts';
+import type { CliIo } from '../shell.ts';
+
+import type { FlagValues } from './flags.ts';
+import { resolveStoreRun } from './retrieve.ts';
+import type { ResolvedStoreRun } from './retrieve.ts';
+import type { ConfigSource, Subcommand } from './subcommand.ts';
+
+/**
+ * `smelt stats` — the store's counters, without touching them.
+ *
+ * Reading stats does NOT count as a retrieval: `stats()` folds the journal and scans
+ * the blobs, journaling nothing, so watching the expansion rate can never move it —
+ * an observer that inflated its own metric would make the honest signal dishonest.
+ *
+ * The plain form is one `name value` per line, greppable and stable; `--json` emits
+ * the {@link RetrieveStats} verbatim in its own versioned envelope
+ * ({@link CLI_STATS_JSON_FORMAT}), like every other machine-read surface here.
+ *
+ * It resolves through `retrieve`'s {@link resolveStoreRun} because the two verbs
+ * share one merge — the store leg, and the same refusal when that store cannot
+ * outlive a run. Sharing the function is the point; sharing a struct with a hash
+ * field `stats` would never read is not.
+ */
+
+/** `smelt stats` — the store's counters, read without touching them. */
+export interface StatsInvocation {
+  readonly mode: 'stats';
+  readonly json: boolean;
+}
+
+/** What `stats` runs on: the shared store leg, plus how to print it. */
+export interface ResolvedStatsRun {
+  readonly store: ResolvedStoreRun;
+  readonly json: boolean;
+}
+
+/**
+ * The `smelt stats --json` envelope format. Its own version line for the same reason
+ * `smelt map` has one: the two envelopes carry different structures and must move
+ * independently.
+ */
+export const CLI_STATS_JSON_FORMAT = 'smelt-stats-cli/v1';
+
+/** What `smelt stats --json` prints: the {@link RetrieveStats} verbatim, versioned. */
+export interface CliStatsJsonEnvelope {
+  readonly format: string;
+  /** The {@link RetrieveStats} exactly as the store's `stats()` returned them. */
+  readonly stats: RetrieveStats;
+}
+
+export const statsCommand: Subcommand<StatsInvocation, ResolvedStatsRun> = {
+  name: 'stats',
+  flags: ['json'],
+  refusal: `stats reads counters; there is nothing to budget, focus or plan.`,
+  usage: {
+    synopsis: ['stats [--json]'],
+    section: {
+      heading: 'RETRIEVE & STATS',
+      body:
+        `  ${CLI_NAME} stats prints the same store's counters, one \`name value\` per line —\n` +
+        `  elisionsStored, bytesStored, retrieveCalls, uniqueRetrieved, expansionRate,\n` +
+        `  allElisionsRetrieved — and reading them is NOT counted as a retrieval. --json\n` +
+        `  emits the RetrieveStats verbatim in its own versioned envelope.\n` +
+        `\n` +
+        `  Both need somewhere for elisions to outlive the run that made them: a\n` +
+        `  smelt.config.json with a directory store (\`${CLI_NAME} init\` writes one). With a\n` +
+        `  memory store — or no config — every run's store dies with its process, so there\n` +
+        `  is nothing to retrieve across runs, and that is a usage error rather than a\n` +
+        `  quiet empty answer.`,
+    },
+  },
+
+  parse(values: FlagValues, positionals: readonly string[]): StatsInvocation {
+    if (positionals.length > 1) {
+      throw new CliUsageError(
+        `${CLI_NAME}: stats takes no further arguments, got ` +
+          `${positionals.slice(1).join(', ')}. It reports on the one configured store.`,
+      );
+    }
+    return { mode: 'stats', json: values.json === true };
+  },
+
+  resolve(invocation: StatsInvocation, config: ConfigSource): ResolvedStatsRun {
+    return { store: resolveStoreRun('stats', config()), json: invocation.json };
+  },
+
+  run(resolved: ResolvedStatsRun, io: CliIo): number {
+    const stats = new DirectoryElisionStore(resolved.store.storePath).stats();
+
+    if (resolved.json) {
+      const statsEnvelope: CliStatsJsonEnvelope = { format: CLI_STATS_JSON_FORMAT, stats };
+      io.stdout(`${JSON.stringify(statsEnvelope, null, 2)}\n`);
+      return EXIT.ok;
+    }
+
+    io.stdout(
+      [
+        `elisionsStored ${String(stats.elisionsStored)}`,
+        `bytesStored ${String(stats.bytesStored)}`,
+        `retrieveCalls ${String(stats.retrieveCalls)}`,
+        `uniqueRetrieved ${String(stats.uniqueRetrieved)}`,
+        `expansionRate ${String(stats.expansionRate)}`,
+        `allElisionsRetrieved ${String(stats.allElisionsRetrieved)}`,
+        '',
+      ].join('\n'),
+    );
+    return EXIT.ok;
+  },
+};

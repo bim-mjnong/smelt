@@ -1,7 +1,7 @@
 import type { RepoMap } from '../repomap/map.ts';
 import type { SmeltResult } from '../types.ts';
 
-import { CLI_NAME } from './args.ts';
+import { CLI_NAME } from './shell.ts';
 
 export interface ReportInput {
   readonly result: SmeltResult;

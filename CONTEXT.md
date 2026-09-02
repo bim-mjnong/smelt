@@ -68,10 +68,27 @@ codebase-design glossary.
   sees it). Planners never estimate independently; `createSmelter` and the CLI construct
   the pricing centrally, and a JS caller who omits it gets `MissingMarkerPricingError`,
   never a guessed cost.
-- **ResolvedRun**: the CLI's single merge of flags + config + built-ins (`resolveRun` in
-  `src/cli/resolve.ts`); the only place precedence lives, each value carrying its
-  provenance (`flag`/`config`/`builtin`). It owns the budget-required refusal, and
-  `runSmelt` executes it straight-line with no `??` of its own.
+- **Subcommand**: the single adapter carrying every per-verb fact — the flags it owns
+  (`readonly FlagName[]`), its `parse`, its `resolve`, its `run`, its `usage` block and
+  the one sentence a refusal ends with. One file per verb in `src/cli/subcommands/`;
+  the registry (`SUBCOMMANDS` in `src/cli/subcommands/registry.ts`) is
+  `Record<Verb, Subcommand>`, so totality is a compile error. The seam is
+  `subcommandFor(positionals)` — `parseSmeltArgs` looks a verb up and lets it validate
+  itself, `runCli` is a lookup and a dispatch, and every rendered view (the USAGE
+  block, the help's sections, the `map only.` prefix on an OPTIONS entry) is derived.
+  **Flag ownership is the property it exists for**: a flag outside the chosen verb's
+  list is refused by ONE generated message naming the flag, the verb, and — when
+  exactly one verb owns it — where it does belong, replacing the five hand-written
+  refusals in which every verb refused every other verb's flags. `CLI_FLAGS` in
+  `subcommands/flags.ts` is the companion table: it types `FlagName`, tells
+  `parseArgs` how to read each flag, and carries its OPTIONS entry.
+  `test/guards/subcommand-registry.test.ts` crosses every verb with every flag it does
+  not own.
+- **ResolvedRun**: the default verb's single merge of flags + config + built-ins
+  (`resolveRun` in `src/cli/subcommands/smelt.ts`); the only place that verb's
+  precedence lives, each value carrying its provenance (`flag`/`config`/`builtin`). It
+  owns the budget-required refusal, and the verb's `run` executes it straight-line with
+  no `??` of its own.
 - **retrieveStats**: the one exported derivation within `src/` of the honesty
   arithmetic (`expansionRate`, `allElisionsRetrieved`) from a store's
   **RawRetrieveCounters** — a free function in `src/stats.ts`, not a base class. A
@@ -90,8 +107,9 @@ codebase-design glossary.
   `--strategy` name; the map fits itself to its byte budget by construction, so
   `map` has no over-budget exit.
 - **ResolvedMapRun**: `smelt map`'s single merge of flags + config + built-ins
-  (`resolveMapRun` in `src/cli/resolve.ts`) — ResolvedRun's sibling, sharing the
-  module that owns precedence and the budget-required refusal, not the struct.
+  (`resolveMapRun` in `src/cli/subcommands/map.ts`) — ResolvedRun's sibling, sharing
+  the seam that owns precedence (`Subcommand.resolve`) and the budget-required
+  refusal, not the struct.
 - **Focus promotion** (repo map): a focus term moves matching symbols to the front
   of the map's fill order with a `focus-match` receipt naming the term; the measured
   rank and reference counts are never altered.
