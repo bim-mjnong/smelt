@@ -119,8 +119,8 @@ would have been the first thing a knowledgeable reader checked and the last thin
 believed.
 
 What is honest to say instead: state the **mechanism** and the **class** of expected
-saving _with its source_. The nearest real comparable is Headroom's own stated **15–20%
-for coding agents** (its 60–95% figures apply to narrow content like JSON logs).
+saving _with its source_. The nearest real comparable is Headroom's own stated **21–57%
+across its four proof scenarios** (their README, 2026-09).
 LLMLingua's 20× results are on non-code benchmarks. Until smelt has run its own harness
 on its own traffic, the README states mechanisms and cites other people's numbers as
 other people's. Slice 3 below is the harness that changes that.
