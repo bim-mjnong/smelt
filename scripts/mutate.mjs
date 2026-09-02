@@ -57,6 +57,7 @@ const GUARDS = [
   'test/guards/bench-results.test.ts',
   'test/guards/repo-map.test.ts',
   'test/guards/init-wizard.test.ts',
+  'test/guards/planner-registry.test.ts',
 ];
 
 /**
@@ -568,6 +569,14 @@ const MUTATIONS = [
     find: '    expansionRate: raw.elisionsStored === 0 ? 0 : raw.uniqueRetrieved / raw.elisionsStored,',
     replace: '    expansionRate: 0,',
     why: 'the one shared derivation of the honest signal wired flat — every store now reports a flattering zero at once, and no per-store copy of the arithmetic exists to disagree',
+  },
+  {
+    id: 'planner-registry-entry-dropped',
+    guard: 'test/guards/planner-registry.test.ts',
+    file: 'plan/planners.ts',
+    find: '  structural: (options: PlannerFactoryOptions): Planner =>\n    new StructuralPlanner(options.structural ?? {}),\n',
+    replace: '',
+    why: 'a shipped strategy dropped from the one PLANNERS registry — the factory, --strategy and config validation, and the help text all lose it in the same edit, and the guard must watch every face go red together',
   },
 ];
 

@@ -122,6 +122,7 @@ $ pnpm mutate
   PASS  test/guards/bench-results.test.ts
   PASS  test/guards/repo-map.test.ts
   PASS  test/guards/init-wizard.test.ts
+  PASS  test/guards/planner-registry.test.ts
 
 === mutations: every guard must go red ===
 
@@ -154,7 +155,7 @@ artefact mutations copy the one file into a scratch root. A runner that edited t
 files and then crashed would leave the repository broken, which is the opposite of what a
 safe-to-fail check is for.
 
-The twelve guards today, and what each one would let through if it stopped working:
+The thirteen guards today, and what each one would let through if it stopped working:
 
 | Guard                                | If it silently stopped working                                                                                                        |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -170,6 +171,7 @@ The twelve guards today, and what each one would let through if it stopped worki
 | `guards/structural-totality.test.ts` | a language claimed by the planner with no fixture, snapshot or doc-comment case behind it                                             |
 | `guards/bench-results.test.ts`       | an edited or extrapolated results row, a network call in the offline tier, or `bench/` slipping into the tarball                      |
 | `guards/init-wizard.test.ts`         | `smelt init` overwriting a hand-written file without an explicit per-file yes                                                         |
+| `guards/planner-registry.test.ts`    | a strategy vanishing from the `PLANNERS` registry while the factory, the flag/config validation, or the help text still claims it     |
 
 ## Two promises, not one
 

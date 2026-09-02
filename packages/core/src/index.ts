@@ -2,9 +2,9 @@ import { applyPlan, markerForLanguage, reconstruct } from './apply.ts';
 import type { ApplyOptions, MarkerBuilder, MarkerInfo } from './apply.ts';
 import { detectLanguage } from './detect.ts';
 import { SmeltError } from './errors.ts';
-import { LexicalPlanner } from './plan/lexical.ts';
 import type { LexicalPlannerOptions } from './plan/lexical.ts';
-import { StructuralPlanner } from './plan/structural.ts';
+import { PLANNERS } from './plan/planners.ts';
+import type { Strategy } from './plan/planners.ts';
 import type { StructuralPlannerOptions } from './plan/structural.ts';
 import { createRetrieveTool } from './retrieve.ts';
 import { MemoryElisionStore } from './store.ts';
@@ -36,6 +36,8 @@ export {
 export { clearGrammarCache, grammarPath, loadGrammar, WASM_BY_LANGUAGE } from './plan/grammar.ts';
 export { LEXICAL_PLANNER_ID, LexicalPlanner, planLexical } from './plan/lexical.ts';
 export type { LexicalPlannerOptions } from './plan/lexical.ts';
+export { isStrategy, PLANNERS, STRATEGIES } from './plan/planners.ts';
+export type { PlannerFactoryOptions } from './plan/planners.ts';
 export {
   planStructural,
   STRUCTURAL_LANGUAGES,
@@ -126,21 +128,27 @@ export {
   structuralLanguages,
 } from './lang/registry.ts';
 export type { LanguageProfile, LanguageStructure, RepoMapFacts } from './lang/profile.ts';
+export { resolveRun } from './cli/resolve.ts';
+export type { ResolvedRun } from './cli/resolve.ts';
 
 /**
- * Which planner a smelter uses. `'structural'` parses every language named in
- * {@link STRUCTURAL_LANGUAGES} with a bundled grammar and throws
- * {@link GrammarUnavailableError} for anything else — never a silent lexical
- * fallback. The list is the single source of truth, so this doc cannot fall behind
- * it. See {@link StructuralPlanner}.
+ * Which planner a smelter uses, named by string. The names, their factories, and this
+ * type all come from the one {@link PLANNERS} registry in `src/plan/planners.ts`, so
+ * the CLI's validation and help text cannot drift from what `createSmelter` builds.
  */
-export type Strategy = 'lexical' | 'structural';
+export type { Strategy } from './plan/planners.ts';
 
 export interface SmelterConfig {
   /** Where elided bytes live. Defaults to a fresh {@link MemoryElisionStore}. */
   readonly store?: ElisionStore;
   /** Used when a `smelt()` call omits `budgetBytes`. No global default is assumed. */
   readonly defaultBudgetBytes?: number;
+  /**
+   * A constructed planner instance. Wins over `strategy`: the registry is a
+   * convenience for the shipped planners, and an instance you built yourself is
+   * always more specific than a name.
+   */
+  readonly planner?: Planner;
   readonly strategy?: Strategy;
   readonly marker?: MarkerBuilder;
   /**
@@ -197,11 +205,8 @@ export interface Smelter {
  */
 export function createSmelter(config: SmelterConfig = {}): Smelter {
   const store = config.store ?? new MemoryElisionStore();
-  const strategy = config.strategy ?? 'lexical';
-  const planner: Planner =
-    strategy === 'structural'
-      ? new StructuralPlanner(config.structural ?? {})
-      : new LexicalPlanner(config.lexical ?? {});
+  // A constructed instance wins over a strategy name; the registry serves the names.
+  const planner: Planner = config.planner ?? PLANNERS[config.strategy ?? 'lexical'](config);
   const applyOptions: ApplyOptions = {
     ...(config.marker === undefined ? {} : { marker: config.marker }),
     ...(config.measure === undefined ? {} : { measure: config.measure }),

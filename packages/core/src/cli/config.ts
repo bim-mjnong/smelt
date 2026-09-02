@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import { CliUsageError } from '../errors.ts';
+import { isStrategy, STRATEGIES } from '../plan/planners.ts';
+import type { Strategy } from '../plan/planners.ts';
 
 import { CLI_NAME } from './args.ts';
 
@@ -42,8 +44,8 @@ export interface SmeltConfig {
   readonly smeltConfig: typeof CONFIG_VERSION;
   /** Used when a `smelt` run omits `--budget`. UTF-8 bytes, like every smelt budget. */
   readonly defaultBudgetBytes?: number;
-  /** Used when a run omits `--strategy`. */
-  readonly strategy?: 'lexical' | 'structural';
+  /** Used when a run omits `--strategy`. Validated against the {@link PLANNERS} registry. */
+  readonly strategy?: Strategy;
   /** Used for every run; there is no store flag. Defaults to memory when absent. */
   readonly store?: SmeltConfigStore;
 }
@@ -140,8 +142,11 @@ export function parseConfig(text: string, path: string): SmeltConfig {
   }
 
   const strategy = fields['strategy'];
-  if (strategy !== undefined && strategy !== 'lexical' && strategy !== 'structural') {
-    throw bad(`"strategy" must be "lexical" or "structural", got ${JSON.stringify(strategy)}.`);
+  if (strategy !== undefined && (typeof strategy !== 'string' || !isStrategy(strategy))) {
+    throw bad(
+      `"strategy" must be ${STRATEGIES.map((s) => `"${s}"`).join(' or ')}, ` +
+        `got ${JSON.stringify(strategy)}.`,
+    );
   }
 
   const store = parseStore(fields['store'], bad);

@@ -11,15 +11,18 @@ import type { ElisionStore, SmeltResult } from '../types.ts';
 
 import { CLI_NAME, cliUsage, parseSmeltArgs } from './args.ts';
 import type { SmeltInvocation } from './args.ts';
-import { CONFIG_FILE_NAME, loadNearestConfig, resolveStorePath } from './config.ts';
-import type { LoadedConfig } from './config.ts';
+import { loadNearestConfig } from './config.ts';
 import { runInit } from './init.ts';
 import { formatReport } from './report.ts';
+import { resolveRun } from './resolve.ts';
+import type { ResolvedRun } from './resolve.ts';
 
 export { CLI_NAME, cliUsage, parseSmeltArgs } from './args.ts';
 export type { SmeltInvocation } from './args.ts';
 export { formatReport } from './report.ts';
 export type { ReportInput } from './report.ts';
+export { resolveRun } from './resolve.ts';
+export type { ResolvedRun } from './resolve.ts';
 
 /**
  * Exit codes, and why there are five of them.
@@ -133,61 +136,50 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
 }
 
 /**
- * One smelt run, with `smelt.config.json` supplying DEFAULTS and nothing more.
+ * One smelt run, executed straight-line over a {@link ResolvedRun}.
  *
- * The precedence is strict and one-directional: an explicit flag always wins over the
- * config, and the config only fills what the flags left unsaid. A malformed config is
- * a usage error even when every flag was given — a config smelt silently skipped
- * would be a setting the user *believed* was in force.
+ * All merging — flags versus `smelt.config.json` versus built-ins, including the
+ * budget-required refusal — happens in {@link resolveRun}, which is the only place
+ * precedence lives. This function reads the resolved object and never consults a flag
+ * or a config field directly.
  */
 async function runSmelt(invocation: SmeltInvocation, io: CliIo): Promise<number> {
-  const loaded = loadNearestConfig(io.cwd ?? process.cwd());
+  const run = resolveRun(invocation, loadNearestConfig(io.cwd ?? process.cwd()));
 
-  const budgetBytes = invocation.budgetBytes ?? loaded?.config.defaultBudgetBytes;
-  if (budgetBytes === undefined) {
-    throw new CliUsageError(
-      `${CLI_NAME}: --budget is required, in UTF-8 bytes. There is no default, because ` +
-        `a budget smelt invented would silently decide how much of your context to ` +
-        `throw away. Pass --budget, or set defaultBudgetBytes in ${CONFIG_FILE_NAME} ` +
-        `(\`${CLI_NAME} init\` writes one).\n` +
-        `  ${CLI_NAME} src/server.ts --budget 4000 --focus handleRequest`,
-    );
-  }
+  const inputText = readInput(run.file, io);
+  const source = run.file ?? '<stdin>';
 
-  const inputText = readInput(invocation.file, io);
-  const source = invocation.file ?? '<stdin>';
-
-  const strategy = invocation.strategy ?? loaded?.config.strategy ?? 'lexical';
-  const store = storeFromConfig(loaded);
-  const smelter = createSmelter({ strategy, ...(store === undefined ? {} : { store }) });
+  const store = storeFor(run);
+  const smelter = createSmelter({
+    strategy: run.strategy,
+    ...(store === undefined ? {} : { store }),
+  });
   const options: SmeltCallOptions = {
-    budgetBytes,
-    ...(invocation.file === undefined ? {} : { path: invocation.file }),
-    ...(invocation.language === undefined ? {} : { language: invocation.language }),
-    ...(invocation.focus.length === 0 ? {} : { focus: invocation.focus }),
+    budgetBytes: run.budgetBytes,
+    ...(run.file === undefined ? {} : { path: run.file }),
+    ...(run.language === undefined ? {} : { language: run.language }),
+    ...(run.focus.length === 0 ? {} : { focus: run.focus }),
   };
   const result = await smelter.smelt(inputText, options);
 
-  if (invocation.json) {
+  if (run.json) {
     io.stdout(`${JSON.stringify(envelope(result, smelter.store), null, 2)}\n`);
   } else {
     io.stdout(result.text);
   }
-  io.stderr(formatReport({ result, source, budgetBytes, inputText }));
+  io.stderr(formatReport({ result, source, budgetBytes: run.budgetBytes, inputText }));
 
-  return result.outputBytes > budgetBytes ? EXIT.overBudget : EXIT.ok;
+  return result.outputBytes > run.budgetBytes ? EXIT.overBudget : EXIT.ok;
 }
 
 /**
- * The store the config asks for, or `undefined` for the library's own default
- * (a fresh in-memory store). `store.path` resolves relative to the config file, so
- * one config serves every subdirectory it covers without scattering store roots.
+ * Construct the store a {@link ResolvedRun} decided on, or `undefined` for the
+ * library's own default (a fresh in-memory store). Pure construction — the decision,
+ * including path resolution, was already made in {@link resolveRun}.
  */
-function storeFromConfig(loaded: LoadedConfig | undefined): ElisionStore | undefined {
-  if (loaded?.config.store === undefined || loaded.config.store.kind === 'memory') {
-    return undefined;
-  }
-  return new DirectoryElisionStore(resolveStorePath(loaded, loaded.config.store.path));
+function storeFor(run: ResolvedRun): ElisionStore | undefined {
+  if (run.store.kind === 'memory') return undefined;
+  return new DirectoryElisionStore(run.store.path);
 }
 
 /**
