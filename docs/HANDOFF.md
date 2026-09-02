@@ -8,11 +8,14 @@
 code. It says what smelt is, why each of its four laws exists, exactly what is scaffolded
 versus what is yours to build, and the order to build it in.
 
-**Status:** the spine is real and green, the CLI (Slice 1) ships, and the structural
-planner (Slice 2) is real for TypeScript and TSX — `--strategy structural` parses with a
-bundled grammar and collapses siblings by name. Nothing has been
-published to npm; publishing is a founder action. The eight questions this document used
-to end with are answered, in "Decisions the founder has made" below.
+**Status:** the spine is real and green, and every v1 slice has shipped: the CLI
+(Slice 1, plus `smelt init` and `smelt.config.json`), the structural planner for
+fifteen languages (Slices 2, 4 and 4b), the measurement harness (Slice 3 — tiers 1
+and 2 runnable, tier 3 built but deliberately not run), the persistent store
+(Slice 5), cache-prefix hygiene (Slice 6) and the repo-map planner (Slice 7).
+Nothing has been published to npm; publishing is a founder action. The eight
+questions this document used to end with are answered, in "Decisions the founder has
+made" below.
 
 ---
 
@@ -164,28 +167,38 @@ a failed grammar load throws `GrammarUnavailableError`, because output labelled
 
 ### The honesty machinery
 
-| File                                                  | What it guards                                                                                                                                                                                                                                    |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/core/test/guards/no-network.test.ts`        | Law 1. Walks the import graph from **every entrypoint the manifest advertises** (`exports` + `bin`, so the CLI is in the walk); classifies every edge; closes the vacuous-walk, unwalked-file, unvetted-dependency and unwalked-entrypoint holes. |
-| `packages/core/test/guards/reversibility.test.ts`     | Law 3. `reconstruct(smelt(x)) === x` over multi-byte, CRLF, no-trailing-newline and one-20 kB-line inputs, plus every refusal.                                                                                                                    |
-| `packages/core/test/guards/expansion-counter.test.ts` | The retrieve counter and `allElisionsRetrieved`, i.e. the observability half of Law 3.                                                                                                                                                            |
-| `packages/core/test/guards/marker-format.test.ts`     | The wire surface. The rendered marker is pinned per version: the format cannot change without the version changing, and an unknown version fails.                                                                                                 |
-| `packages/core/test/guards/third-party.test.ts`       | Attribution. Reruns the real generator and fails if the committed `THIRD-PARTY.md` differs; also proves the generator refuses an unattributed grammar.                                                                                            |
-| `packages/core/test/guards/persistent-store.test.ts`  | Law 3 across a process boundary. A damaged blob is refused as `StoreCorruptionError`, never returned; the retrieval counters survive a restart; "we hold damaged bytes" stays distinct from "never existed".                                      |
-| `packages/core/test/guards/cache-hygiene.test.ts`     | Slice 6's promise: cache-prefix hygiene detects and warns, never rewrites — inputs stay unmutated, no export returns a "fixed" prompt, and no cache-hit-rate figure exists anywhere in `src`.                                                     |
-| `packages/core/test/guards/_source.ts`                | Shared source-walking helpers: `guardSrcRoot()`, `guardRoot()`, and the string/comment stripper that stops `net/policy.ts` reporting its own word list.                                                                                           |
-| `scripts/mutate.mjs`                                  | **The meta-guard.** Fifty-two mutations across the twelve guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                              |
-| `scripts/bundle-grammars.mjs`                         | Copies the grammars `WASM_BY_LANGUAGE` names into the package, so they ship. Reads the built map rather than keeping a second list.                                                                                                               |
-| `scripts/generate-third-party.mjs`                    | Generates `THIRD-PARTY.md`. The grammar ↔ provenance mapping is a partition: an unattributed grammar throws.                                                                                                                                      |
-| `scripts/check-fresh-clone.sh`                        | Installs and verifies from `git archive` output — tracked files only.                                                                                                                                                                             |
-| `.github/workflows/ci.yml`                            | `pnpm verify` on Node 20.19/22.12/24, plus the fresh-clone job.                                                                                                                                                                                   |
+| File                                                    | What it guards                                                                                                                                                                                                                                    |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core/test/guards/no-network.test.ts`          | Law 1. Walks the import graph from **every entrypoint the manifest advertises** (`exports` + `bin`, so the CLI is in the walk); classifies every edge; closes the vacuous-walk, unwalked-file, unvetted-dependency and unwalked-entrypoint holes. |
+| `packages/core/test/guards/reversibility.test.ts`       | Law 3. `reconstruct(smelt(x)) === x` over multi-byte, CRLF, no-trailing-newline and one-20 kB-line inputs, plus every refusal.                                                                                                                    |
+| `packages/core/test/guards/expansion-counter.test.ts`   | The retrieve counter and `allElisionsRetrieved`, i.e. the observability half of Law 3.                                                                                                                                                            |
+| `packages/core/test/guards/marker-format.test.ts`       | The wire surface. The rendered marker is pinned per version: the format cannot change without the version changing, and an unknown version fails.                                                                                                 |
+| `packages/core/test/guards/third-party.test.ts`         | Attribution. Reruns the real generator and fails if the committed `THIRD-PARTY.md` differs; also proves the generator refuses an unattributed grammar.                                                                                            |
+| `packages/core/test/guards/persistent-store.test.ts`    | Law 3 across a process boundary. A damaged blob is refused as `StoreCorruptionError`, never returned; the retrieval counters survive a restart; "we hold damaged bytes" stays distinct from "never existed".                                      |
+| `packages/core/test/guards/cache-hygiene.test.ts`       | Slice 6's promise: cache-prefix hygiene detects and warns, never rewrites — inputs stay unmutated, no export returns a "fixed" prompt, and no cache-hit-rate figure exists anywhere in `src`.                                                     |
+| `packages/core/test/guards/structural.test.ts`          | The structural planner's claims: honest kinds and counts in every marker, no silent lexical fallback, doc comments attached, pins respected, and a survivor that still parses in its own grammar.                                                 |
+| `packages/core/test/guards/structural-totality.test.ts` | Tests for every claimed language: each id in `STRUCTURAL_LANGUAGES` must have a fixture, a committed snapshot and a doc-comment case — claiming a language without tests goes red.                                                                |
+| `packages/core/test/guards/bench-results.test.ts`       | The harness's honesty: `RESULTS.md` rows carry date + corpus commit + tier (and model where required), stay append-only, never say "up to"; network shapes confined to `tier2.mjs`/`tier3.mjs`; `bench/` never enters the published `files` list. |
+| `packages/core/test/guards/repo-map.test.ts`            | Slice 7's claims: the byte budget respected by construction, deterministic ranked output, content-hash cache invalidation, and corrupt cache entries discarded loudly rather than trusted.                                                        |
+| `packages/core/test/guards/init-wizard.test.ts`         | `smelt init`'s one hard rule: an existing file is never overwritten without an explicit per-file yes.                                                                                                                                             |
+| `packages/core/test/guards/_source.ts`                  | Shared source-walking helpers: `guardSrcRoot()`, `guardRoot()`, and the string/comment stripper that stops `net/policy.ts` reporting its own word list.                                                                                           |
+| `scripts/mutate.mjs`                                    | **The meta-guard.** Fifty-two mutations across the twelve guards; each must go red. A survivor is reported as a hole in the guard, not the mutation.                                                                                              |
+| `scripts/bundle-grammars.mjs`                           | Copies the grammars `WASM_BY_LANGUAGE` names into the package, so they ship. Reads the built map rather than keeping a second list.                                                                                                               |
+| `scripts/generate-third-party.mjs`                      | Generates `THIRD-PARTY.md`. The grammar ↔ provenance mapping is a partition: an unattributed grammar throws.                                                                                                                                      |
+| `scripts/check-fresh-clone.sh`                          | Installs and verifies from `git archive` output — tracked files only.                                                                                                                                                                             |
+| `.github/workflows/ci.yml`                              | `pnpm verify` on Node 20.19/22.12/24, plus the fresh-clone job.                                                                                                                                                                                   |
 
-### Not built at all
+### Not yet real
 
-- No benchmark, so no number smelt owns. **Slice 3.**
-- Cross-file reasoning now exists as the repo map (**Slice 7**, shipped): a ranked,
-  budgeted, explainable symbol map of a whole tree, modelled on Aider's repo-map.
-  `smelt()` itself still sees one blob at a time.
+- No expansion-rate number, and no token-saving claim. The benchmark harness
+  (**Slice 3**) is built and its tier-1 byte rows are committed in
+  `packages/core/bench/RESULTS.md`, but tier 3 — the paid, model-calling tier that
+  measures the expansion rate — has deliberately not been run; the founder runs it
+  once and commits its log. Until then the only numbers smelt owns are tier-1
+  bytes and elision counts.
+- Cross-file reasoning inside `smelt()` itself. The repo map (**Slice 7**, shipped)
+  covers the whole-tree shape as its own planner, but `smelt()` still sees one
+  blob at a time.
 
 ---
 
@@ -278,7 +291,7 @@ traces, `cargo build` output), a set of realistic tasks with known answers, and 
 that reports, per case: input bytes, output bytes, elisions, and — critically —
 **expansion rate**, by actually asking a model and counting its `smelt_retrieve` calls.
 
-**Tiers** — decided (Decision 8), not built. `count_tokens` is free, which is what makes
+**Tiers** — decided (Decision 8), now built. `count_tokens` is free, which is what makes
 this affordable: Tier 1 is bytes and elision counts, deterministic, no key, reproducible
 by any contributor offline. Tier 2 adds token counts through `count_tokens` — free, needs
 any key. Tier 3 is expansion rate, the only paid part: run it once and commit the
@@ -764,8 +777,9 @@ metadata, the bundled files themselves, and `grammar-provenance.json` — which 
 the facts with no machine-readable source here. It is **never hand-written**, because a
 hand-written notices file is a promise that decays: a grammar gets added, the file does
 not, and nothing fails. `tree-sitter-wasms` is Unlicense (the packaging); each grammar
-inside carries its own licence, and all six are MIT, verified 2026-09-01 against the npm
-registry and each repository's `LICENSE`. Even the MIT body is quoted from an installed
+inside carries its own licence, and all fifteen are MIT, verified against the npm
+registry and each repository's `LICENSE` on the date `grammar-provenance.json`
+records (2026-09-02). Even the MIT body is quoted from an installed
 `LICENSE` rather than typed into the generator.
 
 `test/guards/third-party.test.ts` reruns the real generator and fails if the committed
@@ -785,7 +799,8 @@ remains, so a premature `0.0.1` is permanent. Publish after Slice 1 lands and
 
 ### 8. Benchmark tiers — recorded here, built in Slice 3
 
-Not built. Recorded so Slice 3 starts from a decision rather than a debate.
+Recorded before Slice 3 was built, so it started from a decision rather than a
+debate; the harness now implements all three tiers (tier 3 unrun — see Slice 3).
 `count_tokens` is **free** — _"Token counting is free to use but subject to requests per
 minute rate limits"_, 5,000 RPM at the Start tier, with limits independent of message
 creation — which is what makes a three-tier split affordable:

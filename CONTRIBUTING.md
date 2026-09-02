@@ -41,6 +41,9 @@ Two things in this repository are generated, and neither is ever hand-edited:
   from installed package metadata, the bundled files, and `grammar-provenance.json`.
   Bundling the grammars is redistribution, so attribution is required; generating it is
   how the attribution stays true when a grammar is added. A stale copy fails `pnpm test`.
+  The generator emits the file already in prettier's formatting, so `pnpm format` (or an
+  editor's format-on-save, from any directory) is a no-op on it and can never make the
+  committed copy disagree with the generator.
 
 ### Trying the CLI
 
@@ -69,9 +72,11 @@ happens to work. A stub that returns something plausible is indistinguishable fr
 working implementation with nothing to say, and someone will ship it.
 
 ```ts
-plan(_input: PlanInput): Promise<ElisionPlan> {
-  throw new NotImplementedError('the structural planner', 'docs/HANDOFF.md § "Slice 2"');
-}
+throw new NotImplementedError(
+  'reranking',
+  'docs/HANDOFF.md § "Explicitly out of v1" — implement `RerankStage` in your own ' +
+    'code, with your own key, so the network call is visible in your source',
+);
 ```
 
 The error names _what_ is missing and _where to read about it_. `test/stubs.test.ts`
@@ -103,8 +108,13 @@ $ pnpm mutate
   PASS  test/guards/expansion-counter.test.ts
   PASS  test/guards/marker-format.test.ts
   PASS  test/guards/third-party.test.ts
+  PASS  test/guards/persistent-store.test.ts
   PASS  test/guards/cache-hygiene.test.ts
   PASS  test/guards/structural.test.ts
+  PASS  test/guards/structural-totality.test.ts
+  PASS  test/guards/bench-results.test.ts
+  PASS  test/guards/repo-map.test.ts
+  PASS  test/guards/init-wizard.test.ts
 
 === mutations: every guard must go red ===
 
@@ -113,7 +123,7 @@ $ pnpm mutate
            guard:    test/guards/no-network.test.ts
            red on:   AssertionError: Law 1 violation: smelt v1 makes zero network calls: expected [ Array(1) ] to deeply equal []
   …
-=== 21/21 mutations caught across 8 guards ===
+=== 52/52 mutations caught across 12 guards ===
 ```
 
 **Adding a guard? The convention is three steps:**
@@ -137,18 +147,22 @@ artefact mutations copy the one file into a scratch root. A runner that edited t
 files and then crashed would leave the repository broken, which is the opposite of what a
 safe-to-fail check is for.
 
-The eight guards today, and what each one would let through if it stopped working:
+The twelve guards today, and what each one would let through if it stopped working:
 
-| Guard                              | If it silently stopped working                                                                                                        |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `guards/no-network.test.ts`        | source leaving the machine — including from the CLI, a second front door                                                              |
-| `guards/reversibility.test.ts`     | `reconstruct()` returning almost-right text                                                                                           |
-| `guards/expansion-counter.test.ts` | the expansion rate pinned at a flattering zero                                                                                        |
-| `guards/marker-format.test.ts`     | the marker changing shape in everyone's prompts, with no error anywhere                                                               |
-| `guards/third-party.test.ts`       | a bundled grammar being redistributed with no licence notice                                                                          |
-| `guards/cache-hygiene.test.ts`     | cache hygiene quietly rewriting prompts, or a hit-rate claim reappearing                                                              |
-| `guards/structural.test.ts`        | structural markers that mislabel, cut, or approximate what the parse tree says                                                        |
-| `guards/repo-map.test.ts`          | a repo map that overruns its budget, reorders on rank ties, serves stale tags after an edit, or silently trusts a corrupt cache entry |
+| Guard                                | If it silently stopped working                                                                                                        |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `guards/no-network.test.ts`          | source leaving the machine — including from the CLI, a second front door                                                              |
+| `guards/reversibility.test.ts`       | `reconstruct()` returning almost-right text                                                                                           |
+| `guards/expansion-counter.test.ts`   | the expansion rate pinned at a flattering zero                                                                                        |
+| `guards/marker-format.test.ts`       | the marker changing shape in everyone's prompts, with no error anywhere                                                               |
+| `guards/third-party.test.ts`         | a bundled grammar being redistributed with no licence notice                                                                          |
+| `guards/cache-hygiene.test.ts`       | cache hygiene quietly rewriting prompts, or a hit-rate claim reappearing                                                              |
+| `guards/structural.test.ts`          | structural markers that mislabel, cut, or approximate what the parse tree says                                                        |
+| `guards/repo-map.test.ts`            | a repo map that overruns its budget, reorders on rank ties, serves stale tags after an edit, or silently trusts a corrupt cache entry |
+| `guards/persistent-store.test.ts`    | a damaged blob handed back as a faithful retrieval, or retrieval counters that reset to zero on restart                               |
+| `guards/structural-totality.test.ts` | a language claimed by the planner with no fixture, snapshot or doc-comment case behind it                                             |
+| `guards/bench-results.test.ts`       | an edited or extrapolated results row, a network call in the offline tier, or `bench/` slipping into the tarball                      |
+| `guards/init-wizard.test.ts`         | `smelt init` overwriting a hand-written file without an explicit per-file yes                                                         |
 
 ## Two promises, not one
 
@@ -200,7 +214,7 @@ Before the first publish:
 - [ ] `pnpm build` has run, so `packages/core/grammars/` is populated, and
       `pnpm generate:third-party` leaves `THIRD-PARTY.md` unchanged.
 - [ ] `npm pack --dry-run` in `packages/core`, and **read the file list**. It must contain
-      `dist/`, all six `grammars/*.wasm`, `README.md` and `THIRD-PARTY.md`. A tarball
+      `dist/`, all fifteen `grammars/*.wasm`, `README.md` and `THIRD-PARTY.md`. A tarball
       without the grammars still installs and still fails later, on someone else's
       machine, which is the failure shape this project is arranged against.
 - [ ] `node dist/cli/bin.js --version` prints the version in the manifest, and
@@ -315,8 +329,10 @@ laptop is the worst possible outcome.
 2. Map the extensions in `src/detect.ts` and add the id to `SUPPORTED_LANGUAGES`.
 3. `test/detect.test.ts` asserts a grammar resolves on disk for every language in
    `SUPPORTED_LANGUAGES`. It will fail until step 1 is real.
-4. Add the language's node kinds to the structural planner's query set (once Slice 2
-   exists) and a fixture proving a sibling collapse on it.
+4. Add the language's node kinds to `STRUCTURE_BY_LANGUAGE` in
+   `src/plan/structural.ts`, and a fixture proving a sibling collapse on it — the
+   totality guard (`test/guards/structural-totality.test.ts`) fails until the
+   fixture, snapshot and doc-comment case all exist.
 
 ## Opening a PR
 
