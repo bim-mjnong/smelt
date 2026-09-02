@@ -35,8 +35,15 @@ codebase-design glossary.
 
 - **LanguageProfile**: the single adapter carrying every per-language fact — extensions,
   grammar wasm, marker leader, pinned comments, structural node kinds, repo-map tag
-  kinds, licence provenance. Registry at `src/lang/`; consumers read it, never own a
-  slice of it. "Structural language" = a profile with a `structure` section.
+  kinds, licence provenance. One file per language in `src/lang/`; the registry
+  (`LANGUAGE_PROFILES` in `src/lang/registry.ts`) is `Record<LanguageId, LanguageProfile>`,
+  so totality is a compile error. The seam is `profileFor(id)`, `profileForPath(path)`
+  and `structuralLanguages()`; every rendered list and every exported set
+  (`SUPPORTED_LANGUAGES`, `WASM_BY_LANGUAGE`, `STRUCTURAL_LANGUAGES`,
+  `MARKER_LINE_COMMENT_LEADERS`) is a derived view. Consumers read it, never own a
+  slice of it. "Structural language" = a profile with a `structure` section;
+  `grammar-provenance.json` holds the licence facts, its key set guard-pinned to the
+  registry's wasm set.
 - **MarkerPricing**: the seam through which planners ask what a marker will cost in
   bytes. Owned and built by `apply.ts`; planners never estimate independently.
 - **ResolvedRun**: the CLI's single merge of flags + config + defaults; the only place
