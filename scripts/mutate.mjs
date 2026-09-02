@@ -6,7 +6,7 @@
  * ships with at least one *mutation*: a specific, minimal break in the source that the
  * guard must catch. This script copies `packages/core/src` to a scratch directory,
  * applies one mutation, points the guard at the copy via `SMELT_GUARD_SRC`, and
- * asserts the guard goes **red**. Fifty-two mutations across twelve guards; a mutation the
+ * asserts the guard goes **red**. Fifty-six mutations across twelve guards; a mutation the
  * guard survives is reported as a failure of the *guard*, not of the mutation.
  *
  * It also runs every guard against the pristine tree first, because a guard that fails
@@ -170,16 +170,16 @@ const MUTATIONS = [
     id: 'law3-dir-store-verify-skipped',
     guard: 'test/guards/persistent-store.test.ts',
     file: 'store-dir.ts',
-    find: "    if (this.#hash(content) !== hash) {\n      this.#appendLog('corrupt', hash);",
-    replace: "    if (false) {\n      this.#appendLog('corrupt', hash);",
+    find: "    if (this.#hash(content) !== hash) {\n      this.#appendLogCounting('corrupt', hash);",
+    replace: "    if (false) {\n      this.#appendLogCounting('corrupt', hash);",
     why: 'verify-on-read disabled — a torn blob would be handed back as a faithful retrieval',
   },
   {
     id: 'law3-dir-store-counters-die-with-process',
     guard: 'test/guards/persistent-store.test.ts',
     file: 'store-dir.ts',
-    find: "    this.#appendLog('hit', hash);",
-    replace: "    // this.#appendLog('hit', hash);",
+    find: "    this.#appendLogCounting('hit', hash);",
+    replace: "    // this.#appendLogCounting('hit', hash);",
     why: 'the retrieval journal never written — the expansion rate resets to a flattering zero on every restart',
   },
   {
@@ -517,6 +517,48 @@ const MUTATIONS = [
     find: "      if (answer !== 'yes') {",
     replace: '      if (false) {',
     why: 'the per-file overwrite consent wired shut — `smelt init` would clobber a hand-written file after any answer, the helpful-looking break the never-overwrite rule exists to refuse',
+  },
+  {
+    id: 'law1-globalthis-fetch',
+    guard: 'test/guards/no-network.test.ts',
+    file: 'store.ts',
+    find: '  has(hash: string): boolean {',
+    replace: '  has(hash: string): boolean {\n    void globalThis.fetch;',
+    why: 'fetch reached through the global object — `globalThis.fetch` slips past a bare-name grep whose lookbehind rejects any `.`-prefixed match, so the guard must catch the qualified spelling too',
+  },
+  {
+    kind: 'artifact',
+    id: 'bench-static-transport-import',
+    guard: 'test/guards/bench-results.test.ts',
+    file: 'bench/lib.mjs',
+    find: 'export const RESULTS_HEADER = [',
+    replace: "import 'node:https';\n\nexport const RESULTS_HEADER = [",
+    why: 'a network transport imported statically into a non-tier bench module — the specifier lives inside a string literal, which the stripped-source shape scan blanks out, so only the import-specifier scan can see it',
+  },
+  {
+    id: 'reconstruct-counts-as-retrieval',
+    guard: 'test/guards/expansion-counter.test.ts',
+    file: 'apply.ts',
+    find:
+      '    const content = store.peek(elision.hash);\n' +
+      '    if (content === undefined) throw new UnknownHashError(elision.hash);\n' +
+      '    pieces.push(output.subarray(cursor, elision.outputRange.start));\n' +
+      "    pieces.push(Buffer.from(content, 'utf8'));",
+    replace:
+      '    pieces.push(output.subarray(cursor, elision.outputRange.start));\n' +
+      "    pieces.push(Buffer.from(store.retrieve(elision.hash), 'utf8'));",
+    why: 'reconstruct() reverted to the counted retrieve() path — one verification round trip would push the expansion rate to 1.0, inflating the exact number this project exists to keep honest',
+  },
+  {
+    id: 'repomap-usage-site-counted-as-definition',
+    guard: 'test/guards/repo-map.test.ts',
+    file: 'repomap/tags.ts',
+    find:
+      "  if (BODY_REQUIRED_TYPES.has(node.type) && node.childForFieldName('body') === null) {\n" +
+      '    return false; // a bodiless specifier is a usage or forward declaration, not a definition\n' +
+      '  }\n',
+    replace: '',
+    why: "the C/C++ body requirement dropped — `struct point p;` earns a `defined at` receipt it never had, and its name node poisons defNameStarts so the true definition's cross-file references silently vanish from the map",
   },
 ];
 

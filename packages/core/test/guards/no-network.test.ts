@@ -246,12 +246,20 @@ describe('Law 1 — zero network', () => {
     ).toEqual([]);
   });
 
-  it('never touches a network global', () => {
+  it('never touches a network global — bare, or qualified through the global object', () => {
     const violations: string[] = [];
     for (const file of result.visited) {
       const code = stripStringsAndComments(readSource(file, root));
       for (const global of FORBIDDEN_GLOBALS) {
-        const pattern = new RegExp(`(?<![.\\w$'"])${global}\\b`);
+        // Two shapes reach the same global: the bare name, and the name behind a
+        // global-object qualifier (`globalThis.fetch`, `global.fetch`, and the
+        // browser-flavoured `window.`/`self.` for completeness). The bare-name
+        // lookbehind deliberately rejects any `.`-prefixed match, so the qualified
+        // alternative exists to close exactly that hole.
+        const pattern = new RegExp(
+          `(?<![.\\w$'"])${global}\\b` +
+            `|(?<![\\w$])(?:globalThis|global|window|self)\\s*\\.\\s*${global}\\b`,
+        );
         if (pattern.test(code)) violations.push(`${file} references \`${global}\``);
       }
     }
