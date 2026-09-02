@@ -31,7 +31,7 @@ import { extractTags } from '@guard/repomap/tags';
 import type { GuardMutation } from './_mutations.ts';
 
 /**
- * REPO-MAP GUARD — the guarantees Slice 7 claims.
+ * REPO-MAP GUARD — the guarantees the repo map claims.
  *
  * The repo map is modelled on Aider's (https://aider.chat/docs/repomap.html) and
  * inherits this repo's laws on top of it. Each property here could quietly rot into
@@ -78,7 +78,7 @@ function scratch(prefix: string): string {
 
 const BUDGET = 10_000;
 
-describe('Slice 7 — the repo map keeps its claims', () => {
+describe('the repo map keeps its claims', () => {
   it('is deterministic: two runs are byte-identical, with or without a cache', async () => {
     const cold = await buildRepoMap({ root: fixtureRoot, budgetBytes: BUDGET });
     const again = await buildRepoMap({ root: fixtureRoot, budgetBytes: BUDGET });

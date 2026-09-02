@@ -1,7 +1,7 @@
 # Contributing to smelt
 
 Bug fixes, planners, languages, docs — all welcome. Before you write code, read the four
-laws in [`docs/HANDOFF.md`](docs/HANDOFF.md#the-four-laws-and-why-each-one-is-load-bearing).
+laws in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#the-four-laws-and-why-each-one-is-load-bearing).
 They are not style preferences. Each one exists because breaking it produces a library
 that _looks_ like it works, and a contributor acting in good faith will break them
 helpfully unless they know why they are there.
@@ -81,7 +81,7 @@ working implementation with nothing to say, and someone will ship it.
 ```ts
 throw new NotImplementedError(
   'reranking',
-  'docs/HANDOFF.md § "Explicitly out of v1" — implement `RerankStage` in your own ' +
+  'docs/ARCHITECTURE.md § "Explicitly out of scope" — implement `RerankStage` in your own ' +
     'code, with your own key, so the network call is visible in your source',
 );
 ```
@@ -117,6 +117,7 @@ $ pnpm mutate
   PASS  core: test/guards/bench-results.test.ts
   PASS  core: test/guards/cache-hygiene.test.ts
   PASS  core: test/guards/expansion-counter.test.ts
+  PASS  core: test/guards/hooks-preset.test.ts
   PASS  core: test/guards/init-wizard.test.ts
   PASS  core: test/guards/marker-format.test.ts
   PASS  core: test/guards/no-network.test.ts
@@ -183,6 +184,7 @@ The guards today, and what each one would let through if it stopped working:
 | `guards/structural-totality.test.ts` | a language claimed by the planner with no fixture, snapshot or doc-comment case behind it                                             |
 | `guards/bench-results.test.ts`       | an edited or extrapolated results row, a network call in the offline tier, or `bench/` slipping into the tarball                      |
 | `guards/init-wizard.test.ts`         | `smelt init` overwriting a hand-written file without an explicit per-file yes                                                         |
+| `guards/hooks-preset.test.ts`        | a size threshold silently unwired from the config, or `smelt hooks install` clobbering another tool's config file without a yes       |
 | `guards/planner-registry.test.ts`    | a strategy vanishing from the `PLANNERS` registry while the factory, the flag/config validation, or the help text still claims it     |
 
 ## Two promises, not one
@@ -217,18 +219,18 @@ old markers stay valid in caches, transcripts and other people's prompts forever
 If you need a different marker for your own use, pass `marker` to `createSmelter()`. That
 is your format in your process, and nothing here is in your way.
 
-## Publishing (a founder action)
+## Publishing (a maintainer action)
 
-**Do not publish. Do not run `npm login`.** Publishing `@smeltjs/core` is the founder's
+**Do not publish. Do not run `npm login`.** Publishing `@smeltjs/core` is a maintainer
 action, not a contributor's and not an agent's. This checklist exists so the ordering is
 decided before anyone is standing at the keyboard.
 
 **The ordering rule, and why it is a rule:** npm restricts unpublishing after **72
-hours** — after that only `npm deprecate` remains. The first publish is therefore
+hours** — after that only `npm deprecate` remains. A publish is therefore
 effectively permanent. So publish **after** the CLI actually runs on a real file, never
 to "reserve the name".
 
-Before the first publish:
+Before a publish:
 
 - [ ] `pnpm verify` green, and `bash scripts/check-fresh-clone.sh` green — the second one
       is what catches a file that works only because it was never committed.
@@ -244,7 +246,7 @@ Before the first publish:
       a number and lives with it.
 
 Files that carry the package name, should it ever need to change: `packages/core/package.json`,
-`packages/core/README.md`, the root `README.md`, `CONTRIBUTING.md`, `docs/HANDOFF.md`. The
+`packages/core/README.md`, the root `README.md`, `CONTRIBUTING.md`, `docs/ARCHITECTURE.md`. The
 CLI's binary name is `smelt` and is independent of the package name — it is defined once,
 as `CLI_NAME` in `src/cli/args.ts`.
 
@@ -338,7 +340,7 @@ laptop is the worst possible outcome.
 - Bytes, not characters. Budgets, ranges and counters are UTF-8 bytes. `'🔥'.length` is
   2; it costs 4. Budgets are bytes **permanently** — the reasoning, including why there is
   no local Claude tokenizer and why a token budget silently retunes itself between model
-  generations, is in [`docs/HANDOFF.md` § "Decisions the founder has made"](docs/HANDOFF.md#decisions-the-founder-has-made).
+  generations, is in [`docs/ARCHITECTURE.md` § "Design decisions"](docs/ARCHITECTURE.md#design-decisions).
   If you want a token count in the result, supply a `measure`; do not change the unit.
 - **Never touch the marker format** without reading "Two promises, not one" above.
 

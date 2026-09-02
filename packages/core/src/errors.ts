@@ -24,7 +24,7 @@ export class NotImplementedError extends SmeltError {
 
 /**
  * Thrown when something in the elision path tried to reach a non-local resource.
- * v1 has no network. See docs/HANDOFF.md § "Law 1 — zero network".
+ * v1 has no network. See docs/ARCHITECTURE.md § "Law 1 — zero network".
  */
 export class NetworkPolicyError extends SmeltError {
   override readonly name = 'NetworkPolicyError';

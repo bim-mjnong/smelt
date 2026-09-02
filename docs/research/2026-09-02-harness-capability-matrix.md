@@ -3,10 +3,9 @@
 Second note in the `docs/research/` convention (see
 `2026-09-02-agent-enforcement.md` for the convention's start and the Claude
 Code/Codex deep dive). Surveyed 2026-09-02 against primary sources only; every
-claim cites the doc or repo that owns it. Feeds the multi-harness hooks preset
-(Linear KOT-212).
+claim cites the doc or repo that owns it. Feeds the multi-harness hooks preset.
 
-Founder rulings this matrix produced (2026-09-02, all approved): verified tier =
+Decisions this matrix produced (2026-09-02): verified tier =
 Claude Code + Codex first; Gemini/Grok/Hermes/Cursor/opencode/Cline shims land as
 "experimental" until smoke-tested against the real harness; KiloCode = MCP +
 permissions docs; Aider = conventions-file snippet, labelled advisory. The

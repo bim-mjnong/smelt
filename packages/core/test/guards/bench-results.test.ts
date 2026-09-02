@@ -11,8 +11,8 @@ import { guardRoot, importSpecifiers, packageRoot, stripStringsAndComments } fro
 /**
  * BENCH-RESULTS GUARD — Law 4, for the one place numbers are allowed to exist.
  *
- * Slice 3 built the measurement harness so smelt can state a number. That is also
- * the moment a Law 4 violation stops being hypothetical: a results file is exactly
+ * The measurement harness is what lets smelt state a number, and it is also where
+ * a Law 4 violation stops being hypothetical: a results file is exactly
  * where an unmeasured, unattributed, or extrapolated figure would land, and where a
  * network call could quietly creep out of its tier. Three claims are pinned here:
  *
@@ -21,7 +21,7 @@ import { guardRoot, importSpecifiers, packageRoot, stripStringsAndComments } fro
  *     modules can reach the network, which must never ride along in the tarball.
  *  2. Every row in `bench/RESULTS.md` is a measurement: it names its date, corpus
  *     commit and tier, token/retrieval rows name their model (token counts are
- *     model-specific — HANDOFF Decision 8), byte rows name none (bytes belong to no
+ *     model-specific — Decision 8 in docs/ARCHITECTURE.md), byte rows name none (bytes belong to no
  *     model, and a model on a byte row would imply a conversion nobody performed).
  *     And the file contains no extrapolation vocabulary: no "up to", and never a
  *     cache-hit-rate figure — the exact unsupported claims Law 4 was written

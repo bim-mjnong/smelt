@@ -230,7 +230,7 @@ describe('hermes shim (EXPERIMENTAL)', () => {
       action: 'modify',
       args: { command: 'smelt /repo/big.ts --budget 8000' },
     });
-    // A rewrite must never be silent (founder ruling, KOT-212): no reason channel
+    // A rewrite must never be silent: no reason channel
     // in the schema means the substitution is announced on stderr instead.
     expect(output.stderr).toContain('rewrite mode');
     expect(output.stderr).toContain('smelt /repo/big.ts --budget 8000');

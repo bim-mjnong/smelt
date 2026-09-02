@@ -12,7 +12,7 @@ import { extractTags } from './tags.ts';
 import type { FileTags } from './tags.ts';
 
 /**
- * The repo-map builder — Slice 7, the cross-file shape.
+ * The repo-map builder — the cross-file shape.
  *
  * **Modelled on Aider's repo-map, and credited as such.** The whole design is prior
  * art: Paul Gauthier's Aider extracts tree-sitter definition/reference tags per file,

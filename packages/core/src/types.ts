@@ -136,7 +136,7 @@ export interface AppliedElision {
  *
  * Budgets in smelt's core are UTF-8 bytes, permanently — bytes are the only unit that
  * is computable locally for every model, and they mean the same thing in five years.
- * See `docs/HANDOFF.md` § "Decision 1". This hook does not change that: it adds a
+ * See `docs/ARCHITECTURE.md` § "Decision 1". This hook does not change that: it adds a
  * second, labelled number to the result. The plan is still made in bytes.
  *
  * Both `id` and `unit` are required, and that is a Law 4 decision rather than

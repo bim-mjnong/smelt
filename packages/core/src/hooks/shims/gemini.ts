@@ -6,7 +6,7 @@ import type { ShimAdapter } from '../shim.ts';
  * capability matrix (docs/research/2026-09-02-harness-capability-matrix.md, Gemini
  * CLI row; primary source <https://geminicli.com/docs/hooks/reference/>), and the
  * field names were additionally checked 2026-09-02 against the shipped
- * `@google/gemini-cli` 0.58.0 bundle (installed headlessly for KOT-212's
+ * `@google/gemini-cli` 0.58.0 bundle (installed headlessly for the shim's
  * verification pass): the BeforeTool stdin payload is `{ tool_name, tool_input }`,
  * `read_file` takes `file_path` with `start_line`/`end_line` windows, the shell
  * tool is `run_shell_command` with `command`, denial is `{ "decision": "deny",

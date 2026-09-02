@@ -36,8 +36,7 @@ import type { GuardDecision, GuardRequest, GuardSettings } from './guard-core.ts
  *    plugin) — a rewrite nobody can see would change what the model asked for
  *    without telling anyone. And a shim never rewrites in deny mode: a silent
  *    rewrite changes what the model asked for without telling it, which is this
- *    project's signature failure shape applied to the harness (founder ruling,
- *    KOT-212).
+ *    project's signature failure shape applied to the harness.
  */
 
 /** What one harness shim supplies. Everything else is {@link runShim}'s. */

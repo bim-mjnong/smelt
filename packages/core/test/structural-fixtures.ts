@@ -1,5 +1,5 @@
 /**
- * TypeScript, TSX, Rust, Python, Go — and the ten Slice 4b languages — sources the
+ * TypeScript, TSX, Rust, Python, Go — and ten more languages — sources the
  * structural-planner tests and guards share.
  *
  * They are template literals rather than files on disk so the guards can import them
@@ -351,7 +351,7 @@ func Target(value int) int {
 `;
 
 /* -------------------------------------------------------------------------- *
- * Slice 4b — ten more languages, one fixture each. Every fixture has the same
+ * Ten more languages, one fixture each. Every fixture has the same
  * anatomy: a run of collapsible siblings above the focus target (mixed kinds,
  * so the marker has something to name), a doc comment attached to the target
  * in the language's own idiom, and two same-kind siblings below the target so

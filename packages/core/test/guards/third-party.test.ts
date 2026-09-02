@@ -16,7 +16,7 @@ import { guardRoot, packageRoot, repoRoot } from './_source.ts';
  * makes "no native compilation, works offline" true and which makes smelt a
  * redistributor. Attribution is therefore required, and a hand-written notices file is
  * a promise that decays silently: a grammar gets added, the file does not, and nothing
- * anywhere fails. Downstream this is not academic — KLØDD ships in two app stores and
+ * anywhere fails. Downstream this is not academic — an app that bundles smelt
  * takes its licence screen text from here.
  *
  * So `THIRD-PARTY.md` is generated, and this guard regenerates it and fails if the

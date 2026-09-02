@@ -103,7 +103,7 @@ export function Footer() {
             { label: 'GitHub', href: GITHUB },
             { label: 'npm: core', href: 'https://www.npmjs.com/package/@smeltjs/core' },
             { label: 'npm: mcp', href: 'https://www.npmjs.com/package/@smeltjs/mcp' },
-            { label: 'Docs (HANDOFF)', href: `${GITHUB}/blob/main/docs/HANDOFF.md` },
+            { label: 'Docs (ARCHITECTURE)', href: `${GITHUB}/blob/main/docs/ARCHITECTURE.md` },
             { label: 'Bench harness', href: `${GITHUB}/tree/main/packages/core/bench` },
             { label: 'License', href: `${GITHUB}/blob/main/LICENSE` },
           ].map((link) => (

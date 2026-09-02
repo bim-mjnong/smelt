@@ -31,9 +31,9 @@ codebase-design glossary.
 - **Guard**: a test that pins a law or guarantee, proven non-vacuous by mutations.
 - **Mutation**: a deliberate minimal break that its guard must catch (`pnpm mutate`).
 - **The four laws**: zero network · every elision explainable · every elision reversible
-  (and counted) · no unmeasured numbers. Reasoning in `docs/HANDOFF.md`.
+  (and counted) · no unmeasured numbers. Reasoning in `docs/ARCHITECTURE.md`.
 
-## Deepened modules (2026-09-02 architecture review)
+## Deepened modules
 
 - **LanguageProfile**: the single adapter carrying every per-language fact — extensions,
   grammar wasm, marker leader, pinned comments, structural node kinds, repo-map tag
@@ -54,8 +54,10 @@ codebase-design glossary.
   sees it). Planners never estimate independently; `createSmelter` and the CLI construct
   the pricing centrally, and a JS caller who omits it gets `MissingMarkerPricingError`,
   never a guessed cost.
-- **ResolvedRun**: the CLI's single merge of flags + config + defaults; the only place
-  precedence lives.
+- **ResolvedRun**: the CLI's single merge of flags + config + built-ins (`resolveRun` in
+  `src/cli/resolve.ts`); the only place precedence lives, each value carrying its
+  provenance (`flag`/`config`/`builtin`). It owns the budget-required refusal, and
+  `runSmelt` executes it straight-line with no `??` of its own.
 - **retrieveStats**: the one exported derivation within `src/` of the honesty
   arithmetic (`expansionRate`, `allElisionsRetrieved`) from a store's
   **RawRetrieveCounters** — a free function in `src/stats.ts`, not a base class. A
@@ -63,16 +65,10 @@ codebase-design glossary.
   counters, never derive the metric. Consumers see only `stats()`; the seam is for
   adapter authors. (`bench/lib.mjs`, deliberately import-free, re-derives the same
   formula; `test/bench.test.ts` pins the two copies to each other.)
-- **ResolvedRun**: the CLI's single merge of flags + config + built-ins (`resolveRun` in
-  `src/cli/resolve.ts`); the only place precedence lives, each value carrying its
-  provenance (`flag`/`config`/`builtin`). It owns the budget-required refusal, and
-  `runSmelt` executes it straight-line with no `??` of its own.
 - **PLANNERS**: the one registry of planner strategies (`src/plan/planners.ts`), string →
   factory over the lexical/structural option bags. `createSmelter`, `--strategy` and
   config validation, and the help text all serve its keys; a constructed `planner` on
   `SmelterConfig` wins over any strategy name.
-- **retrieveStats**: the one shared derivation of expansion-rate arithmetic from a
-  store's raw counters; adapters supply counters, never derive the metric.
 - **RepoMap**: the ranked whole-tree symbol map `buildRepoMap` returns — deliberately
   **not** an `ElisionPlan` and its builder deliberately not a Planner: nothing is
   elided, stored, or reversible, so the Planner interface would claim laws the map

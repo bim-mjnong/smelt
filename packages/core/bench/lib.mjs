@@ -4,7 +4,7 @@
  * `test/bench.test.ts` can exercise the harness's logic without a built `dist` and
  * without a key.
  *
- * The tier semantics these helpers encode are HANDOFF Decision 8:
+ * The tier semantics these helpers encode are Decision 8 in `docs/ARCHITECTURE.md`:
  *
  *   tier 1 — bytes and elision counts. Deterministic, offline, no key.
  *   tier 2 — token counts via Anthropic's `/v1/messages/count_tokens`. Free, needs a
@@ -130,8 +130,8 @@ export function renderTable(rows) {
 /**
  * Appends a section to an existing results document, refusing to touch what is
  * already there. Rows are append-only: a re-run on a newer model is a new row,
- * never an edit — tokenizers shift between model generations (HANDOFF Decision 8),
- * and editing a row would silently rewrite history.
+ * never an edit — tokenizers shift between model generations (`docs/ARCHITECTURE.md`
+ * § Decision 8), and editing a row would silently rewrite history.
  */
 export function appendResults(existing, section) {
   const base = existing.trimEnd();
@@ -165,7 +165,8 @@ export function countTokensRequest(model, text) {
 /**
  * Tier 3's verdict for one case, from its retrieval log. A case where the model
  * retrieved every elision back is a LOSS, reported as such with its input: every
- * byte smelt hid cost a round trip and saved nothing (HANDOFF Decision 4 names
+ * byte smelt hid cost a round trip and saved nothing (Decision 4 in
+ * `docs/ARCHITECTURE.md` names
  * this the one degenerate outcome).
  *
  * The arithmetic here is deliberately the same formula as `retrieveStats` in

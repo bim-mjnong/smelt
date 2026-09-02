@@ -409,7 +409,7 @@ const myReranker: RerankStage = {
 ## The four laws
 
 The reasoning — _why_ breaking each produces a library that still looks like it works —
-is in [`docs/HANDOFF.md`](docs/HANDOFF.md#the-four-laws-and-why-each-one-is-load-bearing):
+is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#the-four-laws-and-why-each-one-is-load-bearing):
 
 1. **Zero network.** No external calls, in any code path, enforced by a guard that walks
    the real import graph from every entrypoint the manifest advertises.
@@ -460,7 +460,7 @@ aspirational.
 
 | Doc                                                            | What is in it                                                                                                     |
 | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| [`docs/HANDOFF.md`](docs/HANDOFF.md)                           | The deep dive: the four laws and their reasoning, the architecture file by file, the consumer contract, decisions |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)                 | The deep dive: the four laws and their reasoning, the architecture file by file, the consumer contract, decisions |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md)                           | Dev setup, the guard/mutation convention, the recorded transcript of the zero-network guard going red             |
 | [`packages/core/bench/`](packages/core/bench/)                 | The measurement harness: corpus, tiers, and the append-only results table                                         |
 | [`packages/core/THIRD-PARTY.md`](packages/core/THIRD-PARTY.md) | Generated attribution for the bundled grammars. Never hand-edited; a stale copy fails `pnpm test`.                |
@@ -475,9 +475,9 @@ part that matters. `pnpm verify` is the gate; Conventional Commits.
 
 ## License
 
-[Apache-2.0](./LICENSE). smelt is used by, but independent of, the KLØDD app — the
-consumer contract in [`docs/HANDOFF.md`](docs/HANDOFF.md#the-klødd-integration-contract)
-is the same one any consumer gets.
+[Apache-2.0](./LICENSE). The consumer contract — the stable surface and the guarantees
+any consumer can rely on — is in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#the-consumer-contract).
 
 <div align="center">
 <br />
