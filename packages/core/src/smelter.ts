@@ -3,7 +3,7 @@ import type { ApplyOptions, MarkerBuilder } from './apply.ts';
 import { detectLanguage } from './detect.ts';
 import { SmeltError } from './errors.ts';
 import type { LexicalPlannerOptions } from './plan/lexical.ts';
-import { PLANNERS } from './plan/planners.ts';
+import { DEFAULT_STRATEGY, PLANNERS } from './plan/planners.ts';
 import type { Strategy } from './plan/planners.ts';
 import type { StructuralPlannerOptions } from './plan/structural.ts';
 import { createRetrieveTool } from './retrieve.ts';
@@ -98,7 +98,7 @@ export interface Smelter {
 export function createSmelter(config: SmelterConfig = {}): Smelter {
   const store = config.store ?? new MemoryElisionStore();
   // A constructed instance wins over a strategy name; the registry serves the names.
-  const planner: Planner = config.planner ?? PLANNERS[config.strategy ?? 'lexical'](config);
+  const planner: Planner = config.planner ?? PLANNERS[config.strategy ?? DEFAULT_STRATEGY](config);
   const applyOptions: ApplyOptions = {
     ...(config.marker === undefined ? {} : { marker: config.marker }),
     ...(config.measure === undefined ? {} : { measure: config.measure }),

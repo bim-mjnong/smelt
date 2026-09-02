@@ -30,7 +30,13 @@ import { DEFAULT_SUGGESTION_BUDGET_BYTES, DEFAULT_THRESHOLD_BYTES } from '../hoo
 import type { EnforcementMode } from '../hooks/guard-core.ts';
 
 import { CLI_NAME } from './shell.ts';
-import { CONFIG_FILE_NAME, CONFIG_VERSION, findConfigFile, parseConfig } from './config.ts';
+import {
+  CONFIG_FILE_NAME,
+  CONFIG_VERSION,
+  findConfigFile,
+  parseConfig,
+  renderConfig,
+} from './config.ts';
 import type { SmeltConfig, SmeltConfigHooks } from './config.ts';
 
 /**
@@ -617,12 +623,16 @@ export const DEFAULT_STORE_DIR = '.smelt/store';
  * config cannot run would be the exact silent-failure shape this project refuses.
  * An *explicit* `{"kind":"memory"}` is respected; the guard then conditions its
  * retrieve promise on the store kind instead (`retrieveSentence` in guard-core).
+ *
+ * That store injection is this verb's **policy**, which is why it lives here; the
+ * bytes are written by `renderConfig` in `config.ts`, the one writer, so a key added
+ * to the schema reaches this file and `init`'s together or not at all.
  */
 export function renderConfigWithHooks(
   existing: SmeltConfig | undefined,
   hooks: SmeltConfigHooks,
 ): string {
-  const config: SmeltConfig = {
+  return renderConfig({
     smeltConfig: CONFIG_VERSION,
     ...(existing?.defaultBudgetBytes === undefined
       ? {}
@@ -630,8 +640,7 @@ export function renderConfigWithHooks(
     ...(existing?.strategy === undefined ? {} : { strategy: existing.strategy }),
     store: existing?.store ?? { kind: 'directory', path: DEFAULT_STORE_DIR },
     hooks,
-  };
-  return `${JSON.stringify(config, null, 2)}\n`;
+  });
 }
 
 /**

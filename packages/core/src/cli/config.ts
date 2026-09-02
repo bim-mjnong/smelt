@@ -185,6 +185,49 @@ export function parseConfig(text: string, path: string): SmeltConfig {
   };
 }
 
+/**
+ * Serialize a config back to the bytes of a `smelt.config.json` — {@link parseConfig}'s
+ * inverse, and the **only** writer of this file.
+ *
+ * The module that owns the schema owns both directions. It used to own only the read:
+ * two modules hand-built a config object and stringified it — the `init` wizard and
+ * `hooks install` — and they had already drifted, one always emitting `strategy` and
+ * the other only when it was carried. A sixth key would have been written by whichever
+ * module its author was editing and silently dropped by the other, which is the
+ * "setting the user believed was in force" failure this file refuses everywhere else.
+ *
+ * Key order is fixed here — the reader's own key order, top level and inside `store`
+ * and `hooks` — so a re-run diffs cleanly no matter which verb wrote the file, and two
+ * writers can never disagree about shape. What goes *into* the config stays each
+ * verb's policy: the wizard's choices, and `hooks install`'s directory-store injection.
+ * Absent keys are omitted rather than written as `null`, so
+ * `parseConfig(renderConfig(c))` returns `c` field for field —
+ * `test/guards/config-writer.test.ts` pins that round trip.
+ */
+export function renderConfig(config: SmeltConfig): string {
+  const ordered: SmeltConfig = {
+    smeltConfig: CONFIG_VERSION,
+    ...(config.defaultBudgetBytes === undefined
+      ? {}
+      : { defaultBudgetBytes: config.defaultBudgetBytes }),
+    ...(config.strategy === undefined ? {} : { strategy: config.strategy }),
+    ...(config.store === undefined ? {} : { store: renderStore(config.store) }),
+    ...(config.hooks === undefined ? {} : { hooks: renderHooks(config.hooks) }),
+  };
+  return `${JSON.stringify(ordered, null, 2)}\n`;
+}
+
+function renderStore(store: SmeltConfigStore): SmeltConfigStore {
+  return store.kind === 'memory' ? { kind: 'memory' } : { kind: 'directory', path: store.path };
+}
+
+function renderHooks(hooks: SmeltConfigHooks): SmeltConfigHooks {
+  return {
+    ...(hooks.thresholdBytes === undefined ? {} : { thresholdBytes: hooks.thresholdBytes }),
+    ...(hooks.enforcement === undefined ? {} : { enforcement: hooks.enforcement }),
+  };
+}
+
 function parseStore(
   value: unknown,
   bad: (why: string) => CliUsageError,

@@ -3,10 +3,18 @@ import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
 import { CliUsageError } from '../errors.ts';
+import { DEFAULT_STRATEGY } from '../plan/planners.ts';
+import type { Strategy } from '../plan/planners.ts';
 import { STRUCTURAL_LANGUAGES } from '../plan/structural.ts';
 
 import { CLI_NAME } from './shell.ts';
-import { CONFIG_FILE_NAME, CONFIG_VERSION, findConfigFile, parseConfig } from './config.ts';
+import {
+  CONFIG_FILE_NAME,
+  CONFIG_VERSION,
+  findConfigFile,
+  parseConfig,
+  renderConfig,
+} from './config.ts';
 import type { SmeltConfig, SmeltConfigHooks, SmeltConfigStore } from './config.ts';
 
 /**
@@ -53,7 +61,7 @@ export interface InitIo {
 interface WizardChoices {
   budgetBytes: number | undefined;
   store: SmeltConfigStore;
-  strategy: 'lexical' | 'structural';
+  strategy: Strategy;
   /** Generate {@link MEASURE_STUB_FILE}? Never deletes an existing one. */
   measureStub: boolean;
   /** Generate {@link RERANK_STUB_FILE}? Never deletes an existing one. */
@@ -145,7 +153,7 @@ async function freshRun(io: InitIo, ask: Asker): Promise<number> {
   const choices: WizardChoices = {
     budgetBytes: undefined,
     store: { kind: 'memory' },
-    strategy: 'lexical',
+    strategy: DEFAULT_STRATEGY,
     measureStub: false,
     rerankStub: false,
     hooks: undefined,
@@ -178,7 +186,7 @@ async function editRun(
   const choices: WizardChoices = {
     budgetBytes: config.defaultBudgetBytes,
     store: config.store ?? { kind: 'memory' },
-    strategy: config.strategy ?? 'lexical',
+    strategy: config.strategy ?? DEFAULT_STRATEGY,
     measureStub: false,
     rerankStub: false,
     hooks: config.hooks,
@@ -431,28 +439,32 @@ function plannedWrites(choices: WizardChoices, dir: string): readonly PlannedWri
     const unchanged = exists && readFileSync(path, 'utf8') === content;
     return { name, path, content, exists, unchanged };
   };
-  const writes = [plan(CONFIG_FILE_NAME, renderConfig(choices))];
+  const writes = [plan(CONFIG_FILE_NAME, renderConfig(chosenConfig(choices)))];
   if (choices.measureStub) writes.push(plan(MEASURE_STUB_FILE, measureStubSource()));
   if (choices.rerankStub) writes.push(plan(RERANK_STUB_FILE, rerankStubSource()));
   return writes;
 }
 
-/** The config file, serialized with a stable key order so re-runs diff cleanly. */
-export function renderConfig(choices: {
+/**
+ * The config the wizard's choices mean — the wizard's *policy*, handed to the one
+ * writer in `config.ts`. `strategy` and `store` are always written: the wizard asked
+ * about both, and a chosen value left out of the file would be a setting the user
+ * watched themselves pick and never got.
+ */
+function chosenConfig(choices: {
   readonly budgetBytes: number | undefined;
   readonly store: SmeltConfigStore;
-  readonly strategy: 'lexical' | 'structural';
+  readonly strategy: Strategy;
   /** Carried through from an existing config; this wizard never edits it. */
   readonly hooks?: SmeltConfigHooks | undefined;
-}): string {
-  const config: SmeltConfig = {
+}): SmeltConfig {
+  return {
     smeltConfig: CONFIG_VERSION,
     ...(choices.budgetBytes === undefined ? {} : { defaultBudgetBytes: choices.budgetBytes }),
     strategy: choices.strategy,
     store: choices.store,
     ...(choices.hooks === undefined ? {} : { hooks: choices.hooks }),
   };
-  return `${JSON.stringify(config, null, 2)}\n`;
 }
 
 // ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ import {
   buildRepoMap,
   createRetrieveTool,
   createSmelter,
+  DEFAULT_STRATEGY,
   formatReport,
   isStrategy,
   RETRIEVE_TOOL_NAME,
@@ -383,7 +384,7 @@ async function handleSmeltFile(
   }
   const budgetBytes = requireBudget(args);
   const focus = optionalFocus(args);
-  const strategy = optionalStrategy(args) ?? resolved.defaultStrategy ?? 'lexical';
+  const strategy = optionalStrategy(args) ?? resolved.defaultStrategy ?? DEFAULT_STRATEGY;
 
   let inputText: string;
   let source: string;

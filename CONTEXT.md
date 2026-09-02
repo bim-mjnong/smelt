@@ -99,7 +99,10 @@ codebase-design glossary.
 - **PLANNERS**: the one registry of planner strategies (`src/plan/planners.ts`), string →
   factory over the lexical/structural option bags. `createSmelter`, `--strategy` and
   config validation, and the help text all serve its keys; a constructed `planner` on
-  `SmelterConfig` wins over any strategy name.
+  `SmelterConfig` wins over any strategy name. **`DEFAULT_STRATEGY`** lives beside them:
+  the strategy a caller who names none gets, read by `createSmelter`, the `smelt` verb's
+  merge, the `init` wizard and the MCP server's `smelt_file` — the names were derived
+  while the default stayed hand-typed in four places across two packages.
 - **RepoMap**: the ranked whole-tree symbol map `buildRepoMap` returns — deliberately
   **not** an `ElisionPlan` and its builder deliberately not a Planner: nothing is
   elided, stored, or reversible, so the Planner interface would claim laws the map
@@ -134,3 +137,13 @@ codebase-design glossary.
   Each package's `test/guards/_source.ts` stays as its anchor: only `packageRoot()` and
   `repoRoot()` are package-local, and `SMELT_GUARD_SRC` / `SMELT_GUARD_ROOT` keep
   exactly the semantics `scripts/mutate.mjs` sets them with.
+- **SmeltConfig**: the parsed shape of `smelt.config.json`, and the module that owns the
+  schema (`src/cli/config.ts`) owns **both** directions — `parseConfig` reads,
+  `renderConfig` writes, one key order. What goes into a config stays each verb's
+  **policy**: the `init` wizard always writes the strategy and store it asked about,
+  `hooks install` injects a directory store when a config carries none (the deny reasons
+  promise `smelt retrieve <hash>`, which a memory store cannot honour across processes).
+  The round trip — `parseConfig(renderConfig(c))` equals `c` field for field — is the
+  property that could not be expressed while two modules hand-built the file, and the
+  guard reads the key set out of the reader's own refusal, so a field the writer forgets
+  goes red rather than becoming a setting the user believed was in force.

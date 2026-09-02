@@ -33,7 +33,7 @@ export {
 export { clearGrammarCache, grammarPath, loadGrammar, WASM_BY_LANGUAGE } from './plan/grammar.ts';
 export { LEXICAL_PLANNER_ID, LexicalPlanner, planLexical } from './plan/lexical.ts';
 export type { LexicalPlannerOptions } from './plan/lexical.ts';
-export { isStrategy, PLANNERS, STRATEGIES } from './plan/planners.ts';
+export { DEFAULT_STRATEGY, isStrategy, PLANNERS, STRATEGIES } from './plan/planners.ts';
 export type { PlannerFactoryOptions } from './plan/planners.ts';
 export {
   planStructural,
@@ -106,13 +106,13 @@ export {
   findConfigFile,
   loadNearestConfig,
   parseConfig,
+  renderConfig,
   resolveStorePath,
 } from './cli/config.ts';
 export type { LoadedConfig, SmeltConfig, SmeltConfigStore } from './cli/config.ts';
 export {
   MEASURE_STUB_FILE,
   measureStubSource,
-  renderConfig,
   RERANK_STUB_FILE,
   rerankStubSource,
   runInit,
