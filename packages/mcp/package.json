@@ -51,7 +51,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepack": "pnpm run build"
+    "prepack": "pnpm run build",
+    "prepublishOnly": "node -e \"const ua = process.env.npm_config_user_agent || ''; if (!ua.includes('pnpm')) { console.error('Publish with pnpm publish, not npm publish: npm leaves the workspace:^ range un-substituted (this shipped broken in @smeltjs/mcp@0.1.0).'); process.exit(1); }\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

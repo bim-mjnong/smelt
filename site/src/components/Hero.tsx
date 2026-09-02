@@ -62,9 +62,7 @@ export function Hero() {
             >
               Read the source
             </a>
-            <span className="font-mono text-[13px] text-iron-light">
-              Apache-2.0 · zero network calls
-            </span>
+            <span className="font-mono text-[13px] text-slag">Apache-2.0 · zero network calls</span>
           </div>
         </div>
 
@@ -86,7 +84,7 @@ export function Hero() {
                   <span className="text-ember">{MARKER}</span>
                 </code>
               </pre>
-              <p className="mt-3 max-w-[46ch] font-sans text-[13px] leading-[1.5] text-iron-light">
+              <p className="mt-3 max-w-[46ch] font-sans text-[13px] leading-[1.5] text-slag">
                 The removed bytes are stored locally, content-addressed. Every retrieval is counted
                 — cutting too much shows up as a rising number, not a model that is quietly wrong
                 about your code.

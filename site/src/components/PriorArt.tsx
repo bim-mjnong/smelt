@@ -39,15 +39,18 @@ export function PriorArt() {
           index="06 · credited honestly →"
           title={
             <>
-              Prior art. <span className="text-slag">smelt's architecture is close to Headroom's, and it would be dishonest to imply otherwise.</span>
+              Prior art.{' '}
+              <span className="text-slag">
+                smelt's architecture is close to Headroom's, and it would be dishonest to imply
+                otherwise.
+              </span>
             </>
           }
           lead={
             <>
-              What smelt actually adds — the whole list: the zero-network guarantee, the
-              requirement that every elision explains itself in named-rule terms, and the
-              mutation-tested honesty machinery that makes both claims checkable instead of
-              aspirational.
+              What smelt actually adds — the whole list: the zero-network guarantee, the requirement
+              that every elision explains itself in named-rule terms, and the mutation-tested
+              honesty machinery that makes both claims checkable instead of aspirational.
             </>
           }
         />
@@ -88,11 +91,14 @@ export function Footer() {
           <p className="mt-3 max-w-[44ch] text-[14px] leading-[1.6] text-slag">
             Cut hard. Explain everything. Keep the ore.
           </p>
-          <p className="mt-4 font-mono text-[12px] text-iron-light">
+          <p className="mt-4 font-mono text-[12px] text-slag">
             @smeltjs/core v0.2.0 · @smeltjs/mcp v0.1.0 · Apache-2.0
           </p>
         </div>
-        <nav aria-label="Footer" className="grid grid-cols-2 gap-x-12 gap-y-2 text-[14px] sm:grid-cols-3">
+        <nav
+          aria-label="Footer"
+          className="grid grid-cols-2 gap-x-12 gap-y-2 text-[14px] sm:grid-cols-3"
+        >
           {[
             { label: 'GitHub', href: GITHUB },
             { label: 'npm: core', href: 'https://www.npmjs.com/package/@smeltjs/core' },

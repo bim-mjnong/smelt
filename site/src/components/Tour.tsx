@@ -55,9 +55,9 @@ export function Tour() {
           }
           lead={
             <>
-              Cut a real file under a byte budget, read the marker it left, get the exact bytes
-              back by hash, and watch the counters move. Recorded from the built CLI on the repo's
-              own lexical planner — output unedited.
+              Cut a real file under a byte budget, read the marker it left, get the exact bytes back
+              by hash, and watch the counters move. Recorded from the built CLI on the repo's own
+              lexical planner — output unedited.
             </>
           }
         />
@@ -87,7 +87,7 @@ export function Tour() {
               </pre>
             </div>
           </Frame>
-          <p className="mt-4 max-w-[72ch] text-[13px] leading-[1.6] text-iron-light">
+          <p className="mt-4 max-w-[72ch] text-[13px] leading-[1.6] text-slag">
             The report goes to stderr, the smelted text to stdout — the two pipe apart. The exit
             code is non-zero when a plan comes back over budget, and the report says so instead of
             cutting what you asked to keep. <code className="font-mono">expansionRate 0.5</code>{' '}

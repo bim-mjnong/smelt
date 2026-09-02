@@ -87,7 +87,8 @@ const TIERS = [
   {
     tier: 'experimental',
     harnesses: 'Gemini, Grok, Hermes, Cursor, opencode, Cline',
-    meaning: 'schema mapped from the capability matrix, not yet smoke-tested against the real binary',
+    meaning:
+      'schema mapped from the capability matrix, not yet smoke-tested against the real binary',
   },
   {
     tier: 'advisory',
@@ -117,8 +118,8 @@ export function Harness() {
               <code className="rounded-[2px] bg-lift px-1 font-mono text-[13px] text-ash">
                 smelt_retrieve
               </code>
-              , watch the rate. The hooks preset and the MCP server wrap the same loop for
-              harnesses you don't own the code of.
+              , watch the rate. The hooks preset and the MCP server wrap the same loop for harnesses
+              you don't own the code of.
             </>
           }
         />
@@ -154,21 +155,27 @@ export function Harness() {
             </code>
           </h3>
           <p className="mt-2 max-w-[70ch] text-[14px] leading-[1.6] text-slag">
-            A size-guard that refuses raw oversized reads with the exact replacement command,
-            stats on Stop, an opt-in repo map on SessionStart. Deny-with-reason by default;
-            rewrite is opt-in and always announced. Tiered honestly:
+            A size-guard that refuses raw oversized reads with the exact replacement command, stats
+            on Stop, an opt-in repo map on SessionStart. Deny-with-reason by default; rewrite is
+            opt-in and always announced. Tiered honestly:
           </p>
           <div className="mt-5 overflow-x-auto">
             <table className="w-full min-w-[640px] border-collapse text-left text-[14px]">
               <thead>
                 <tr className="border-b border-iron-dark">
-                  <th scope="col" className="py-2.5 pr-6 font-mono text-[13px] font-normal text-iron-light">
+                  <th
+                    scope="col"
+                    className="py-2.5 pr-6 font-mono text-[13px] font-normal text-slag"
+                  >
                     tier
                   </th>
-                  <th scope="col" className="py-2.5 pr-6 font-mono text-[13px] font-normal text-iron-light">
+                  <th
+                    scope="col"
+                    className="py-2.5 pr-6 font-mono text-[13px] font-normal text-slag"
+                  >
                     harnesses
                   </th>
-                  <th scope="col" className="py-2.5 font-mono text-[13px] font-normal text-iron-light">
+                  <th scope="col" className="py-2.5 font-mono text-[13px] font-normal text-slag">
                     what the tier means
                   </th>
                 </tr>

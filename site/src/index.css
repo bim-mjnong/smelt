@@ -7,6 +7,7 @@
 @theme {
   /* the forge palette — the only colours on the page */
   --color-charcoal: #131417; /* ground */
+  --color-pit: #0f1013; /* below the ground — the Frame's outer recess only */
   --color-lift: #1b1d22; /* raised surfaces (the lit corner of charcoal) */
   --color-iron: #3f444c; /* strong dividers, disabled code text */
   --color-iron-dark: #2a2e34; /* hairline rules */
@@ -71,11 +72,6 @@ body {
     transform: none;
     transition: none;
   }
-}
-
-/* surfaces that end mid-content mask out, never cut off */
-.mask-fade-b {
-  mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
 }
 
 /* the one legitimate gradient: a right-edge scroll affordance over code */

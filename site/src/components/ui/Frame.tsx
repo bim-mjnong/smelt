@@ -8,8 +8,10 @@ import { cn } from '@/lib/utils';
  */
 export function Frame({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn('rounded-[16px] border border-iron-dark bg-[#0f1013] p-1', className)}>
-      <div className="overflow-hidden rounded-[12px] border border-iron-dark bg-lift">{children}</div>
+    <div className={cn('rounded-[16px] border border-iron-dark bg-pit p-1', className)}>
+      <div className="overflow-hidden rounded-[12px] border border-iron-dark bg-lift">
+        {children}
+      </div>
     </div>
   );
 }
@@ -27,7 +29,7 @@ export function FrameBar({
   return (
     <div className="flex min-h-10 items-center gap-3 border-b border-iron-dark px-4 py-2">
       <span className="font-mono text-[13px] text-slag">{label}</span>
-      {meta ? <span className="ml-auto font-mono text-[12px] text-iron-light">{meta}</span> : null}
+      {meta ? <span className="ml-auto font-mono text-[12px] text-slag">{meta}</span> : null}
       {right ? <span className={meta ? '' : 'ml-auto'}>{right}</span> : null}
     </div>
   );

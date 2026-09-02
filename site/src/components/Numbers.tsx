@@ -43,12 +43,14 @@ export function Numbers() {
           index="05 · measured, or absent →"
           title={
             <>
-              Measured numbers. <span className="text-slag">Generated from the bench table, never typed.</span>
+              Measured numbers.{' '}
+              <span className="text-slag">Generated from the bench table, never typed.</span>
             </>
           }
           lead={
             <>
-              From the committed measurement harness (<code className="font-mono text-[13px]">pnpm bench</code>
+              From the committed measurement harness (
+              <code className="font-mono text-[13px]">pnpm bench</code>
               ), tier 1 — bytes and elision counts, deterministic, offline, reproducible from a
               fresh clone. This table is parsed out of{' '}
               <code className="font-mono text-[13px]">bench/RESULTS.md</code> at build time.
@@ -59,30 +61,47 @@ export function Numbers() {
         <Reveal className="mt-10">
           <div className="grid gap-10 lg:grid-cols-12 lg:gap-8">
             <div className="lg:col-span-8">
-              <p className="font-mono text-[13px] text-iron-light">
-                run {bench.runDate} · corpus {bench.corpusCommit} · {bench.tier} · unit: UTF-8
-                bytes
+              <p className="font-mono text-[13px] text-slag">
+                run {bench.runDate} · corpus {bench.corpusCommit} · {bench.tier} · unit: UTF-8 bytes
               </p>
               <div className="mt-3 overflow-x-auto">
                 <table className="w-full min-w-[560px] border-collapse text-left text-[14px]">
                   <thead>
                     <tr className="border-b border-iron-dark">
-                      <th scope="col" className="py-2.5 pr-4 font-mono text-[13px] font-normal text-iron-light">
+                      <th
+                        scope="col"
+                        className="py-2.5 pr-4 font-mono text-[13px] font-normal text-slag"
+                      >
                         case
                       </th>
-                      <th scope="col" className="py-2.5 pr-4 font-mono text-[13px] font-normal text-iron-light">
+                      <th
+                        scope="col"
+                        className="py-2.5 pr-4 font-mono text-[13px] font-normal text-slag"
+                      >
                         planner
                       </th>
-                      <th scope="col" className="py-2.5 pr-4 font-mono text-[13px] font-normal text-iron-light">
+                      <th
+                        scope="col"
+                        className="py-2.5 pr-4 font-mono text-[13px] font-normal text-slag"
+                      >
                         budget
                       </th>
-                      <th scope="col" className="py-2.5 pr-4 text-right font-mono text-[13px] font-normal text-iron-light">
+                      <th
+                        scope="col"
+                        className="py-2.5 pr-4 text-right font-mono text-[13px] font-normal text-slag"
+                      >
                         in (B)
                       </th>
-                      <th scope="col" className="py-2.5 pr-4 text-right font-mono text-[13px] font-normal text-iron-light">
+                      <th
+                        scope="col"
+                        className="py-2.5 pr-4 text-right font-mono text-[13px] font-normal text-slag"
+                      >
                         out (B)
                       </th>
-                      <th scope="col" className="py-2.5 text-right font-mono text-[13px] font-normal text-iron-light">
+                      <th
+                        scope="col"
+                        className="py-2.5 text-right font-mono text-[13px] font-normal text-slag"
+                      >
                         reduction
                       </th>
                     </tr>
@@ -93,8 +112,12 @@ export function Numbers() {
                         <td className="py-3 pr-4 text-ash">{row.case}</td>
                         <td className="py-3 pr-4 text-slag">{plannerOf(row.note)}</td>
                         <td className="py-3 pr-4 text-slag">{budgetOf(row.note)}</td>
-                        <td className="py-3 pr-4 text-right text-slag">{fmt.format(row.inputBytes)}</td>
-                        <td className="py-3 pr-4 text-right text-slag">{fmt.format(row.outputBytes)}</td>
+                        <td className="py-3 pr-4 text-right text-slag">
+                          {fmt.format(row.inputBytes)}
+                        </td>
+                        <td className="py-3 pr-4 text-right text-slag">
+                          {fmt.format(row.outputBytes)}
+                        </td>
                         <td className="py-3 text-right">
                           {row.overBudget ? (
                             <span className="text-ember">over budget, reported</span>
@@ -107,7 +130,7 @@ export function Numbers() {
                   </tbody>
                 </table>
               </div>
-              <p className="mt-3 font-mono text-[12px] text-iron-light">
+              <p className="mt-3 font-mono text-[12px] text-slag">
                 generated at build time by site/scripts/bench-data.mjs from
                 packages/core/bench/RESULTS.md
               </p>
@@ -121,8 +144,8 @@ export function Numbers() {
                 <code className="font-mono text-[13px]">pnpm bench</code>.
               </p>
               <p className="mt-3">
-                <span className="text-ash">What they are not:</span> token savings, cost savings,
-                or an aggregate claim — the corpus is six cases, the build-log row is a synthetic
+                <span className="text-ash">What they are not:</span> token savings, cost savings, or
+                an aggregate claim — the corpus is six cases, the build-log row is a synthetic
                 best-case and says so in its header, and one case came back over budget and is
                 reported as exactly that.
               </p>
@@ -139,8 +162,8 @@ export function Numbers() {
                 >
                   Headroom's
                 </a>{' '}
-                stated 15–20% for coding agents — their number, on their corpus, cited as exactly
-                that.
+                stated 21–57% across its four proof scenarios (README, 2026-09) — their numbers, on
+                their corpus, cited as exactly that.
               </p>
             </div>
           </div>

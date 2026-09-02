@@ -88,7 +88,10 @@ export function AgentPrompt() {
           lead={
             <>
               Copy the prompt for your harness and hand it to the agent. It installs the CLI, runs
-              the <code className="rounded-[2px] bg-lift px-1 font-mono text-[13px] text-ash">smelt init</code>{' '}
+              the{' '}
+              <code className="rounded-[2px] bg-lift px-1 font-mono text-[13px] text-ash">
+                smelt init
+              </code>{' '}
               wizard, wires the hooks preset, and proves the loop with a real retrieve round trip —
               nothing is written without a confirm.
             </>
@@ -119,7 +122,7 @@ export function AgentPrompt() {
               ),
             }))}
           />
-          <p className="mt-4 max-w-[72ch] text-[13px] leading-[1.6] text-iron-light">
+          <p className="mt-4 max-w-[72ch] text-[13px] leading-[1.6] text-slag">
             Same discipline as running it yourself: the wizard and the hooks installer list every
             file before a final confirm, re-runs edit one choice at a time, and a merge into an
             existing settings file leaves every byte outside smelt's entries untouched.{' '}

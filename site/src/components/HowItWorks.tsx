@@ -13,7 +13,10 @@ function Stage({ name, note }: { name: string; note: string }) {
 
 function Arrow() {
   return (
-    <div aria-hidden="true" className="flex items-center justify-center self-center text-iron-light">
+    <div
+      aria-hidden="true"
+      className="flex items-center justify-center self-center text-iron-light"
+    >
       <span className="rotate-90 font-mono text-[14px] md:rotate-0">→</span>
     </div>
   );
@@ -57,22 +60,32 @@ export function HowItWorks() {
           }
           lead={
             <>
-              A planner turns blob + budget + focus into a plan without removing anything.
-              Applying the plan is the single byte-remover, every removal leaves a marker, and the
-              store makes each one reversible — by construction, not by promise.
+              A planner turns blob + budget + focus into a plan without removing anything. Applying
+              the plan is the single byte-remover, every removal leaves a marker, and the store
+              makes each one reversible — by construction, not by promise.
             </>
           }
         />
 
         <Reveal className="mt-10">
-          <div className="flex flex-col gap-2 md:flex-row md:gap-3" role="img" aria-label="Pipeline: plan, then apply, then store, then retrieve">
-            <Stage name="plan" note="blob + budget + focus → an elision plan; nothing removed yet" />
+          <div
+            className="flex flex-col gap-2 md:flex-row md:gap-3"
+            role="img"
+            aria-label="Pipeline: plan, then apply, then store, then retrieve"
+          >
+            <Stage
+              name="plan"
+              note="blob + budget + focus → an elision plan; nothing removed yet"
+            />
             <Arrow />
             <Stage name="apply" note="the only byte-remover; every cut leaves a one-line marker" />
             <Arrow />
             <Stage name="store" note="elided bytes kept locally, content-addressed, no eviction" />
             <Arrow />
-            <Stage name="retrieve" note="exact original bytes back by hash — and the call is counted" />
+            <Stage
+              name="retrieve"
+              note="exact original bytes back by hash — and the call is counted"
+            />
           </div>
         </Reveal>
 
@@ -88,7 +101,7 @@ export function HowItWorks() {
               </article>
             ))}
           </div>
-          <p className="mt-4 max-w-[72ch] text-[13px] leading-[1.6] text-iron-light">
+          <p className="mt-4 max-w-[72ch] text-[13px] leading-[1.6] text-slag">
             Each law has a guard that can fail, and each guard has mutations proving it does:
             fifteen guard suites, 70 mutations across them, run by{' '}
             <code className="font-mono">pnpm mutate</code> — a deliberate break the guard must
