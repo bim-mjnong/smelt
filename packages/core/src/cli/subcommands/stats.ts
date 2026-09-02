@@ -1,5 +1,6 @@
 import { CliUsageError } from '../../errors.ts';
-import { DirectoryElisionStore } from '../../store-dir.ts';
+import { openStore } from '../../ops/inputs.ts';
+import { readCounters } from '../../ops/verbs.ts';
 import type { RetrieveStats } from '../../types.ts';
 import { CLI_NAME, EXIT } from '../shell.ts';
 import type { CliIo } from '../shell.ts';
@@ -89,7 +90,8 @@ export const statsCommand: Subcommand<StatsInvocation, ResolvedStatsRun> = {
   },
 
   run(resolved: ResolvedStatsRun, io: CliIo): number {
-    const stats = new DirectoryElisionStore(resolved.store.storePath).stats();
+    const store = openStore({ kind: 'directory', path: resolved.store.storePath });
+    const stats = readCounters({ store });
 
     if (resolved.json) {
       const statsEnvelope: CliStatsJsonEnvelope = { format: CLI_STATS_JSON_FORMAT, stats };

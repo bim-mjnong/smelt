@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
 
@@ -11,18 +11,25 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import {
-  buildRepoMap,
+  budgetFault,
+  budgetMalformed,
+  budgetRequired,
   createRetrieveTool,
-  createSmelter,
-  DEFAULT_STRATEGY,
   formatReport,
   isStrategy,
+  mapTree,
+  readBlob,
+  readCounters,
+  readTree,
+  resolveStrategy,
+  retrieveBytes,
   RETRIEVE_TOOL_NAME,
+  smeltBlob,
   SmeltError,
   STRATEGIES,
   UnknownHashError,
 } from '@smeltjs/core';
-import type { Strategy } from '@smeltjs/core';
+import type { Ruling, Strategy } from '@smeltjs/core';
 
 import { resolveMcpStore } from './store.ts';
 import type { ResolvedMcpStore } from './store.ts';
@@ -35,7 +42,24 @@ import type { ResolvedMcpStore } from './store.ts';
  * un-cut, orient, and audit. Everything else the library offers stays a library
  * concern; a tool a model never needed is context every call pays for.
  *
- * Two properties are load-bearing and guarded:
+ * **Each tool is an adapter, and nothing more: validate the JSON Schema, call the op,
+ * wrap the answer.** The verbs themselves are `smeltBlob`, `mapTree`, `retrieveBytes`
+ * and `readCounters` in `@smeltjs/core`'s ops seam, which sits below this server and
+ * below the `smelt` binary alike — so the two front doors cannot drift on what a verb
+ * does. The laws their inputs must satisfy come from the same place (a budget is a
+ * positive integer with no default; an explicit strategy beats a configured one and
+ * `lexical` fills last; a tree reader refuses a file; a path is read or the refusal
+ * names it), each stated once there and spelled in *this* surface's vocabulary here:
+ * `"budgetBytes"` rather than `--budget`, `smelt_file` rather than `smelt <file>`.
+ *
+ * What stays this server's own is what genuinely is: the schemas, the descriptions, the
+ * `isError` envelope — and one deliberate divergence from the CLI, kept here on
+ * purpose. `smelt retrieve` refuses a memory store outright; this server accepts one,
+ * serves the whole session from it, and appends {@link ResolvedMcpStore.persistenceHint}
+ * at the moment an unknown hash makes the difference bite. A resident process can
+ * honestly serve a session-lifetime store; a fresh CLI process cannot.
+ *
+ * Two further properties are load-bearing and guarded:
  *
  * - **stdio-local.** This package's one sanctioned dependency beyond the core is the
  *   official `@modelcontextprotocol/sdk`, and only its stdio transport. The SDK also
@@ -158,26 +182,28 @@ function requireString(args: Record<string, unknown>, key: string): string {
 }
 
 /**
- * `budgetBytes`, validated the way the CLI validates `--budget`: a whole number of
- * UTF-8 bytes greater than zero, with no default — a budget this server invented
- * would silently decide how much of the caller's context to throw away.
+ * `budgetBytes`, validated the way the CLI validates `--budget`, because it is the same
+ * law: `ops/inputs.ts` owns the rule and both sentences, and this function supplies
+ * only how *this* surface spells the knob. There is no default — a budget this server
+ * invented would silently decide how much of the caller's context to throw away.
+ *
+ * The lexing is this surface's own: a JSON argument arrives with whatever type the
+ * model sent, so "is it a number at all" is answered here, and the numeric rule (whole,
+ * greater than zero) is answered by the law.
  */
 function requireBudget(args: Record<string, unknown>): number {
   const value = args['budgetBytes'];
   if (value === undefined) {
     throw new ToolArgumentError(
-      '"budgetBytes" is required, in UTF-8 bytes. There is no default, because a ' +
-        'budget smelt invented would silently decide how much of your context to ' +
-        'throw away.',
+      budgetRequired({ knob: '"budgetBytes"', stake: 'your context to throw away' }),
     );
   }
-  if (typeof value !== 'number' || !Number.isInteger(value)) {
-    throw new ToolArgumentError(
-      `"budgetBytes" must be a whole number of bytes, got ${JSON.stringify(value)}.`,
-    );
+  if (typeof value !== 'number') {
+    throw new ToolArgumentError(budgetMalformed('not-an-integer', '"budgetBytes"', value));
   }
-  if (value <= 0) {
-    throw new ToolArgumentError(`"budgetBytes" must be greater than zero, got ${String(value)}.`);
+  const fault = budgetFault(value);
+  if (fault !== undefined) {
+    throw new ToolArgumentError(budgetMalformed(fault, '"budgetBytes"', value));
   }
   return value;
 }
@@ -201,6 +227,18 @@ function optionalStrategy(args: Record<string, unknown>): Strategy | undefined {
     );
   }
   return value;
+}
+
+/**
+ * A {@link Ruling} from an ops law, in this surface's currency: the value, or a tool
+ * error carrying the law's own sentence. The laws return rather than throw precisely
+ * so this conversion is explicit — the CLI turns the same refusal into a
+ * `CliUsageError` that exits 2, and a shared exception type would have made one of the
+ * two wrong.
+ */
+function take<T>(ruling: Ruling<T>): T {
+  if (!ruling.ok) throw new ToolArgumentError(ruling.refusal);
+  return ruling.value;
 }
 
 /** The JSON Schema fragments the tool list advertises. */
@@ -384,38 +422,31 @@ async function handleSmeltFile(
   }
   const budgetBytes = requireBudget(args);
   const focus = optionalFocus(args);
-  const strategy = optionalStrategy(args) ?? resolved.defaultStrategy ?? DEFAULT_STRATEGY;
+  // The same precedence the CLI applies to --strategy: what the caller said wins, the
+  // config fills in, `lexical` fills last — and the built-in is named in one place.
+  const { strategy } = resolveStrategy(optionalStrategy(args), resolved.defaultStrategy);
 
-  let inputText: string;
-  let source: string;
-  if (path !== undefined) {
-    const full = resolve(cwd, path);
-    try {
-      inputText = readFileSync(full, 'utf8');
-    } catch (cause) {
-      throw new ToolArgumentError(
-        `cannot read "${path}": ${cause instanceof Error ? cause.message : String(cause)}`,
-      );
-    }
-    source = path;
-  } else {
-    inputText = inline as string;
-    source = '<text>';
-  }
+  // A relative path is resolved against the server's working directory, but the
+  // refusal names the path as the model wrote it: echoing back an absolute path it
+  // never typed answers a question nobody asked.
+  const inputText =
+    path === undefined ? (inline as string) : take(readBlob(resolve(cwd, path), path));
 
-  const smelter = createSmelter({ store: resolved.store, strategy });
-  const result = await smelter.smelt(inputText, {
+  const outcome = await smeltBlob({
+    text: inputText,
+    source: path ?? '<text>',
     budgetBytes,
+    strategy,
+    store: resolved.store,
     ...(path === undefined ? {} : { path }),
     ...(focus === undefined ? {} : { focus }),
   });
 
-  // Two blocks: the payload, then the same report the CLI prints to stderr — every
-  // total read off the result, no separate accounting. Over budget is reported in the
-  // report (the plan came back as it came back), not dressed up as an error.
-  return {
-    content: [text(result.text), text(formatReport({ result, source, budgetBytes, inputText }))],
-  };
+  // Two blocks: the payload, then the same report the CLI prints to stderr — built
+  // from the values the op returned, so no total is counted twice. Over budget is
+  // reported in the report (the plan came back as it came back), not dressed up as an
+  // error.
+  return { content: [text(outcome.result.text), text(formatReport(outcome))] };
 }
 
 function handleRetrieve(args: Record<string, unknown>, resolved: ResolvedMcpStore): CallToolResult {
@@ -424,11 +455,13 @@ function handleRetrieve(args: Record<string, unknown>, resolved: ResolvedMcpStor
   try {
     // The counted read — this is the expansion rate moving. Exact original bytes,
     // nothing appended, nothing re-encoded.
-    return { content: [text(resolved.store.retrieve(hash))] };
+    return { content: [text(retrieveBytes({ store: resolved.store, hash }))] };
   } catch (error) {
     if (error instanceof UnknownHashError && resolved.persistenceHint !== undefined) {
       // On a memory store, "unknown hash" is very often "hash from an earlier
-      // session" — say so, the way the CLI's `smelt retrieve` refusal says so.
+      // session" — say so. This is the deliberate divergence from the CLI, which
+      // refuses a memory store for `smelt retrieve` outright: a resident process can
+      // honestly serve a session-lifetime store, a fresh CLI process cannot.
       return toolError(`${error.name}: ${error.message}\n\n${resolved.persistenceHint}`);
     }
     throw error;
@@ -441,24 +474,13 @@ async function handleRepoMap(args: Record<string, unknown>, cwd: string): Promis
   const budgetBytes = requireBudget(args);
   const focus = optionalFocus(args);
 
-  const root = resolve(cwd, dir);
-  let isDirectory: boolean;
-  try {
-    isDirectory = statSync(root).isDirectory();
-  } catch (cause) {
-    throw new ToolArgumentError(
-      `cannot read directory "${dir}": ` +
-        `${cause instanceof Error ? cause.message : String(cause)}`,
-    );
-  }
-  if (!isDirectory) {
-    throw new ToolArgumentError(
-      `"${dir}" is not a directory. repo_map reads a whole tree; for one file, use ` +
-        `${SMELT_FILE_TOOL_NAME}.`,
-    );
-  }
+  // The same two refusals `smelt map` gives, in this surface's vocabulary: a path that
+  // cannot be statted, and a path that is a file and therefore wanted the other verb.
+  const root = take(
+    readTree(resolve(cwd, dir), dir, { tree: REPO_MAP_TOOL_NAME, file: SMELT_FILE_TOOL_NAME }),
+  );
 
-  const map = await buildRepoMap({
+  const map = await mapTree({
     root,
     budgetBytes,
     ...(focus === undefined ? {} : { focus }),
@@ -479,7 +501,10 @@ async function handleRepoMap(args: Record<string, unknown>, cwd: string): Promis
 
 function handleStats(args: Record<string, unknown>, resolved: ResolvedMcpStore): CallToolResult {
   refuseUnknownKeys(args, []);
-  // `stats()` journals nothing — an observer that inflated its own metric would make
-  // the honest signal dishonest. The RetrieveStats goes out verbatim, as JSON.
-  return { content: [text(JSON.stringify(resolved.store.stats(), null, 2))] };
+  // The uncounted read — `stats()` journals nothing, because an observer that inflated
+  // its own metric would make the honest signal dishonest. The RetrieveStats goes out
+  // verbatim, as JSON.
+  return {
+    content: [text(JSON.stringify(readCounters({ store: resolved.store }), null, 2))],
+  };
 }

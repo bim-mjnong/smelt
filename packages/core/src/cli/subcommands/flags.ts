@@ -1,6 +1,8 @@
 import { SUPPORTED_LANGUAGES } from '../../detect.ts';
 import { CliUsageError } from '../../errors.ts';
 import { HARNESS_IDS } from '../../harness/registry.ts';
+import { budgetFault, budgetMalformed } from '../../ops/inputs.ts';
+import type { BudgetFault } from '../../ops/inputs.ts';
 import { STRATEGIES } from '../../plan/planners.ts';
 import { STRUCTURAL_LANGUAGES } from '../../plan/structural.ts';
 import { CLI_NAME } from '../shell.ts';
@@ -202,15 +204,23 @@ export const FLAG_HELP: Readonly<Record<FlagName, FlagHelp>> = {
  *
  * It lives with the flag rather than with a verb because two verbs own `--budget`, and
  * the two of them agreeing on what "4kb" means is not something to leave to chance.
+ *
+ * The *lexing* is the CLI's own and stays here — argv carries strings, so `4kb` and a
+ * leading `-` are answered by a digits-only test before anything numeric happens. The
+ * *rule* and *the sentence that refuses it* come from `ops/inputs.ts`, which is also
+ * where the `smelt_file` tool gets them: two surfaces, one law, spelled `--budget`
+ * here and `"budgetBytes"` there.
  */
 export function parseBudget(raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;
-  if (!/^\d+$/.test(raw)) {
-    throw new CliUsageError(`${CLI_NAME}: --budget must be a whole number of bytes, got "${raw}".`);
-  }
+  if (!/^\d+$/.test(raw)) throw refuseBudget('not-an-integer', raw);
   const value = Number(raw);
-  if (value <= 0) {
-    throw new CliUsageError(`${CLI_NAME}: --budget must be greater than zero, got "${raw}".`);
-  }
+  const fault = budgetFault(value);
+  if (fault !== undefined) throw refuseBudget(fault, raw);
   return value;
+}
+
+/** The malformed-budget refusal, in the CLI's currency: prefixed, and exit 2. */
+function refuseBudget(fault: BudgetFault, raw: string): CliUsageError {
+  return new CliUsageError(`${CLI_NAME}: ${budgetMalformed(fault, '--budget', raw)}`);
 }

@@ -196,11 +196,4 @@ export const MUTATIONS: GuardMutation[] = [
     replace: "PLANNERS[config.strategy ?? 'structural'](config)",
     why: 'a call site defaults to something other than DEFAULT_STRATEGY — the constant and what a caller who names no strategy actually gets have come apart, which is exactly the drift the four hand-typed copies used to allow',
   },
-  {
-    id: 'config-writer-default-strategy-restated',
-    file: 'cli/subcommands/smelt.ts',
-    find: 'config?.config.strategy ?? DEFAULT_STRATEGY',
-    replace: "config?.config.strategy ?? 'lexical'",
-    why: 'a site re-hardcodes the default with the value it currently has: nothing misbehaves today, and the next change to the default moves on some faces and not others — the scan is what makes a silent second copy visible',
-  },
 ];

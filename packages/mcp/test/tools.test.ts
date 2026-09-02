@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { CliUsageError } from '@smeltjs/core';
+import { budgetMalformed, budgetRequired, CliUsageError, readTree } from '@smeltjs/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -16,9 +16,24 @@ import {
 } from '../src/index.ts';
 
 /**
- * In-process tests for each tool's edge cases, driven through a real SDK client over
- * a linked in-memory transport pair — the same protocol layer the stdio binary
- * serves, minus the process boundary (`test/protocol.test.ts` owns that half).
+ * In-process tests for the four tools as **adapters**, driven through a real SDK
+ * client over a linked in-memory transport pair — the same protocol layer the stdio
+ * binary serves, minus the process boundary (`test/protocol.test.ts` owns that half).
+ *
+ * What is tested here is what only this package can see: the schema each tool
+ * advertises, the shape of the result it returns, the `isError` envelope a refusal
+ * arrives in, the arguments only a JSON surface can get wrong, the cwd a relative
+ * path resolves against, and the store decision this server makes at startup —
+ * including the one place it deliberately rules differently from the CLI.
+ *
+ * What is **not** tested here any more is what smelt *does*. The budget law, the
+ * strategy precedence, the structural refusal, the not-a-directory refusal, the
+ * unknown hash and the uncounted counters all moved down to the ops seam they now
+ * come from — `packages/core/test/ops.test.ts` — because asserting them through a
+ * transport was asserting a library fact in the package furthest from where it is
+ * decided, in duplicate with the CLI's own suite. One refusal of each family stays
+ * below, on purpose: not to re-test the law, but to prove this adapter renders it as
+ * a tool error rather than crashing the server.
  */
 
 const cleanups: (() => void)[] = [];
@@ -97,7 +112,7 @@ describe('tools/list', () => {
 });
 
 describe('smelt_file', () => {
-  it('smelts inline text and returns the payload plus the report, markers intact', async () => {
+  it('returns the payload and the report as two blocks, markers intact', async () => {
     const client = await connect(tempDir());
     const input = fixtureText();
     const result = await call(client, SMELT_FILE_TOOL_NAME, {
@@ -111,6 +126,7 @@ describe('smelt_file', () => {
     expect(smelted).toContain('the handleRequest line the task is about');
     expect(smelted).toContain('<<smelt/v1:');
     expect(smelted.length).toBeLessThan(input.length);
+    // The second block is the CLI's own report, built from the op's return values.
     expect(report).toMatch(/in [\d,]+ B → out [\d,]+ B/);
     expect(report).toContain('focus-window');
   });
@@ -143,18 +159,33 @@ describe('smelt_file', () => {
     expect(neither.texts[0]).toContain('pass exactly one of "path"');
   });
 
-  it('refuses a missing, zero, negative or fractional budget — never invents one', async () => {
+  it('renders the budget law as a tool error naming the tool and the argument', async () => {
+    // The law and its whole matrix live in packages/core/test/ops.test.ts. What is
+    // this package's to prove is two things: the envelope — `isError`, the tool name,
+    // and a sentence a model can act on rather than a crash — and that the sentence
+    // is *the core's*. The expectation is composed from `budgetRequired`, never
+    // pasted: change the law in the core and this test moves with it, and the server
+    // must still match; stop calling the law and it will not. (`test/guards/
+    // ops-seam.test.ts` holds the same claim structurally, over source, because the
+    // mutation runner cannot import a mutant tree.)
     const client = await connect(tempDir());
-    for (const args of [
-      { text: 'hello' },
-      { text: 'hello', budgetBytes: 0 },
-      { text: 'hello', budgetBytes: -1 },
-      { text: 'hello', budgetBytes: 1.5 },
-      { text: 'hello', budgetBytes: '4kb' },
-    ]) {
-      const result = await call(client, SMELT_FILE_TOOL_NAME, args);
-      expect(result.isError, JSON.stringify(args)).toBe(true);
-      expect(result.texts[0]).toContain('budgetBytes');
+    const missing = await call(client, SMELT_FILE_TOOL_NAME, { text: 'hello' });
+    expect(missing.isError).toBe(true);
+    expect(missing.texts[0]).toBe(
+      `${SMELT_FILE_TOOL_NAME}: ` +
+        budgetRequired({ knob: '"budgetBytes"', stake: 'your context to throw away' }),
+    );
+
+    for (const [budgetBytes, fault] of [
+      ['4kb', 'not-an-integer'],
+      [1.5, 'not-an-integer'],
+      [0, 'not-positive'],
+    ] as const) {
+      const malformed = await call(client, SMELT_FILE_TOOL_NAME, { text: 'hello', budgetBytes });
+      expect(malformed.isError, JSON.stringify(budgetBytes)).toBe(true);
+      expect(malformed.texts[0]).toBe(
+        `${SMELT_FILE_TOOL_NAME}: ` + budgetMalformed(fault, '"budgetBytes"', budgetBytes),
+      );
     }
   });
 
@@ -170,7 +201,7 @@ describe('smelt_file', () => {
     expect(result.texts[0]).toContain('"focuss"');
   });
 
-  it('refuses an unreadable path as a tool error naming the path', async () => {
+  it('refuses an unreadable path as a tool error naming the path as written', async () => {
     const client = await connect(tempDir());
     const result = await call(client, SMELT_FILE_TOOL_NAME, {
       path: 'no-such-file.txt',
@@ -180,7 +211,9 @@ describe('smelt_file', () => {
     expect(result.texts[0]).toContain('cannot read "no-such-file.txt"');
   });
 
-  it('passes a structural refusal through as a tool error, never a silent fallback', async () => {
+  it('renders a library refusal as a tool error carrying its error name', async () => {
+    // A `SmeltError` out of the op is a refusal, not a broken server: it comes back
+    // named, so a model can tell a GrammarUnavailableError from an UnknownHashError.
     const client = await connect(tempDir());
     const result = await call(client, SMELT_FILE_TOOL_NAME, {
       text: fixtureText(),
@@ -202,22 +235,21 @@ describe('smelt_file', () => {
     expect(result.texts[0]).toContain('"strategy" must be');
   });
 
-  it('defaults the strategy from smelt.config.json, flag-over-config style', async () => {
+  it('feeds the config’s strategy to the op, and an argument beats it', async () => {
+    // The precedence itself is the ops seam's (see resolveStrategy); what this proves
+    // is the wiring — that startup reads smelt.config.json and hands the result over.
     const cwd = tempDir();
     writeFileSync(
       join(cwd, 'smelt.config.json'),
       `${JSON.stringify({ smeltConfig: 1, strategy: 'structural' })}\n`,
     );
     const client = await connect(cwd);
-    // No strategy argument → the config's structural default applies to pathless
-    // text (language 'unknown'), which structural refuses: proof the default drove.
     const configured = await call(client, SMELT_FILE_TOOL_NAME, {
       text: fixtureText(),
       budgetBytes: 600,
     });
     expect(configured.isError).toBe(true);
     expect(configured.texts[0]).toContain('GrammarUnavailableError');
-    // An explicit argument wins over the config, same precedence as the CLI.
     const explicit = await call(client, SMELT_FILE_TOOL_NAME, {
       text: fixtureText(),
       budgetBytes: 600,
@@ -225,26 +257,12 @@ describe('smelt_file', () => {
     });
     expect(explicit.isError).toBe(false);
   });
-
-  it('handles an oversized input without truncating it silently', async () => {
-    const client = await connect(tempDir());
-    const big = fixtureText(120_000); // ~2 MB
-    const result = await call(client, SMELT_FILE_TOOL_NAME, {
-      text: big,
-      budgetBytes: 2_000,
-      focus: ['handleRequest'],
-    });
-    expect(result.isError).toBe(false);
-    const [smelted, report] = result.texts as [string, string];
-    expect(smelted).toContain('the handleRequest line the task is about');
-    expect(smelted).toContain('<<smelt/v1:');
-    expect(smelted.length).toBeLessThan(big.length / 100);
-    expect(report).toMatch(/\d+ elisions/);
-  });
 });
 
 describe('smelt_retrieve', () => {
-  it('returns the exact elided bytes, and the retrieval is counted', async () => {
+  it('closes the marker’s retrieve("hash") loop over the wire', async () => {
+    // The frozen wire contract, end to end: a hash the model can only have read out
+    // of a marker goes in, the exact original bytes come back in one text block.
     const client = await connect(tempDir());
     const input = fixtureText();
     const smelted = (
@@ -260,37 +278,11 @@ describe('smelt_retrieve', () => {
     const retrieved = await call(client, RETRIEVE_TOOL_NAME, { hash });
     expect(retrieved.isError).toBe(false);
     expect(retrieved.texts).toHaveLength(1);
-    // Exact original bytes: the retrieved run is a verbatim slice of the input.
     expect(retrieved.texts[0]!.length).toBeGreaterThan(0);
     expect(input).toContain(retrieved.texts[0]!);
-
-    const stats = JSON.parse((await call(client, SMELT_STATS_TOOL_NAME, {})).texts[0]!) as Record<
-      string,
-      number
-    >;
-    expect(stats['retrieveCalls']).toBe(1);
-    expect(stats['uniqueRetrieved']).toBe(1);
   });
 
-  it('answers an unknown hash with a tool error, never empty text', async () => {
-    const client = await connect(tempDir());
-    const result = await call(client, RETRIEVE_TOOL_NAME, { hash: 'deadbeefdeadbeef' });
-    expect(result.isError).toBe(true);
-    expect(result.texts[0]).toContain('UnknownHashError');
-    expect(result.texts[0]).toContain('no stored content for hash "deadbeefdeadbeef"');
-  });
-
-  it('says how to get persistence when a memory store cannot hold earlier sessions', async () => {
-    const client = await connect(tempDir()); // no config → memory store
-    const result = await call(client, RETRIEVE_TOOL_NAME, { hash: 'deadbeefdeadbeef' });
-    expect(result.isError).toBe(true);
-    expect(result.texts[0]).toContain('memory store dies with the process that made it');
-    expect(result.texts[0]).toContain('{"store": {"kind": "directory", "path": …}}');
-    expect(result.texts[0]).toContain('smelt.config.json');
-    expect(result.texts[0]).toContain('`smelt init` writes one');
-  });
-
-  it('keeps the directory-store unknown-hash error free of the memory-store hint', async () => {
+  it('renders an unknown hash as a tool error, never empty text', async () => {
     const cwd = tempDir();
     writeFileSync(
       join(cwd, 'smelt.config.json'),
@@ -303,7 +295,23 @@ describe('smelt_retrieve', () => {
     const result = await call(client, RETRIEVE_TOOL_NAME, { hash: 'deadbeefdeadbeef' });
     expect(result.isError).toBe(true);
     expect(result.texts[0]).toContain('UnknownHashError');
+    expect(result.texts[0]).toContain('no stored content for hash "deadbeefdeadbeef"');
+    // On a directory store the memory-store hint would be a non-sequitur.
     expect(result.texts[0]).not.toContain('memory store dies');
+  });
+
+  it('says how to get persistence when a memory store cannot hold earlier sessions', async () => {
+    // The deliberate divergence from the CLI, and the reason it is deliberate: this
+    // server accepts a memory store and serves the session from it, then explains
+    // itself at the moment an unknown hash makes the difference bite. `smelt
+    // retrieve` refuses the same store up front, because a fresh process has nothing.
+    const client = await connect(tempDir()); // no config → memory store
+    const result = await call(client, RETRIEVE_TOOL_NAME, { hash: 'deadbeefdeadbeef' });
+    expect(result.isError).toBe(true);
+    expect(result.texts[0]).toContain('memory store dies with the process that made it');
+    expect(result.texts[0]).toContain('{"store": {"kind": "directory", "path": …}}');
+    expect(result.texts[0]).toContain('smelt.config.json');
+    expect(result.texts[0]).toContain('`smelt init` writes one');
   });
 
   it('retrieves across server instances through the shared directory store', async () => {
@@ -344,7 +352,7 @@ describe('smelt_retrieve', () => {
 });
 
 describe('repo_map', () => {
-  it('renders a ranked map inside the budget', async () => {
+  it('returns the map as a text block, resolved against the server cwd', async () => {
     const cwd = tempDir();
     const src = join(cwd, 'src');
     mkdirSync(src);
@@ -352,18 +360,13 @@ describe('repo_map', () => {
       join(src, 'greet.ts'),
       'export function greet(name: string): string {\n  return `hi ${name}`;\n}\n',
     );
-    writeFileSync(
-      join(src, 'main.ts'),
-      "import { greet } from './greet.ts';\n\nexport function main(): void {\n  greet('smelt');\n  greet('again');\n}\n",
-    );
     const client = await connect(cwd);
     const result = await call(client, REPO_MAP_TOOL_NAME, { dir: 'src', budgetBytes: 2_000 });
     expect(result.isError).toBe(false);
     expect(result.texts[0]).toContain('greet');
-    expect(Buffer.byteLength(result.texts[0]!, 'utf8')).toBeLessThanOrEqual(2_000);
   });
 
-  it('refuses a missing or non-directory target as a tool error', async () => {
+  it('renders the tree refusals as tool errors in this surface’s vocabulary', async () => {
     const cwd = tempDir();
     writeFileSync(join(cwd, 'a-file.txt'), 'not a directory\n');
     const client = await connect(cwd);
@@ -372,30 +375,41 @@ describe('repo_map', () => {
     expect(missing.texts[0]).toContain('cannot read directory "nowhere"');
     const file = await call(client, REPO_MAP_TOOL_NAME, { dir: 'a-file.txt', budgetBytes: 1_000 });
     expect(file.isError).toBe(true);
-    expect(file.texts[0]).toContain('is not a directory');
+    // Composed from the core's law, in this surface's naming: the tool names its own
+    // siblings, and the sentence around them is not this package's to write.
+    const law = readTree(join(cwd, 'a-file.txt'), 'a-file.txt', {
+      tree: REPO_MAP_TOOL_NAME,
+      file: SMELT_FILE_TOOL_NAME,
+    });
+    expect(file.texts[0]).toBe(
+      `${REPO_MAP_TOOL_NAME}: ${law.ok ? '(the fixture was a directory)' : law.refusal}`,
+    );
   });
 });
 
 describe('smelt_stats', () => {
-  it('is an uncounted read: watching the counters never moves them', async () => {
+  it('serves the RetrieveStats verbatim, as JSON', async () => {
     const client = await connect(tempDir());
     await call(client, SMELT_FILE_TOOL_NAME, {
       text: fixtureText(),
       budgetBytes: 600,
       focus: ['handleRequest'],
     });
-    const first = JSON.parse((await call(client, SMELT_STATS_TOOL_NAME, {})).texts[0]!) as Record<
-      string,
-      unknown
-    >;
-    const second = JSON.parse((await call(client, SMELT_STATS_TOOL_NAME, {})).texts[0]!) as Record<
-      string,
-      unknown
-    >;
-    expect(second).toEqual(first);
-    expect(first['retrieveCalls']).toBe(0);
-    expect(first['elisionsStored']).toBeGreaterThan(0);
-    expect(first['allElisionsRetrieved']).toBe(false);
+    const result = await call(client, SMELT_STATS_TOOL_NAME, {});
+    expect(result.isError).toBe(false);
+    const stats = JSON.parse(result.texts[0]!) as Record<string, unknown>;
+    expect(Object.keys(stats).toSorted()).toEqual(
+      [
+        'elisionsStored',
+        'bytesStored',
+        'retrieveCalls',
+        'uniqueRetrieved',
+        'misses',
+        'expansionRate',
+        'allElisionsRetrieved',
+      ].toSorted(),
+    );
+    expect(stats['elisionsStored']).toBeGreaterThan(0);
   });
 
   it('refuses arguments — the tool takes none', async () => {

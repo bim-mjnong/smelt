@@ -126,6 +126,27 @@ codebase-design glossary.
   claims are asserted by _counting calls_ — a symlink is statted once and never read
   (refused on `isSymlink`, not on the accident that an `lstat` of a link is neither
   file nor directory), an ignored path is never statted at all.
+- **Ops**: the operations seam under both front doors (`src/ops/`) — `smeltBlob`,
+  `mapTree`, `retrieveBytes`, `readCounters` (`ops/verbs.ts`) as library functions over
+  **already-resolved** inputs, returning data (text, the values a report needs, a
+  `RepoMap`, bytes, counters); plus the laws an input must satisfy to be resolved
+  (`ops/inputs.ts`). An op never touches argv, stdout, exit codes or MCP result shapes.
+  Both front doors are adapters over it: the CLI's subcommand `run` bodies
+  parse/resolve → call an op → render; the MCP tools validate their JSON Schema → call
+  an op → wrap a `CallToolResult`. Five laws live in `ops/inputs.ts` because both
+  packages held a copy of each: the budget (positive integer, no default), strategy
+  precedence and the `lexical` built-in (`BUILT_IN_STRATEGY`, `resolveStrategy`), the
+  not-a-directory refusal (`readTree`), read-a-path-or-name-it (`readBlob`), and opening
+  a store decision (`openStore`, over `configuredStore`'s `ConfiguredStore`). A law
+  states its **rule and reasoning** once and takes the caller's **naming** as an
+  argument — `--budget` versus `"budgetBytes"`, `map` versus `repo_map` — so the two
+  surfaces stay byte-identical to what each printed before. Nothing in `ops/` throws for
+  a refusable law: it returns a **Ruling** (`{ok, value}` or `{ok: false, refusal}`),
+  because the doors refuse in different currencies (`CliUsageError`/exit 2 versus
+  `isError: true`) and a shared exception would make one of them wrong. Deliberate
+  divergences stay in the adapters — `smelt retrieve`/`stats` refuse a memory store,
+  the MCP server accepts one and hints — which is why `resolveStoreRun` stays
+  unexported: it is the CLI's policy, not a shared law.
 - **guard-kit**: the guards' shared machine — `packages/guard-kit`, test-only,
   `private: true`, never published and never more than a devDependency. It owns the
   import-graph **walker** (`walkImportGraph`, `assertNoNetwork`) that both packages'
