@@ -51,15 +51,32 @@ export const defaultMarker: MarkerBuilder = ({ explanation, bytes, hash }) =>
   `<<smelt/${MARKER_FORMAT_VERSION}: ${explanation} (${String(bytes)}B) — retrieve("${hash}")>>`;
 
 /**
- * Line-comment leaders for languages where a bare marker line breaks the syntax of
- * what remains around it.
+ * Line-comment leaders per language: the marker always lands as a comment in the
+ * survivor's own syntax, because a bare marker line breaks the syntax of what remains
+ * around it — in **every** grammar this was tested against, not just the indented ones.
  *
- * Python is the one entry, and it earns its place: significant indentation means a
- * parse error does not stay local. Reparsing a survivor whose marker sits bare between
- * two `def`s shows the ERROR node swallowing the *neighbouring definitions too* — the
- * survivor stops being Python at all, not just at the marker line. Brace-delimited
- * languages keep their structure around an unparsable line, so they keep the bare
- * marker.
+ * The failure classes, each verified by reparsing a bare-marker survivor:
+ *
+ *   - **python** — significant indentation means a parse error does not stay local.
+ *     The ERROR node swallows the *neighbouring definitions too* — the survivor stops
+ *     being Python at all, not just at the marker line.
+ *   - **ruby** and **bash** — the marker *begins with* `<<`, which both languages read
+ *     as a heredoc operator. A bare marker line opens a heredoc whose terminator never
+ *     arrives, and everything after it — every kept declaration — is swallowed into a
+ *     string literal.
+ *   - **php** — `<<` is an operator here too: the kept function after a bare marker is
+ *     re-typed into an anonymous-function operand inside the marker's binary
+ *     expression. The kept declaration is no longer a declaration in the survivor.
+ *   - **kotlin**, **swift**, and the rest of the brace-delimited set (typescript, tsx,
+ *     javascript, rust, go, java, c, cpp, c_sharp) — the folk claim that braces keep a
+ *     parse error local is **empirically false**: reparsing each language's fixture
+ *     survivor with its own bundled grammar shows ERROR nodes spanning the kept
+ *     declarations (a C function's signature absorbed into an ERROR, fifteen cascading
+ *     ERRORs in swift, and so on). The survivor-reparse guard in
+ *     `test/guards/structural.test.ts` now asserts the opposite property for every
+ *     structural language: the survivor reparses with no new issues.
+ *
+ * Only `'unknown'` keeps the bare marker — lexical text has no syntax to break.
  *
  * This does **not** move the frozen wire surface. The `<<smelt/v1: … >>` core is
  * rendered by {@link defaultMarker}, byte-identical and still versioned in band; the
@@ -68,7 +85,21 @@ export const defaultMarker: MarkerBuilder = ({ explanation, bytes, hash }) =>
  * the one wrapping that cannot change what a model reads out of the marker.
  */
 export const MARKER_LINE_COMMENT_LEADERS: Readonly<Partial<Record<DetectedLanguage, string>>> = {
+  typescript: '// ',
+  tsx: '// ',
+  javascript: '// ',
+  rust: '// ',
   python: '# ',
+  go: '// ',
+  java: '// ',
+  c: '// ',
+  cpp: '// ',
+  c_sharp: '// ',
+  ruby: '# ',
+  php: '// ',
+  kotlin: '// ',
+  swift: '// ',
+  bash: '# ',
 };
 
 /**

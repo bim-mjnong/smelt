@@ -214,10 +214,10 @@ export function createSmelter(config: SmelterConfig = {}): Smelter {
         ...(options.focus === undefined ? {} : { focus: options.focus }),
       };
       const plan = await planner.plan(input);
-      // The marker follows the *result's* language: where a bare marker line would
-      // break the survivor's syntax (python — see MARKER_LINE_COMMENT_LEADERS), it is
-      // wrapped in the language's line-comment leader. A caller-supplied marker
-      // builder always wins.
+      // The marker follows the *result's* language: it lands behind the language's
+      // line-comment leader (see MARKER_LINE_COMMENT_LEADERS), because a bare marker
+      // line breaks the survivor's syntax in every grammar tested. A caller-supplied
+      // marker builder always wins.
       const marker = config.marker ?? markerForLanguage(plan.language);
       return applyPlan(text, plan, store, { ...applyOptions, marker });
     },

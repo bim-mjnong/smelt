@@ -1,5 +1,20 @@
 /** Languages smelt can parse structurally. Everything else falls back to the lexical planner. */
-export type LanguageId = 'typescript' | 'tsx' | 'javascript' | 'rust' | 'python' | 'go';
+export type LanguageId =
+  | 'typescript'
+  | 'tsx'
+  | 'javascript'
+  | 'rust'
+  | 'python'
+  | 'go'
+  | 'java'
+  | 'c'
+  | 'cpp'
+  | 'c_sharp'
+  | 'ruby'
+  | 'php'
+  | 'kotlin'
+  | 'swift'
+  | 'bash';
 
 /** `'unknown'` is a first-class outcome, not a failure: it selects the lexical planner. */
 export type DetectedLanguage = LanguageId | 'unknown';

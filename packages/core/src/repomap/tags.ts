@@ -84,6 +84,52 @@ const DEF_KINDS: Readonly<Record<LanguageId, Readonly<Record<string, string>>>> 
     method_declaration: 'method',
     type_spec: 'type',
   },
+  // The slice-4b tables below list only node kinds whose `name` field is an
+  // *identifier* node, because that is what the extraction walk reads — a kind whose
+  // name is spelled differently (php's `name` nodes, ruby's `constant` class names,
+  // bash's `word` function names, kotlin's field-less declarations) is *omitted*, not
+  // guessed at. An omitted kind means fewer symbols on the map, never wrong ones.
+  java: {
+    class_declaration: 'class',
+    interface_declaration: 'interface',
+    enum_declaration: 'enum',
+    record_declaration: 'record',
+    annotation_type_declaration: 'annotation type',
+    method_declaration: 'method',
+  },
+  c: {
+    struct_specifier: 'struct',
+    union_specifier: 'union',
+    enum_specifier: 'enum',
+  },
+  cpp: {
+    class_specifier: 'class',
+    struct_specifier: 'struct',
+    union_specifier: 'union',
+    enum_specifier: 'enum',
+    namespace_definition: 'namespace',
+  },
+  c_sharp: {
+    class_declaration: 'class',
+    interface_declaration: 'interface',
+    struct_declaration: 'struct',
+    enum_declaration: 'enum',
+    record_declaration: 'record',
+    delegate_declaration: 'delegate',
+    method_declaration: 'method',
+  },
+  ruby: {
+    method: 'method',
+    singleton_method: 'method',
+  },
+  php: {},
+  kotlin: {},
+  swift: {
+    class_declaration: 'type',
+    protocol_declaration: 'protocol',
+    function_declaration: 'function',
+  },
+  bash: {},
 };
 
 /** Node types counted as references, per language. */
@@ -94,6 +140,15 @@ const REF_TYPES: Readonly<Record<LanguageId, readonly string[]>> = {
   rust: ['identifier', 'type_identifier'],
   python: ['identifier'],
   go: ['identifier', 'type_identifier'],
+  java: ['identifier', 'type_identifier'],
+  c: ['identifier', 'type_identifier'],
+  cpp: ['identifier', 'type_identifier'],
+  c_sharp: ['identifier'],
+  ruby: ['identifier', 'constant'],
+  php: ['name', 'variable_name'],
+  kotlin: ['simple_identifier', 'type_identifier'],
+  swift: ['simple_identifier', 'type_identifier'],
+  bash: ['variable_name'],
 };
 
 /**
