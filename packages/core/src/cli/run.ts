@@ -13,12 +13,14 @@ import type { ElisionStore, RetrieveStats, SmeltResult } from '../types.ts';
 
 import { CLI_NAME, cliUsage, parseSmeltArgs } from './args.ts';
 import type {
+  HooksInvocation,
   MapInvocation,
   RetrieveInvocation,
   SmeltInvocation,
   StatsInvocation,
 } from './args.ts';
 import { loadNearestConfig } from './config.ts';
+import { runHooks } from './hooks.ts';
 import { runInit } from './init.ts';
 import { formatMapReport, formatReport } from './report.ts';
 import { resolveMapRun, resolveRun, resolveStoreRun } from './resolve.ts';
@@ -27,6 +29,7 @@ import type { ResolvedRun } from './resolve.ts';
 export { CLI_NAME, cliUsage, parseSmeltArgs } from './args.ts';
 export type {
   CliInvocation,
+  HooksInvocation,
   MapInvocation,
   RetrieveInvocation,
   SmeltInvocation,
@@ -168,6 +171,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         return runRetrieve(invocation, io);
       case 'stats':
         return runStats(invocation, io);
+      case 'hooks':
+        return await runHooksMode(invocation, io);
     }
   } catch (error) {
     if (error instanceof CliUsageError) {
@@ -180,6 +185,25 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     throw error;
   }
+}
+
+/**
+ * `smelt hooks <install|remove>` — interactive like `init`, so it needs the same
+ * line-by-line input stream, and refuses to run without one for the same reason.
+ */
+async function runHooksMode(invocation: HooksInvocation, io: CliIo): Promise<number> {
+  if (io.initInput === undefined) {
+    throw new CliUsageError(
+      `${CLI_NAME}: hooks ${invocation.action} is interactive, and this invocation has ` +
+        `no interactive input stream. Run \`${CLI_NAME} hooks ${invocation.action}\` ` +
+        `from a terminal.`,
+    );
+  }
+  return await runHooks(invocation.action, invocation.harness, {
+    input: io.initInput,
+    output: io.stdout,
+    cwd: io.cwd ?? process.cwd(),
+  });
 }
 
 /**

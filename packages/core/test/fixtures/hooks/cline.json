@@ -1,0 +1,17 @@
+{
+  "_cites": "docs/research/2026-09-02-harness-capability-matrix.md, Cline row (PreToolUse executable under .clinerules/hooks/, response {\"cancel\":true}; no input-modification field; https://docs.cline.bot/features/hooks) — EXPERIMENTAL tier",
+  "readBig": {
+    "hookName": "PreToolUse",
+    "toolName": "Read",
+    "toolInput": { "file_path": "/repo/big.ts" }
+  },
+  "readBigNested": {
+    "hookName": "PreToolUse",
+    "preToolUse": { "toolName": "Read", "toolInput": { "file_path": "/repo/big.ts" } }
+  },
+  "bashCatBig": {
+    "hookName": "PreToolUse",
+    "toolName": "execute_command",
+    "toolInput": { "command": "cat /repo/big.ts" }
+  }
+}

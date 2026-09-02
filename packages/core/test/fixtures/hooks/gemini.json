@@ -1,0 +1,18 @@
+{
+  "_cites": "docs/research/2026-09-02-harness-capability-matrix.md, Gemini CLI row (BeforeTool deny {\"decision\":\"deny\"}; rewrite via hookSpecificOutput.tool_input; https://geminicli.com/docs/hooks/reference/) — EXPERIMENTAL tier. Input field names additionally verified 2026-09-02 against the shipped @google/gemini-cli 0.58.0 bundle, installed headlessly: BeforeTool stdin carries {tool_name, tool_input}; read_file params are file_path/start_line/end_line (PARAM_FILE_PATH in base-declarations); the shell tool is run_shell_command with param command.",
+  "readBig": {
+    "hook_event_name": "BeforeTool",
+    "tool_name": "read_file",
+    "tool_input": { "file_path": "/repo/big.ts" }
+  },
+  "readWindowed": {
+    "hook_event_name": "BeforeTool",
+    "tool_name": "read_file",
+    "tool_input": { "file_path": "/repo/big.ts", "start_line": 10, "end_line": 30 }
+  },
+  "shellCatBig": {
+    "hook_event_name": "BeforeTool",
+    "tool_name": "run_shell_command",
+    "tool_input": { "command": "cat /repo/big.ts" }
+  }
+}

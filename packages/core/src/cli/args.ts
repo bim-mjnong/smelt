@@ -65,8 +65,21 @@ export interface StatsInvocation {
   readonly json: boolean;
 }
 
+/**
+ * `smelt hooks install` / `smelt hooks remove` — the harness-hooks installer. Like
+ * `init`, the subcommand is interactive; the only flag is `--harness`, which skips
+ * the selection step. Validation of the id happens in `cli/hooks.ts`, where the
+ * harness registry lives.
+ */
+export interface HooksInvocation {
+  readonly mode: 'hooks';
+  readonly action: 'install' | 'remove';
+  readonly harness?: string;
+}
+
 /** Everything `parseSmeltArgs` can return. Narrow on `mode`. */
-export type CliInvocation = SmeltInvocation | MapInvocation | RetrieveInvocation | StatsInvocation;
+export type CliInvocation =
+  SmeltInvocation | MapInvocation | RetrieveInvocation | StatsInvocation | HooksInvocation;
 
 /**
  * Argument parsing on `node:util.parseArgs` — stable since Node 20, which `engines`
@@ -92,6 +105,7 @@ export function parseSmeltArgs(argv: readonly string[]): CliInvocation {
         strategy: { type: 'string' },
         ignore: { type: 'string', multiple: true },
         cache: { type: 'string' },
+        harness: { type: 'string' },
         json: { type: 'boolean' },
         reconstruct: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
@@ -141,12 +155,22 @@ export function parseSmeltArgs(argv: readonly string[]): CliInvocation {
     return parseStatsArgs(values, positionals);
   }
 
+  if (positionals[0] === 'hooks') {
+    return parseHooksArgs(values, positionals);
+  }
+
   // These two belong to `smelt map` alone; silently ignoring a flag the user typed
   // would be a setting they believed was in force.
   if (values.ignore !== undefined || values.cache !== undefined) {
     throw new CliUsageError(
       `${CLI_NAME}: --ignore and --cache belong to \`${CLI_NAME} map\`. A single-blob ` +
         `run reads one file or stdin; there is no tree to walk and nothing to cache.`,
+    );
+  }
+  if (values.harness !== undefined) {
+    throw new CliUsageError(
+      `${CLI_NAME}: --harness belongs to \`${CLI_NAME} hooks\`. A single-blob run ` +
+        `has no harness to install into.`,
     );
   }
 
@@ -194,6 +218,7 @@ interface MapFlagValues {
   readonly strategy?: string;
   readonly ignore?: readonly string[];
   readonly cache?: string;
+  readonly harness?: string;
   readonly json?: boolean;
   readonly reconstruct?: boolean;
 }
@@ -227,6 +252,12 @@ function parseMapArgs(values: MapFlagValues, positionals: readonly string[]): Ma
       `${CLI_NAME}: --language and --strategy apply to single-blob runs. map reads a ` +
         `whole tree, detects each file's language itself, and is not a planner ` +
         `strategy — it returns a map, not an elision plan.`,
+    );
+  }
+  if (values.harness !== undefined) {
+    throw new CliUsageError(
+      `${CLI_NAME}: --harness belongs to \`${CLI_NAME} hooks\`. map has no harness ` +
+        `to install into.`,
     );
   }
   const budgetBytes = parseBudget(values.budget);
@@ -295,6 +326,46 @@ function parseStatsArgs(
 }
 
 /**
+ * `hooks` takes an action and at most `--harness`. It is interactive like `init` —
+ * the wizard asks everything else — so every other flag is refused rather than
+ * ignored.
+ */
+function parseHooksArgs(
+  values: Record<string, unknown>,
+  positionals: readonly string[],
+): HooksInvocation {
+  const action = positionals[1];
+  if (action !== 'install' && action !== 'remove') {
+    throw new CliUsageError(
+      `${CLI_NAME}: hooks needs an action — install or remove.\n` +
+        `  ${CLI_NAME} hooks install [--harness <id>]\n` +
+        `  ${CLI_NAME} hooks remove [--harness <id>]`,
+    );
+  }
+  if (positionals.length > 2) {
+    throw new CliUsageError(
+      `${CLI_NAME}: hooks ${action} takes no further arguments, got ` +
+        `${positionals.slice(2).join(', ')}.`,
+    );
+  }
+  const flags = Object.entries(values).filter(
+    ([name, value]) => value !== undefined && name !== 'harness',
+  );
+  if (flags.length > 0) {
+    throw new CliUsageError(
+      `${CLI_NAME}: hooks takes only --harness ` +
+        `(got --${flags.map(([name]) => name).join(', --')}). The wizard asks the rest.`,
+    );
+  }
+  const harness = values['harness'];
+  return {
+    mode: 'hooks',
+    action,
+    ...(typeof harness === 'string' ? { harness } : {}),
+  };
+}
+
+/**
  * `--budget` has no built-in default, for the same reason `smelt()` has none: a budget
  * smelt invented would be smelt deciding how much of the caller's context to throw
  * away, silently, at a number nobody chose. A *missing* flag is not an error here,
@@ -345,6 +416,8 @@ USAGE
   ${CLI_NAME} map <dir> --budget <bytes> [--focus <term>]... [--ignore <entry>]... [--cache <dir>]
   ${CLI_NAME} retrieve <hash>
   ${CLI_NAME} stats [--json]
+  ${CLI_NAME} hooks install [--harness <id>]
+  ${CLI_NAME} hooks remove [--harness <id>]
   ${CLI_NAME} --reconstruct <result.json>
   ${CLI_NAME} --reconstruct < result.json
   ${CLI_NAME} init
@@ -392,6 +465,22 @@ RETRIEVE & STATS
   is nothing to retrieve across runs, and that is a usage error rather than a
   quiet empty answer.
 
+HOOKS
+  ${CLI_NAME} hooks install wires the smelt guard into agent-harness hooks: a
+  PreToolUse size-guard that refuses oversized raw reads with the exact ${CLI_NAME}
+  replacement command (default on), \`${CLI_NAME} stats\` at session end (default
+  on), and an opening \`${CLI_NAME} map\` at session start (opt-in) — plus an
+  instruction-file snippet that teaches \`${CLI_NAME} retrieve\` after a deny.
+  Harnesses are tiered honestly: verified (Claude Code, Codex), experimental
+  (Gemini, Grok, Hermes, Cursor, opencode, Cline — schemas from the capability
+  matrix, not yet smoke-tested), advisory (KiloCode, Aider — instructions only,
+  nothing enforced). Same discipline as init: every file listed before a final
+  confirm, no existing file overwritten without a per-file yes, re-runs edit
+  toggles. ${CLI_NAME} hooks remove takes it back out. Guard settings live in
+  smelt.config.json ("hooks": {"thresholdBytes", "enforcement": "deny"|"rewrite"});
+  deny is the default — rewrite substitutes commands in-flight only where a
+  harness supports it, and never silently.
+
 OPTIONS
   --budget <bytes>     Required, unless smelt.config.json sets defaultBudgetBytes.
                        Soft ceiling for the output, in UTF-8 bytes (for map: a hard
@@ -411,6 +500,9 @@ OPTIONS
                        an entry containing / is a root-relative prefix.
   --cache <dir>        map only. Directory for the tags cache, keyed by content
                        hash. Only when given does the map write to disk at all.
+  --harness <id>       hooks only. Skip harness detection and target one id:
+                       claude-code, codex, gemini, grok, hermes, cursor, opencode,
+                       cline, kilocode, aider.
   --json               Print a JSON envelope on stdout instead of the text:
                        { format, result, elided } for a smelt run — \`result\` is
                        the SmeltResult verbatim, \`elided\` carries the bytes, so

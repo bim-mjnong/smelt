@@ -1,0 +1,37 @@
+{
+  "_cites": "docs/research/2026-09-02-agent-enforcement.md § 1 — PreToolUse input schema verified 2026-09-02 against https://code.claude.com/docs/en/hooks (Read: absolute file_path, offset/limit; Bash: command)",
+  "readBig": {
+    "session_id": "abc123",
+    "transcript_path": "/tmp/transcript.jsonl",
+    "cwd": "/repo",
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Read",
+    "tool_input": { "file_path": "/repo/big.ts" }
+  },
+  "readWindowed": {
+    "session_id": "abc123",
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Read",
+    "tool_input": { "file_path": "/repo/big.ts", "offset": 100, "limit": 40 }
+  },
+  "readSmall": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Read",
+    "tool_input": { "file_path": "/repo/small.ts" }
+  },
+  "bashCatBig": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": { "command": "cat /repo/big.ts", "description": "Read the big file" }
+  },
+  "bashGrep": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": { "command": "grep -rn handleRequest src" }
+  },
+  "otherTool": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Edit",
+    "tool_input": { "file_path": "/repo/big.ts", "old_string": "a", "new_string": "b" }
+  }
+}

@@ -7,7 +7,7 @@ import { STRUCTURAL_LANGUAGES } from '../plan/structural.ts';
 
 import { CLI_NAME } from './args.ts';
 import { CONFIG_FILE_NAME, CONFIG_VERSION, findConfigFile, parseConfig } from './config.ts';
-import type { SmeltConfig, SmeltConfigStore } from './config.ts';
+import type { SmeltConfig, SmeltConfigHooks, SmeltConfigStore } from './config.ts';
 
 /**
  * `smelt init` — the setup wizard.
@@ -58,6 +58,12 @@ interface WizardChoices {
   measureStub: boolean;
   /** Generate {@link RERANK_STUB_FILE}? Never deletes an existing one. */
   rerankStub: boolean;
+  /**
+   * An existing config's `hooks` block, carried through verbatim. This wizard never
+   * edits it — `smelt hooks install` owns those choices — but a re-run that silently
+   * dropped it would be an edit the user never made.
+   */
+  hooks: SmeltConfigHooks | undefined;
 }
 
 type StepOutcome = 'ok' | 'back';
@@ -142,6 +148,7 @@ async function freshRun(io: InitIo, ask: Asker): Promise<number> {
     strategy: 'lexical',
     measureStub: false,
     rerankStub: false,
+    hooks: undefined,
   };
 
   let index = 0;
@@ -174,6 +181,7 @@ async function editRun(
     strategy: config.strategy ?? 'lexical',
     measureStub: false,
     rerankStub: false,
+    hooks: config.hooks,
   };
 
   io.output(
@@ -408,6 +416,11 @@ async function confirmAndWrite(
     io.output(`  wrote ${write.name}\n`);
   }
   io.output(`Done.\n`);
+  io.output(
+    `Also: \`${CLI_NAME} hooks install\` wires the smelt guard into agent-harness ` +
+      `hooks (Claude Code, Codex, and more) — it detects installed harnesses and asks ` +
+      `before writing anything.\n`,
+  );
   return 'done';
 }
 
@@ -429,12 +442,15 @@ export function renderConfig(choices: {
   readonly budgetBytes: number | undefined;
   readonly store: SmeltConfigStore;
   readonly strategy: 'lexical' | 'structural';
+  /** Carried through from an existing config; this wizard never edits it. */
+  readonly hooks?: SmeltConfigHooks | undefined;
 }): string {
   const config: SmeltConfig = {
     smeltConfig: CONFIG_VERSION,
     ...(choices.budgetBytes === undefined ? {} : { defaultBudgetBytes: choices.budgetBytes }),
     strategy: choices.strategy,
     store: choices.store,
+    ...(choices.hooks === undefined ? {} : { hooks: choices.hooks }),
   };
   return `${JSON.stringify(config, null, 2)}\n`;
 }

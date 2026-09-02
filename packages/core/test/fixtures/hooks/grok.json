@@ -1,0 +1,13 @@
+{
+  "_cites": "docs/research/2026-09-02-harness-capability-matrix.md, Grok CLI row (official xai-org/grok-build; PreToolUse deny {\"decision\":\"deny\"} or exit 2; input read-only, no rewrite; https://docs.x.ai/build/features/hooks) — EXPERIMENTAL tier",
+  "readBig": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Read",
+    "tool_input": { "file_path": "/repo/big.ts" }
+  },
+  "bashCatBig": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": { "command": "cat /repo/big.ts" }
+  }
+}
