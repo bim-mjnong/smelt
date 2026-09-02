@@ -70,10 +70,15 @@ function manifest(): Manifest {
   return JSON.parse(readFileSync(resolve(packageRoot(), 'package.json'), 'utf8')) as Manifest;
 }
 
-/** Every `./dist/**.js` path anywhere inside a JSON value. */
+/**
+ * Every `dist/**.js` path anywhere inside a JSON value, normalized without the `./`
+ * prefix — npm 11's publish validation strips `./` from `bin` values (and removed the
+ * whole entry when it carried one), so both spellings must count as the same front door.
+ */
 function distPaths(value: unknown, found: string[] = []): readonly string[] {
   if (typeof value === 'string') {
-    if (/^\.\/dist\/.+\.js$/.test(value)) found.push(value);
+    const normalized = value.startsWith('./') ? value.slice(2) : value;
+    if (/^dist\/.+\.js$/.test(normalized)) found.push(`./${normalized}`);
     return found;
   }
   if (Array.isArray(value)) {
