@@ -52,7 +52,7 @@ const VETTED_DEPENDENCIES: readonly string[] = ['@modelcontextprotocol/sdk', '@s
 
 /** Node builtins OUR modules may import, each with its reason. */
 const ALLOWED_MCP_BUILTINS: readonly string[] = [
-  'node:fs', // reading the manifest, a smelt_file path, a stat for repo_map
+  'node:fs', // reading this package's own manifest, for the server version
   'node:path', // resolving tool paths against the server cwd
   'node:process', // cwd, stderr, and the exit code, for the binary
 ];
@@ -152,8 +152,8 @@ export const MUTATIONS: GuardMutation[] = [
   {
     id: 'mcp-law1-node-https-import',
     file: 'server.ts',
-    find: "import { readFileSync, statSync } from 'node:fs';",
-    replace: "import 'node:https';\nimport { readFileSync, statSync } from 'node:fs';",
+    find: "import { readFileSync } from 'node:fs';",
+    replace: "import 'node:https';\nimport { readFileSync } from 'node:fs';",
     why: 'a network transport imported directly into the MCP server',
   },
   {

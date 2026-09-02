@@ -328,33 +328,32 @@ export const MUTATIONS: GuardMutation[] = [
   {
     id: 'cli-retrieve-not-counted',
     file: 'cli/subcommands/retrieve.ts',
-    find: '    io.stdout(store.retrieve(resolved.hash));',
+    find: '    io.stdout(retrieveBytes({ store, hash: resolved.hash }));',
     replace: "    io.stdout(store.peek(resolved.hash) ?? '');",
     why: 'the marker-loop command reverted to the uncounted peek() — a pure-shell agent could pull every blob back while expansionRate sat at a flattering zero',
   },
   {
     id: 'cli-retrieve-reencodes',
     file: 'cli/subcommands/retrieve.ts',
-    find: '    const store = new DirectoryElisionStore(resolved.store.storePath);',
+    find: "    const store = openStore({ kind: 'directory', path: resolved.store.storePath });",
     replace:
+      "    const real = openStore({ kind: 'directory', path: resolved.store.storePath });\n" +
       '    const store = {\n' +
-      '      retrieve: (hash: string) =>\n' +
-      "        new DirectoryElisionStore(resolved.store.storePath).retrieve(hash).trimEnd() + '\\n',\n" +
-      '    };',
+      "      retrieve: (hash: string) => real.retrieve(hash).trimEnd() + '\\n',\n" +
+      '    } as typeof real;',
     why: 'retrieve prints tidied-up text instead of the raw bytes — an almost-right blob handed back as a faithful retrieval, the exact silent wrongness Law 3 exists to refuse',
   },
   {
     id: 'cli-stats-counts-as-retrieval',
     file: 'cli/subcommands/stats.ts',
-    find: '    const stats = new DirectoryElisionStore(resolved.store.storePath).stats();',
+    find: '    const stats = readCounters({ store });',
     replace:
-      '    const statsStore = new DirectoryElisionStore(resolved.store.storePath);\n' +
       '    try {\n' +
-      "      statsStore.retrieve('0000000000000000');\n" +
+      "      store.retrieve('0000000000000000');\n" +
       '    } catch {\n' +
       '      // the observer just journalled a miss\n' +
       '    }\n' +
-      '    const stats = statsStore.stats();',
+      '    const stats = readCounters({ store });',
     why: 'reading the stats journals a retrieval of its own — watching the metric moves it, so the count inflates with every look',
   },
 ];
