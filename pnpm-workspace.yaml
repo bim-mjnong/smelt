@@ -1,2 +1,8 @@
 packages:
   - 'packages/*'
+  - 'site'
+
+# supply-chain hardening (effective on pnpm >= 10.26; the pinned 10.15 ignores unknown keys)
+minimumReleaseAge: 10080
+trustPolicy: no-downgrade
+blockExoticSubdeps: true
