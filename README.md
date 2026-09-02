@@ -349,8 +349,8 @@ have not been run yet; when they are, the rows land in
 model named, append-only. Until then this README claims nothing about them.
 
 For the class of saving to expect on real agent traffic, the honest comparable remains
-**Headroom's stated 15–20% for coding agents** — their number, on their corpus, cited as
-exactly that.
+**Headroom's stated 21–57% across its four proof scenarios** (their README, 2026-09) — their
+numbers, on their corpus, cited as exactly that.
 
 ## On units: bytes, and why that is the strength
 
