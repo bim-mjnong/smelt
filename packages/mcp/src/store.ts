@@ -1,23 +1,20 @@
-import {
-  CONFIG_FILE_NAME,
-  DirectoryElisionStore,
-  loadNearestConfig,
-  MemoryElisionStore,
-  resolveStorePath,
-} from '@smeltjs/core';
+import { CONFIG_FILE_NAME, configuredStore, loadNearestConfig, openStore } from '@smeltjs/core';
 import type { ElisionStore, Strategy } from '@smeltjs/core';
 
 /**
  * The store this server serves its four tools from, decided once at startup.
  *
  * The decision is the CLI's decision, made by the CLI's own exported machinery —
- * `loadNearestConfig` walks up from `cwd` exactly as `smelt` does, `resolveStorePath`
- * resolves `store.path` against the config file exactly as `smelt` does — so a
- * `smelt.config.json` with a directory store gives the CLI and this server **one**
- * persistent store: a marker minted by either can be retrieved by the other, and both
- * move the same counters. Nothing here is a fork of that logic; a malformed config
- * throws the CLI's own `CliUsageError` and the server refuses to start, because a
- * config silently skipped would be a setting the user believed was in force.
+ * `loadNearestConfig` walks up from `cwd` exactly as `smelt` does, `configuredStore`
+ * reads the one store key and resolves `store.path` against the config file exactly as
+ * `smelt` does, and `openStore` (the ops seam) turns that decision into the same live
+ * store the CLI would open. So a `smelt.config.json` with a directory store gives the
+ * CLI and this server **one** persistent store: a marker minted by either can be
+ * retrieved by the other, and both move the same counters. Nothing here reads a config
+ * key itself — this file used to test `store.kind` and resolve the store path by hand,
+ * which is a second reading of the same key in a second package — and a malformed
+ * config throws the CLI's own `CliUsageError` so the server refuses to start, because
+ * a config silently skipped would be a setting the user believed was in force.
  */
 export interface ResolvedMcpStore {
   readonly store: ElisionStore;
@@ -49,15 +46,17 @@ export interface ResolvedMcpStore {
  */
 export function resolveMcpStore(cwd: string): ResolvedMcpStore {
   const loaded = loadNearestConfig(cwd);
+  const decision = configuredStore(loaded);
   const strategy = loaded?.config.strategy;
   const withStrategy = strategy === undefined ? {} : { defaultStrategy: strategy };
 
-  if (loaded !== undefined && loaded.config.store?.kind === 'directory') {
-    const path = resolveStorePath(loaded, loaded.config.store.path);
+  if (loaded !== undefined && decision.kind === 'directory') {
     return {
-      store: new DirectoryElisionStore(path),
+      store: openStore(decision),
       kind: 'directory',
-      description: `directory store at ${path} (from ${loaded.path}) — shared with the smelt CLI`,
+      description:
+        `directory store at ${decision.path} (from ${loaded.path}) — ` +
+        `shared with the smelt CLI`,
       ...withStrategy,
     };
   }
@@ -67,7 +66,7 @@ export function resolveMcpStore(cwd: string): ResolvedMcpStore {
       ? `there is no ${CONFIG_FILE_NAME} at or above ${cwd}`
       : `the ${CONFIG_FILE_NAME} at ${loaded.path} uses a memory store`;
   return {
-    store: new MemoryElisionStore(),
+    store: openStore({ kind: 'memory' }),
     kind: 'memory',
     description: `in-memory store (${state}) — retrieval works within this session only`,
     persistenceHint:
