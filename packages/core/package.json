@@ -40,7 +40,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "smelt": "./dist/cli/bin.js"
+    "smelt": "dist/cli/bin.js"
   },
   "types": "./dist/index.d.ts",
   "scripts": {
