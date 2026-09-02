@@ -368,7 +368,9 @@ describe('--help and --version', () => {
     ) as { version: string; bin: Record<string, string> };
     const bin = readFileSync(new URL('../src/cli/bin.ts', import.meta.url), 'utf8');
     expect(bin).toContain("new URL('../../package.json', import.meta.url)");
-    expect(manifest.bin['smelt']).toBe('./dist/cli/bin.js');
+    // No `./` prefix: npm 11's publish validation treats a `./`-prefixed bin value as
+    // invalid and silently REMOVES the bin entry from the published manifest.
+    expect(manifest.bin['smelt']).toBe('dist/cli/bin.js');
     expect(typeof manifest.version).toBe('string');
   });
 });
