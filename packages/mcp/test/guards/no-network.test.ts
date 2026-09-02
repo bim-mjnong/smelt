@@ -1,7 +1,12 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join, posix, resolve } from 'node:path';
-
 import { describe, expect, it } from 'vitest';
+
+import {
+  assertNoNetwork,
+  readManifest,
+  walkImportGraph,
+  type Classification,
+  type Edge,
+} from '@smelt/guard-kit';
 
 import {
   ALLOWED_NODE_BUILTINS,
@@ -11,14 +16,7 @@ import {
 } from '@smeltjs/core';
 
 import type { GuardMutation } from './_mutations.ts';
-import {
-  allSourceFiles,
-  guardSrcRoot,
-  importSpecifiers,
-  packageRoot,
-  readSource,
-  stripStringsAndComments,
-} from './_source.ts';
+import { guardSrcRoot, packageRoot } from './_source.ts';
 
 /**
  * ZERO-NETWORK GUARD for the MCP package — Law 1, plus this package's own ruling:
@@ -27,12 +25,13 @@ import {
  * The sanctioned dependency, `@modelcontextprotocol/sdk`, ships HTTP and SSE
  * transports alongside stdio. Vetting "the package" would therefore vet a network
  * server into the graph; what was actually sanctioned is the *stdio* slice. So this
- * guard does what the core's guard does — walks the real import graph from every
- * manifest entrypoint and classifies every edge into exactly one bucket — and pins
- * the SDK to an explicit subpath allowlist ({@link ALLOWED_SDK_SUBPATHS}): stdio
- * transport, the server class, the protocol types, nothing else. An SDK subpath off
- * that list (`server/sse.js`, `server/streamableHttp.js`) is forbidden, not
- * unclassified — the guard names the ruling it breaks.
+ * guard runs the same machine the core's guard runs — `@smelt/guard-kit`'s
+ * `walkImportGraph`, which walks the real import graph from every manifest entrypoint
+ * and carries the four vacuity defences — and pins the SDK to an explicit subpath
+ * allowlist ({@link ALLOWED_SDK_SUBPATHS}): stdio transport, the server class, the
+ * protocol types, nothing else. An SDK subpath off that list (`server/sse.js`,
+ * `server/streamableHttp.js`) is forbidden, not unclassified — the guard names the
+ * ruling it breaks.
  *
  * The forbidden lists are imported from `@smeltjs/core`'s own `net/policy.ts` — the
  * one place Law 1 is written down — so the two packages cannot drift on what counts
@@ -61,77 +60,12 @@ const ALLOWED_MCP_BUILTINS: readonly string[] = [
 /** Modules legitimately unreachable from any entrypoint. Empty, and staying so. */
 const UNREACHABLE_BY_DESIGN: readonly string[] = [];
 
-interface Manifest {
-  readonly dependencies?: Record<string, string>;
-  readonly peerDependencies?: Record<string, string>;
-  readonly exports?: unknown;
-  readonly bin?: Record<string, string>;
-}
-
-function manifest(): Manifest {
-  return JSON.parse(readFileSync(resolve(packageRoot(), 'package.json'), 'utf8')) as Manifest;
-}
-
-/** Every `dist/**.js` path anywhere inside a JSON value — see the core guard. */
-function distPaths(value: unknown, found: string[] = []): readonly string[] {
-  if (typeof value === 'string') {
-    const normalized = value.startsWith('./') ? value.slice(2) : value;
-    if (/^dist\/.+\.js$/.test(normalized)) found.push(`./${normalized}`);
-    return found;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) distPaths(item, found);
-    return found;
-  }
-  if (typeof value === 'object' && value !== null) {
-    for (const item of Object.values(value)) distPaths(item, found);
-  }
-  return found;
-}
-
-/** The published front doors, as source paths, derived from `exports` + `bin`. */
-function entrypoints(root: string): readonly string[] {
-  const { exports: exported, bin } = manifest();
-  const declared = [...new Set([...distPaths(exported), ...distPaths(bin)])].toSorted();
-
-  const missing: string[] = [];
-  const sources = declared.map((path) => {
-    const source = path.replace(/^\.\/dist\//, '').replace(/\.js$/, '.ts');
-    if (!existsSync(join(root, source))) missing.push(`${path} → src/${source}`);
-    return source;
-  });
-  if (missing.length > 0) {
-    throw new Error(
-      `the manifest advertises entrypoints with no source file: ${missing.join(', ')}. ` +
-        `The zero-network walk starts at these, so a broken mapping would silently ` +
-        `shrink the guard.`,
-    );
-  }
-  return sources;
-}
-
-interface Edge {
-  readonly from: string;
-  readonly specifier: string;
-}
-
-type Classification =
-  | { readonly kind: 'relative'; readonly target: string }
-  | { readonly kind: 'allowed-builtin' }
-  | { readonly kind: 'allowed-package' }
-  | { readonly kind: 'forbidden'; readonly why: string }
-  | { readonly kind: 'unclassified' };
-
-function classify(edge: Edge, root: string): Classification {
+/**
+ * THE RULING, for this package: stdio-local. Relative edges are the walker's
+ * business; every bare specifier is judged here.
+ */
+function classify(edge: Edge): Classification {
   const { specifier } = edge;
-
-  if (specifier.startsWith('.')) {
-    const target = posix.normalize(posix.join(posix.dirname(edge.from), specifier));
-    for (const candidate of [target, `${target}.ts`, `${target}/index.ts`]) {
-      if (existsSync(join(root, candidate))) return { kind: 'relative', target: candidate };
-    }
-    return { kind: 'forbidden', why: `relative import "${specifier}" resolves to nothing` };
-  }
 
   if (FORBIDDEN_NODE_MODULES.includes(specifier)) {
     return { kind: 'forbidden', why: `"${specifier}" is a network transport` };
@@ -157,116 +91,39 @@ function classify(edge: Edge, root: string): Classification {
   return { kind: 'unclassified' };
 }
 
-interface WalkResult {
-  readonly visited: readonly string[];
-  readonly edges: readonly (Edge & { readonly classification: Classification })[];
-  readonly entrypoints: readonly string[];
-}
-
-function walk(root: string): WalkResult {
-  const visited: string[] = [];
-  const edges: (Edge & { classification: Classification })[] = [];
-  const starts = entrypoints(root);
-  const queue = [...starts];
-
-  while (queue.length > 0) {
-    const file = queue.shift()!;
-    if (visited.includes(file)) continue;
-    if (!existsSync(join(root, file))) continue;
-    visited.push(file);
-
-    for (const specifier of importSpecifiers(readSource(file, root))) {
-      const edge: Edge = { from: file, specifier };
-      const classification = classify(edge, root);
-      edges.push({ ...edge, classification });
-      if (classification.kind === 'relative') queue.push(classification.target);
-    }
-  }
-  return { visited, edges, entrypoints: starts };
-}
-
 describe('Law 1 for @smeltjs/mcp — zero network, stdio-local', () => {
-  const root = guardSrcRoot();
-  const result = walk(root);
+  const manifest = readManifest(packageRoot());
+  const walk = walkImportGraph({ root: guardSrcRoot(), manifest });
 
-  it('starts from every front door the manifest advertises', () => {
-    expect(
-      result.entrypoints.length,
-      'no entrypoints derived from the manifest — the walk would be vacuous',
-    ).toBeGreaterThanOrEqual(2);
-    expect(result.entrypoints).toContain('index.ts');
-    expect(result.entrypoints).toContain('bin.ts');
-    const { bin } = manifest();
-    expect(
-      Object.keys(bin ?? {}),
-      'the server ships as a `bin` (npx @smeltjs/mcp) and the walk starts from it',
-    ).toContain('smelt-mcp');
-    for (const entry of result.entrypoints) expect(result.visited).toContain(entry);
-  });
-
-  it('actually walked the graph (a guard that visits nothing passes vacuously)', () => {
-    expect(result.visited.length).toBeGreaterThanOrEqual(4);
-    expect(result.edges.length).toBeGreaterThanOrEqual(8);
-    // The modules with the most dangerous surface must be in the walk, by name.
-    expect(result.visited).toContain('server.ts');
-    expect(result.visited).toContain('store.ts');
-    expect(result.visited).toContain('bin.ts');
-  });
-
-  it('reaches every source file, or says why not', () => {
-    const discovered = allSourceFiles(root);
-    const unreached = discovered.filter(
-      (file) => !result.visited.includes(file) && !UNREACHABLE_BY_DESIGN.includes(file),
-    );
-    expect(
-      unreached,
-      `these modules are never reached from any manifest entrypoint, so nothing scans ` +
-        `them for network access. Export them from the entrypoint, reach them from the ` +
-        `bin, or justify them in UNREACHABLE_BY_DESIGN.`,
-    ).toEqual([]);
-  });
-
-  it('imports no network transport, and no SDK subpath off the stdio-local allowlist', () => {
-    const violations = result.edges
-      .filter((edge) => edge.classification.kind === 'forbidden')
-      .map(
-        (edge) =>
-          `${edge.from} → ${edge.specifier}: ${(edge.classification as { why: string }).why}`,
-      );
-    expect(violations, 'Law 1 violation: this server makes zero network calls').toEqual([]);
-  });
-
-  it('classifies every import it found (an unknown import is a failure, not a pass)', () => {
-    const unknown = result.edges
-      .filter((edge) => edge.classification.kind === 'unclassified')
-      .map((edge) => `${edge.from} → ${edge.specifier}`);
-    expect(
-      unknown,
-      'unclassified import. Add it to ALLOWED_MCP_BUILTINS or ALLOWED_SDK_SUBPATHS in ' +
+  assertNoNetwork({
+    walk,
+    classify,
+    unreachableByDesign: UNREACHABLE_BY_DESIGN,
+    forbiddenGlobals: FORBIDDEN_GLOBALS,
+    coverage: {
+      entrypoints: ['index.ts', 'bin.ts'],
+      bin: ['smelt-mcp'],
+      binWhy: 'the server ships as a `bin` (npx @smeltjs/mcp) and the walk starts from it',
+      minVisited: 4,
+      minEdges: 8,
+      // The modules with the most dangerous surface must be in the walk, by name.
+      mustVisit: ['server.ts', 'store.ts', 'bin.ts'],
+    },
+    messages: {
+      violation: 'Law 1 violation: this server makes zero network calls',
+      unclassified:
+        'unclassified import. Add it to ALLOWED_MCP_BUILTINS or ALLOWED_SDK_SUBPATHS in ' +
         'this guard, with a comment saying why it cannot reach the network — or accept ' +
         'that it is forbidden.',
-    ).toEqual([]);
-  });
-
-  it('never touches a network global — bare, or qualified through the global object', () => {
-    const violations: string[] = [];
-    for (const file of result.visited) {
-      const code = stripStringsAndComments(readSource(file, root));
-      for (const global of FORBIDDEN_GLOBALS) {
-        const pattern = new RegExp(
-          `(?<![.\\w$'"])${global}\\b` +
-            `|(?<![\\w$])(?:globalThis|global|window|self)\\s*\\.\\s*${global}\\b`,
-        );
-        if (pattern.test(code)) violations.push(`${file} references \`${global}\``);
-      }
-    }
-    expect(violations, 'Law 1 violation: network-capable global in the MCP server').toEqual([]);
+    },
   });
 
   it('declares exactly the vetted runtime dependencies, and nothing more', () => {
+    // Hole 3, the manifest half — and this package's ruling is equality, not a
+    // partition: the SDK is the one sanctioned addition.
     const declared = [
-      ...Object.keys(manifest().dependencies ?? {}),
-      ...Object.keys(manifest().peerDependencies ?? {}),
+      ...Object.keys(manifest.dependencies ?? {}),
+      ...Object.keys(manifest.peerDependencies ?? {}),
     ].toSorted();
     expect(
       declared,
