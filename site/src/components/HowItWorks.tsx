@@ -103,7 +103,7 @@ export function HowItWorks() {
           </div>
           <p className="mt-4 max-w-[72ch] text-[13px] leading-[1.6] text-slag">
             Each law has a guard that can fail, and each guard has mutations proving it does:
-            fifteen guard suites, 70 mutations across them, run by{' '}
+            fifteen guard suites, 71 mutations across them, run by{' '}
             <code className="font-mono">pnpm mutate</code> — a deliberate break the guard must
             catch, or the run fails.
           </p>

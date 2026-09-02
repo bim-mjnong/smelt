@@ -27,7 +27,9 @@ import {
 import { EXIT, runCli } from '@guard/cli/run';
 import { SmeltError } from '@guard/errors';
 import { extractTags } from '@guard/repomap/tags';
+import { nodeFsReader } from '@guard/repomap/reader';
 
+import { STUB_ROOT, stubReader } from '../repo-reader-stub.ts';
 import type { GuardMutation } from './_mutations.ts';
 
 /**
@@ -58,9 +60,15 @@ import type { GuardMutation } from './_mutations.ts';
  *  7. **The `smelt map` report tells the truth.** The stderr "bytes used" figure is
  *     the byte count of what actually landed on stdout, read off the RepoMap —
  *     never a second tally, never the budget dressed up as a measurement.
+ *  8. **The tree is touched only through the read-only `RepoReader` seam**, and the
+ *     symlink refusal is stated on `isSymlink` rather than inherited from the
+ *     accident that an `lstat` of a link is neither file nor directory. Both are
+ *     counted at the reader: a resolving reader's link is statted once and never
+ *     read, an ignored path is never statted at all, and a `cacheDir` changes the
+ *     call log by nothing.
  *
- * Mutations for 2, 1, 4, 5 and 7 live in the MUTATIONS export at the bottom of this
- * file; `pnpm mutate` proves each one turns this file red.
+ * Mutations for 2, 1, 4, 5, 7 and 8 live in the MUTATIONS export at the bottom of
+ * this file; `pnpm mutate` proves each one turns this file red.
  */
 
 const fixtureRoot = fileURLToPath(new URL('../fixtures/repomap-repo', import.meta.url));
@@ -489,6 +497,110 @@ describe('the repo map keeps its claims', () => {
     );
     expect(Number(match![2]!.replaceAll(',', ''))).toBe(BUDGET);
   });
+
+  it('refuses a symlink on isSymlink itself, counted call by call at the reader', async () => {
+    // The real-filesystem check above passes for a weak reason: an `lstat` of a
+    // symlink reports neither file nor directory, so a walk with no refusal at all
+    // would skip it anyway. That accident is not the guarantee. This pins the
+    // guarantee: a reader whose `stat` RESOLVES the link — `isFile: true`, readable
+    // bytes behind it — must still be refused, and the refusal is visible in the
+    // call log: the link is statted once and never read, never listed.
+    // Mutation `repomap-symlink-refusal-dropped` deletes the check and this goes red.
+    const reader = stubReader({
+      'real.ts': {
+        kind: 'file',
+        content: 'export function insideTheRoot(): number {\n  return 1;\n}\n',
+      },
+      'link.ts': {
+        kind: 'symlink',
+        content: 'export function leakedSecretToken(): number {\n  return 2;\n}\n',
+      },
+    });
+
+    const map = await buildRepoMap({ root: STUB_ROOT, budgetBytes: BUDGET, reader });
+
+    expect(reader.opsFor('link.ts'), 'the walk went through a symlink').toEqual(['stat']);
+    expect(reader.opsFor('real.ts')).toEqual(['stat', 'read']);
+    expect(map.filesScanned).toBe(1);
+    expect(map.entries.map((entry) => entry.name)).toEqual(['insideTheRoot']);
+    expect(map.text).not.toContain('leakedSecretToken');
+  });
+
+  it('touches the tree only through the read-only seam, and identically with or without a cache', async () => {
+    // Law 1's sibling ruling — smelt writes nothing outside a store or cache it was
+    // handed — counted rather than described. `RepoReader` is the map's whole door to
+    // the tree and it has no writer on it (the shape assertion below), so the walk's
+    // entire filesystem contact is this log: one listing per directory, one stat per
+    // entry the ignore list kept, one read per file. An ignored path is not even
+    // statted, and handing in a cacheDir changes the log by nothing at all — the
+    // bytes that land on disk are the cache the caller named, never a by-product of
+    // reading.
+    const tree = {
+      'src/only.ts': {
+        kind: 'file' as const,
+        content: 'export function onlySymbol(): number {\n  return 1;\n}\n',
+      },
+      'src/nested/deep.ts': {
+        kind: 'file' as const,
+        content: 'export function deepSymbol(): number {\n  return 2;\n}\n',
+      },
+      'skipme/huge.ts': {
+        kind: 'file' as const,
+        content: 'export function ignoredSymbol(): number {\n  return 3;\n}\n',
+      },
+    };
+    const EXPECTED_CALLS = [
+      { op: 'list', path: '' },
+      { op: 'stat', path: 'src' },
+      { op: 'list', path: 'src' },
+      { op: 'stat', path: 'src/nested' },
+      { op: 'list', path: 'src/nested' },
+      { op: 'stat', path: 'src/nested/deep.ts' },
+      { op: 'stat', path: 'src/only.ts' },
+      { op: 'read', path: 'src/nested/deep.ts' },
+      { op: 'read', path: 'src/only.ts' },
+    ];
+
+    const bare = stubReader(tree);
+    const uncached = await buildRepoMap({
+      root: STUB_ROOT,
+      budgetBytes: BUDGET,
+      ignore: ['skipme'],
+      reader: bare,
+    });
+    expect(bare.calls).toEqual(EXPECTED_CALLS);
+    expect(bare.opsFor('skipme'), 'an ignored path was statted').toEqual([]);
+    expect(bare.opsFor('skipme/huge.ts'), 'an ignored file was touched').toEqual([]);
+    expect(uncached.cache, 'cache counts invented with no cacheDir').toBeUndefined();
+
+    // The same tree with a cacheDir: identical reader calls, cold and warm.
+    const cacheDir = scratch('smelt-repomap-seam-cache-');
+    const cold = stubReader(tree);
+    const coldMap = await buildRepoMap({
+      root: STUB_ROOT,
+      budgetBytes: BUDGET,
+      ignore: ['skipme'],
+      reader: cold,
+      cacheDir,
+    });
+    const warm = stubReader(tree);
+    const warmMap = await buildRepoMap({
+      root: STUB_ROOT,
+      budgetBytes: BUDGET,
+      ignore: ['skipme'],
+      reader: warm,
+      cacheDir,
+    });
+    expect(cold.calls).toEqual(EXPECTED_CALLS);
+    expect(warm.calls).toEqual(EXPECTED_CALLS);
+    expect(coldMap.cache).toEqual({ hits: 0, misses: 2, discarded: 0 });
+    expect(warmMap.cache).toEqual({ hits: 2, misses: 0, discarded: 0 });
+    expect(warmMap.text).toBe(uncached.text);
+
+    // And the seam itself carries no way to write: three read-only methods, and a
+    // fourth one appearing here is a Law 1 conversation, not a merge.
+    expect(Object.keys(nodeFsReader()).toSorted()).toEqual(['list', 'read', 'stat']);
+  });
 });
 
 /**
@@ -549,5 +661,12 @@ export const MUTATIONS: GuardMutation[] = [
     replace:
       '    `bytes used ${group(map.budgetBytes)} of ${group(map.budgetBytes)} budget (${budgetSource}) ` +',
     why: "the map report's bytes-used figure wired to the budget — a budget-fitting report that always claims the budget spent, so the one number a human reads off `smelt map` stops being a measurement",
+  },
+  {
+    id: 'repomap-symlink-refusal-dropped',
+    file: 'repomap/map.ts',
+    find: '      if (stat.isSymlink) continue;',
+    replace: '      // symlink refusal removed',
+    why: 'the walk stops refusing symlinks and leans on the accident that an lstat of a link is neither file nor directory — a reader whose stat resolves the link is then followed straight out of the root, and the call log shows the map reading a path it was never handed',
   },
 ];

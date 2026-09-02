@@ -319,7 +319,7 @@ Three things that look like bugs and are not:
 - **The honesty machinery** — fifteen guard suites (fourteen in the core, one guarding
   the MCP server's stdio-local surface) that walk the real import graph, assert
   byte-exact reversibility, pin the wire format, and re-derive the attribution file; plus
-  a mutation runner (`pnpm mutate`) that breaks the source on purpose — 70 mutations
+  a mutation runner (`pnpm mutate`) that breaks the source on purpose — 71 mutations
   across 15 guards, each watched going red — and fails if a guard does not notice. Every
   guarantee in this README has a guard.
 

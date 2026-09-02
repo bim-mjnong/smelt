@@ -1,4 +1,3 @@
-import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { detectLanguage } from '../detect.ts';
@@ -8,6 +7,8 @@ import type { LanguageId } from '../types.ts';
 import { TagsCache, tagsCacheKey } from './cache.ts';
 import { rankDefinitions } from './rank.ts';
 import type { FileTagsEntry, RankedDefinition } from './rank.ts';
+import { nodeFsReader } from './reader.ts';
+import type { RepoReader } from './reader.ts';
 import { extractTags } from './tags.ts';
 import type { FileTags } from './tags.ts';
 
@@ -24,6 +25,9 @@ import type { FileTags } from './tags.ts';
  *
  *  - **Local files only** (Law 1). The caller names the root; symlinks are never
  *    followed, so the walk cannot leave it; binary files are skipped; no network.
+ *    The whole tree is read through one read-only seam, {@link RepoReader} — the
+ *    default is `node:fs` and the interface has no writer, so the only bytes this
+ *    module can write are the tags cache the caller asked for by name.
  *  - **Every inclusion is explainable** (Law 2, applied to inclusion rather than
  *    elision): each symbol in the map carries a rule id and a sentence stating its
  *    definition site and the measured reference counts that ranked it.
@@ -109,6 +113,14 @@ export interface RepoMapOptions {
    * to disk — smelt never writes outside a store or cache it was explicitly handed.
    */
   readonly cacheDir?: string;
+  /**
+   * The filesystem the map reads through. Defaults to {@link nodeFsReader} — plain
+   * `node:fs`, the calls this module used to make in-line — so callers that do not
+   * care never mention it. Hand in a {@link RepoReader} to map a tree that is not on
+   * this disk, or to watch, call by call, exactly what the walk touched. Read-only
+   * by construction: the interface has no writer.
+   */
+  readonly reader?: RepoReader;
 }
 
 /** One symbol included in the rendered map, with the receipt for its inclusion. */
@@ -195,17 +207,18 @@ export async function buildRepoMap(options: RepoMapOptions): Promise<RepoMap> {
     );
   }
   const ignore = options.ignore ?? DEFAULT_REPO_IGNORE;
+  const reader = options.reader ?? nodeFsReader();
   const cache = options.cacheDir === undefined ? undefined : new TagsCache(options.cacheDir);
   const cacheCounts = { hits: 0, misses: 0, discarded: 0 };
   const warnings: RepoMapWarning[] = [];
 
-  const files = scanFiles(root, ignore);
+  const files = scanFiles(reader, root, ignore);
   let binarySkipped = 0;
   const parsed: FileTagsEntry[] = [];
   const pathOnlyPaths: string[] = [];
 
   for (const rel of files) {
-    const bytes = readFileSync(join(root, ...rel.split('/')));
+    const bytes = reader.read(join(root, ...rel.split('/')));
     if (bytes.includes(0)) {
       binarySkipped += 1;
       continue;
@@ -314,19 +327,29 @@ async function tagsFor(
  *
  * Symlinks are skipped outright — file or directory, in-root or out. Never following
  * one is the simplest true implementation of "never follow a symlink out of the
- * root": there is no resolution step to get wrong.
+ * root": there is no resolution step to get wrong. The refusal is stated on
+ * `isSymlink`, not left to the accident that an `lstat` of a link is neither file
+ * nor directory — so a reader whose `stat` resolves the target is refused just the
+ * same, and the guard can watch the refusal happen by counting reader calls.
+ *
+ * The ignore list is applied before the entry is statted, so an ignored path costs
+ * nothing and is never even looked at.
  */
-function scanFiles(root: string, ignore: readonly string[]): readonly string[] {
+function scanFiles(reader: RepoReader, root: string, ignore: readonly string[]): readonly string[] {
   const found: string[] = [];
   const walk = (dir: string, relDir: string): void => {
-    for (const entry of readdirSync(dir).toSorted()) {
+    for (const entry of reader
+      .list(dir)
+      .map((listed) => listed.name)
+      .toSorted()) {
       const rel = relDir === '' ? entry : `${relDir}/${entry}`;
       if (isIgnored(rel, ignore)) continue;
       const full = join(dir, entry);
-      const stat = lstatSync(full);
-      if (stat.isSymbolicLink()) continue;
-      if (stat.isDirectory()) walk(full, rel);
-      else if (stat.isFile()) found.push(rel);
+      const stat = reader.stat(full);
+      if (stat === undefined) continue; // the reader has nothing there
+      if (stat.isSymlink) continue;
+      if (stat.isDirectory) walk(full, rel);
+      else if (stat.isFile) found.push(rel);
     }
   };
   walk(root, '');
