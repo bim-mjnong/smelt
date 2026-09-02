@@ -4,13 +4,13 @@
   "description": "Structure-aware, reversible, offline context optimization for AI coding agents.",
   "license": "Apache-2.0",
   "author": "mong-x",
-  "homepage": "https://github.com/mong-x/smelt#readme",
+  "homepage": "https://github.com/smeltjs/smelt#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mong-x/smelt.git",
+    "url": "git+https://github.com/smeltjs/smelt.git",
     "directory": "packages/core"
   },
-  "bugs": "https://github.com/mong-x/smelt/issues",
+  "bugs": "https://github.com/smeltjs/smelt/issues",
   "keywords": [
     "llm",
     "context",
