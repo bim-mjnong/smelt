@@ -1,0 +1,45 @@
+smelt — shrink text for a model, without lying about what was removed.
+
+USAGE
+  smelt <file> --budget <bytes> [--focus <term>]...
+  smelt --budget <bytes> [--focus <term>]... < input
+  smelt --reconstruct <result.json>
+  smelt --reconstruct < result.json
+  smelt init
+
+Smelted text goes to stdout and the report goes to stderr, so the two can be piped
+apart:  smelt big.log --budget 4000 > small.log
+
+CONFIG
+  smelt init walks you through writing a smelt.config.json (and optional typed
+  stubs), one question at a time; nothing is written until a final confirm. Runs read
+  the nearest smelt.config.json, walking up from the working directory, for DEFAULTS
+  only — budget, strategy, store. An explicit flag always wins, and a malformed config
+  is a usage error, never silently ignored.
+
+OPTIONS
+  --budget <bytes>     Required, unless smelt.config.json sets defaultBudgetBytes.
+                       Soft ceiling for the output, in UTF-8 bytes. No built-in
+                       default: a budget smelt invented would decide for you.
+  --focus <term>       What you were looking for. Repeatable. Matching regions and
+                       their context survive; the runs between them collapse.
+  --language <id>      Override detection. One of: typescript, tsx, javascript, rust, python, go, java, c, cpp, c_sharp, ruby, php, kotlin, swift, bash, unknown.
+  --strategy <id>      lexical or structural. Defaults to lexical, unless
+                       smelt.config.json says otherwise. structural parses
+                       typescript, tsx, javascript, rust, python, go, java, c, cpp, c_sharp, ruby, php, kotlin, swift, bash;
+                       any other language is refused, never approximated.
+  --json               Print a JSON envelope on stdout instead of the smelted text:
+                       { format, result, elided }. `result` is the SmeltResult
+                       verbatim; `elided` carries the bytes, so the envelope can be
+                       reconstructed. Feed it back with --reconstruct.
+  --reconstruct        Read a --json envelope and print the original text, byte for
+                       byte. This is Law 3 you can run from a shell.
+  -h, --help           This text.
+  --version            The package version.
+
+EXIT CODES
+  0  under budget
+  1  over budget — the plan did not fit, and the report says so. Never silent.
+  2  usage error
+  3  smelt refused (a SmeltError: an unbuilt planner, a missing hash)
+  4  unexpected internal error

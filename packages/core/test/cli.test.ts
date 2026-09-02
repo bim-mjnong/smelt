@@ -357,6 +357,14 @@ describe('--help and --version', () => {
     expect(stdout).toMatch(/EXIT CODES/);
   });
 
+  it('matches the committed help snapshot, so a help change is a reviewable diff', async () => {
+    // This used to be `expect(stdout).toBe(cliUsage())` and nothing else — the help
+    // compared to itself, a tautology that shipped two help bugs (a duplicated entry
+    // reads identically on both sides). Pinning the text to a committed file turns
+    // that whole class into a diff a reviewer actually sees.
+    await expect(cliUsage()).toMatchFileSnapshot('__snapshots__/cli-usage.help.txt');
+  });
+
   it('derives the --strategy language list from STRUCTURAL_LANGUAGES, never a stale hand count', async () => {
     // The help once hardcoded "typescript, tsx, rust, python and go" and claimed the
     // rest were refused — false from the moment ten more grammars shipped. Deriving
