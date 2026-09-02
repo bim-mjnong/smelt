@@ -1,0 +1,13 @@
+{
+  "_cites": "docs/research/2026-09-02-harness-capability-matrix.md, Cursor row (preToolUse supports updated_input; permission allow/deny/ask with userMessage/agentMessage; https://cursor.com/docs/agent/hooks) — EXPERIMENTAL tier",
+  "readBig": {
+    "hook_event_name": "preToolUse",
+    "tool_name": "read_file",
+    "tool_input": { "path": "/repo/big.ts" }
+  },
+  "terminalCatBig": {
+    "hook_event_name": "preToolUse",
+    "tool_name": "run_terminal_cmd",
+    "tool_input": { "command": "cat /repo/big.ts" }
+  }
+}

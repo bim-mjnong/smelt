@@ -1,0 +1,13 @@
+{
+  "_cites": "docs/research/2026-09-02-harness-capability-matrix.md, Hermes Agent row (pre_tool_call → {\"action\":\"block\"} or {\"action\":\"modify\",\"args\":{...}} shallow-merge; https://hermes-agent.nousresearch.com/docs/user-guide/features/hooks) — EXPERIMENTAL tier",
+  "readBig": {
+    "event": "pre_tool_call",
+    "tool_name": "read_file",
+    "args": { "path": "/repo/big.ts" }
+  },
+  "bashCatBig": {
+    "event": "pre_tool_call",
+    "tool_name": "execute_command",
+    "args": { "command": "cat /repo/big.ts" }
+  }
+}

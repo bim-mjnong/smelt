@@ -38,6 +38,14 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./hooks/guard-core": "./dist/hooks/guard-core.js",
+    "./hooks/shims/claude-code": "./dist/hooks/shims/claude-code.js",
+    "./hooks/shims/codex": "./dist/hooks/shims/codex.js",
+    "./hooks/shims/gemini": "./dist/hooks/shims/gemini.js",
+    "./hooks/shims/grok": "./dist/hooks/shims/grok.js",
+    "./hooks/shims/hermes": "./dist/hooks/shims/hermes.js",
+    "./hooks/shims/cursor": "./dist/hooks/shims/cursor.js",
+    "./hooks/shims/cline": "./dist/hooks/shims/cline.js",
     "./package.json": "./package.json"
   },
   "bin": {
