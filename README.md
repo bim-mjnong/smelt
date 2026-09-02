@@ -311,19 +311,16 @@ Three things that look like bugs and are not:
   tags, deterministic PageRank over the reference graph, a caller-owned disk cache.
   Modelled on [Aider's repo-map](https://aider.chat/2023/10/22/repomap.html) and credited
   as such. Every included symbol can say why it ranked.
-- **The honesty machinery** — fourteen guard suites (thirteen in the core, one guarding
-  the MCP server's stdio-local surface) that walk the real import graph, assert
-  byte-exact reversibility, pin the wire format, and re-derive the attribution file; plus
-  a mutation runner (`pnpm mutate`) that breaks the source on purpose — 68 mutations
 - **The hooks preset** — `smelt hooks install`: a zero-dependency guard core plus thin
   shims that wire the size-guard, stats-on-stop and map-on-start into agent harnesses,
   tiered honestly (verified / experimental / advisory — see the harness guide above).
   Deny-with-reason by default; rewrite opt-in and always announced — in the decision
   reason where the harness has one, on stderr where it does not.
-- **The honesty machinery** — fourteen guard suites that walk the real import graph, assert
+- **The honesty machinery** — fifteen guard suites (fourteen in the core, one guarding
+  the MCP server's stdio-local surface) that walk the real import graph, assert
   byte-exact reversibility, pin the wire format, and re-derive the attribution file; plus
-  a mutation runner (`pnpm mutate`) that breaks the source on purpose — 66 mutations
-  across 14 guards, each watched going red — and fails if a guard does not notice. Every
+  a mutation runner (`pnpm mutate`) that breaks the source on purpose — 70 mutations
+  across 15 guards, each watched going red — and fails if a guard does not notice. Every
   guarantee in this README has a guard.
 
 ## Measured numbers
