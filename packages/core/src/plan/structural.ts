@@ -13,6 +13,7 @@ import type {
   Planner,
 } from '../types.ts';
 
+import { predictOutputBytes, savingBytes } from './budget.ts';
 import { loadGrammar } from './grammar.ts';
 
 export const STRUCTURAL_PLANNER_ID = 'structural/v1';
@@ -116,11 +117,14 @@ export class StructuralPlanner implements Planner {
  * reused directly. Deterministic: same text, same language, same focus, same options —
  * byte-identical plan.
  *
- * `budgetBytes` is a target, not a guarantee, for the same reason it is in the lexical
- * planner: once every non-matching sibling run is collapsed there is nothing left to
- * cut except the declarations the caller asked to keep, and an optimizer that silently
- * drops the thing you searched for is the exact failure this design refuses. Callers
- * who need a hard ceiling check `outputBytes` and decide.
+ * `budgetBytes` is a target, not a guarantee. The plan is built in two passes: every
+ * maximal run of non-matching siblings is collapsed where that pays for its marker,
+ * and then — only if the plan is still over budget — each run the first pass refused
+ * is re-asked as its own best profitable sub-run (the budget rung, in
+ * {@link planFromTree}). Under the last of those there is nothing left to cut except
+ * the declarations the caller asked to keep, and an optimizer that silently drops the
+ * thing you searched for is the exact failure this design refuses. Callers who need a
+ * hard ceiling check `outputBytes` and decide.
  *
  * @throws {GrammarUnavailableError} when the language is not one this planner parses,
  *   when the grammar cannot be loaded, or when the parser produces no tree. Never a
@@ -162,9 +166,7 @@ export async function planStructural(
 }
 
 function assertStructuralLanguage(language: PlanInput['language']): StructuralLanguage {
-  for (const supported of STRUCTURAL_LANGUAGES) {
-    if (language === supported) return supported;
-  }
+  if (isStructuralLanguage(language)) return language;
   const named = `${STRUCTURAL_LANGUAGES.slice(0, -1).join(', ')} and ${
     STRUCTURAL_LANGUAGES[STRUCTURAL_LANGUAGES.length - 1]
   }`;
@@ -174,6 +176,25 @@ function assertStructuralLanguage(language: PlanInput['language']): StructuralLa
       `labelled structural/v1 that is really line windows would be undetectable from ` +
       `the outside. Use the lexical planner explicitly if that is what you want.`,
   );
+}
+
+/**
+ * Whether this planner has a bundled grammar for the language — the one membership
+ * test, shared with the `auto` strategy (`plan/auto.ts`).
+ *
+ * The refusal above and auto's selection are the same question asked for opposite
+ * reasons, and two spellings of it would be two answers: a language auto routed to
+ * `structural` that `assertStructuralLanguage` then refused would be a
+ * `GrammarUnavailableError` raised by the strategy whose entire job is not raising
+ * one.
+ */
+export function isStructuralLanguage(
+  language: PlanInput['language'],
+): language is StructuralLanguage {
+  for (const supported of STRUCTURAL_LANGUAGES) {
+    if (language === supported) return true;
+  }
+  return false;
 }
 
 function planFromTree(
@@ -201,49 +222,134 @@ function planFromTree(
     units.flatMap((unit) => [unit.start, unit.end]),
   );
 
-  const elisions: PlannedElision[] = [];
-  let run: Unit[] = [];
-
-  const flush = (): void => {
-    if (run.length === 0) return;
-    const group = run;
-    run = [];
-    if (group.length < minSiblings) return;
-    // A line-comment marker swallows the rest of its line. When the run's last unit
+  /**
+   * One contiguous group of siblings as an elision — or nothing, when collapsing it
+   * would be illegal or would not pay for its marker. Every cut in this planner,
+   * first pass and budget rung alike, is minted here: one legality rule, one price,
+   * one explanation, so the rung cannot cut something the first pass would refuse.
+   */
+  const collapse = (group: readonly Unit[]): PlannedElision | undefined => {
+    if (group.length === 0 || group.length < minSiblings) return undefined;
+    // A line-comment marker swallows the rest of its line. When the group's last unit
     // ends mid-line — python's `stmt_a(); stmt_b()` puts two top-level statements on
     // one line — the marker's `# ` leader would comment out the *kept* code after it.
     // Refusing the collapse is the honest move; extending the range would elide code
     // no unit accounted for.
     if (markerIsLineComment && !restOfLineIsBlank(input.text, group[group.length - 1]!.end)) {
-      return;
+      return undefined;
     }
     const start = toByte.get(group[0]!.start)!;
     const end = toByte.get(group[group.length - 1]!.end)!;
-    const cutBytes = end - start;
-    const explanation = explain(group);
+    const candidate: PlannedElision = {
+      range: { start, end },
+      reason: { rule: SIBLING_COLLAPSE_RULE, explanation: explain(group) },
+    };
     // Profitability, priced rather than estimated: ask the MarkerPricing seam for the
     // exact cost of the marker this cut would earn — the explanation's length varies
     // with kind diversity, and the pricing carries the language's comment leader (or a
     // caller's custom builder), so a fixed estimate can pass a cut whose marker is
     // bigger than what it removes, and a marker that costs more than it removes grows
     // the output.
-    const markerBytes = pricing.costBytes({ rule: SIBLING_COLLAPSE_RULE, explanation }, cutBytes);
-    if (cutBytes <= markerBytes) return;
-    elisions.push({
-      range: { start, end },
-      reason: { rule: SIBLING_COLLAPSE_RULE, explanation },
-    });
+    return savingBytes(candidate, pricing) > 0 ? candidate : undefined;
   };
 
+  // The first pass: every maximal run of siblings no focus term matched and no rule
+  // pinned, collapsed whole. A run that earns no cut is remembered, not forgotten —
+  // the budget rung below is the only reader of that list.
+  const elisions: PlannedElision[] = [];
+  const refused: (readonly Unit[])[] = [];
+  for (const group of maximalRuns(units, matched)) {
+    const cut = collapse(group);
+    if (cut === undefined) refused.push(group);
+    else elisions.push(cut);
+  }
+
+  // THE BUDGET RUNG — the structural answer to the lexical planner's context ladder.
+  //
+  // Until this existed, `planStructural` never read `input.budgetBytes` at all: it
+  // took every profitable maximal run and stopped, which is right until the plan
+  // comes back over budget with a profitable cut still on the table. The review's
+  // case: 158 bytes, a budget of 120, and a run of three sibling classes worth 92
+  // bytes left whole — because the *maximal* run also swallowed a `VERSION = 1`
+  // statement above them, and a mixed-kind explanation ("1 statement, 3 classes")
+  // priced a 106-byte marker against a 105-byte cut. The planner returned over budget
+  // having elided nothing, while the three classes alone priced an 82-byte marker
+  // against 92 bytes — a real saving of 10 bytes nobody was offered.
+  //
+  // So, and only when the plan is still over budget, each refused run is re-asked as
+  // its own best profitable sub-run, earliest run first, stopping the moment the plan
+  // fits. Three properties hold by construction rather than by care:
+  //
+  //   - **A focus match is never cut.** A matched unit is not in any run, so no
+  //     sub-run of any run can contain one. Same for a pinned unit.
+  //   - **The output never grows.** Every candidate goes through `collapse`, which
+  //     mints nothing whose marker is not strictly cheaper than the bytes it removes.
+  //   - **It stays deterministic.** Sub-runs are enumerated start-ascending and
+  //     length-descending, and a tie in saving keeps the one already held — the
+  //     earliest start, then the longest.
+  //
+  // Budget pressure is the trigger, not profitability, because a maximal run is the
+  // better *explanation*: one marker naming everything it hid beats two naming halves
+  // of it. Trading that away is worth it to fit a budget and not worth it otherwise.
+  const inputBytes = Buffer.byteLength(input.text, 'utf8');
+  for (const group of refused) {
+    if (predictOutputBytes(inputBytes, elisions, pricing) <= input.budgetBytes) break;
+    const cut = bestSubRun(group, collapse, pricing);
+    if (cut !== undefined) elisions.push(cut);
+  }
+
+  return elisions.toSorted((a, b) => a.range.start - b.range.start);
+}
+
+/**
+ * The runs the first pass collapses: every maximal contiguous group of units that no
+ * focus term matched and no rule pinned. A matched or pinned unit ends the run before
+ * it and starts none — which is what makes "never cut a focus-matched declaration" a
+ * property of the *shape* of the data rather than a check anyone has to remember.
+ */
+function maximalRuns(
+  units: readonly Unit[],
+  matched: readonly boolean[],
+): readonly (readonly Unit[])[] {
+  const runs: Unit[][] = [];
+  let run: Unit[] = [];
   for (let i = 0; i < units.length; i += 1) {
     if (matched[i] === true || units[i]!.pinned === true) {
-      flush();
+      if (run.length > 0) runs.push(run);
+      run = [];
     } else {
       run.push(units[i]!);
     }
   }
-  flush();
-  return elisions;
+  if (run.length > 0) runs.push(run);
+  return runs;
+}
+
+/**
+ * The best cut available inside one refused run: the contiguous sub-run whose real
+ * marker is cheapest against the bytes it removes. Quadratic in the run's unit count,
+ * which is affordable because it runs only over runs the first pass already refused —
+ * and a run refused on price lost to a ~100-byte marker, so it is small.
+ */
+function bestSubRun(
+  group: readonly Unit[],
+  collapse: (group: readonly Unit[]) => PlannedElision | undefined,
+  pricing: MarkerPricing,
+): PlannedElision | undefined {
+  let best: PlannedElision | undefined;
+  let bestSaving = 0;
+  for (let from = 0; from < group.length; from += 1) {
+    for (let to = group.length; to > from; to -= 1) {
+      const candidate = collapse(group.slice(from, to));
+      if (candidate === undefined) continue;
+      const saving = savingBytes(candidate, pricing);
+      if (saving > bestSaving) {
+        best = candidate;
+        bestSaving = saving;
+      }
+    }
+  }
+  return best;
 }
 
 /** True when nothing but whitespace follows `index` on its own line. */

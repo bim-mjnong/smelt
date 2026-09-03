@@ -13,6 +13,10 @@ import type { ElisionPlan, PlanInput } from '@guard/types';
 
 import {
   BOUNDARY_TS,
+  BUDGET_RUNG_BUDGET,
+  BUDGET_RUNG_CUT_BYTES,
+  BUDGET_RUNG_MARKER_BYTES,
+  BUDGET_RUNG_PY,
   BUILD_TAG_GO,
   FIXTURE_BY_LANGUAGE,
   FUNCTIONS_PY,
@@ -58,6 +62,12 @@ import type { GuardMutation } from './_mutations.ts';
  *  6. **An elision never costs more than it removes.** The profitability check
  *     renders the actual marker, because a mixed-kind explanation can outgrow a
  *     small cut — and an optimizer that grows its input is worse than none.
+ *  7. **The budget rung cuts around the focus, never through it.** `planStructural`
+ *     reads `input.budgetBytes` now: when the first pass comes back over budget it
+ *     re-prices each run it refused as that run's best profitable sub-run. Under
+ *     that pressure, the one thing that must stay untouchable is the declaration the
+ *     caller searched for — an optimizer that drops the thing you asked for under
+ *     load is worse than one that returns over budget and says so.
  *
  * Plus the determinism claim: same file, same focus, byte-identical plan — asserted
  * by running it, not assumed. Mutations for all of these live in the MUTATIONS
@@ -703,6 +713,79 @@ describe('every claimed language keeps the same claims', () => {
   });
 });
 
+/** The review's case as a `PlanInput`, at whatever budget is being squeezed. */
+const budgetInput = (budgetBytes: number): PlanInput => ({
+  text: BUDGET_RUNG_PY,
+  language: 'python',
+  budgetBytes,
+  focus: ['alpha_gate'],
+  pricing: markerPricing('python'),
+});
+
+/**
+ * THE BUDGET RUNG — the pass that reads `input.budgetBytes`, and the one thing it is
+ * never allowed to reach for.
+ *
+ * Under budget pressure the planner re-prices the runs its first pass refused. Every
+ * candidate it mints goes through the same profitability check as the first pass, so
+ * the output cannot grow; and a focus-matched unit is not in any run, so no sub-run of
+ * any run can contain one. That second property is the one worth a guard: it holds
+ * because of the *shape* of the data, and a plausible edit that widened the search to
+ * "all units" instead of "the units of a refused run" would break it silently — the
+ * plan would still be smaller, still be reversible, and still be labelled
+ * `structural/v1`, having quietly hidden the declaration the caller went looking for.
+ */
+describe('the budget rung cuts around the focus, never through it', () => {
+  it('finds the profitable cut a maximal run was hiding, when over budget', async () => {
+    // The review's case: 158 bytes against a budget of 120. Without the rung this
+    // plan is empty and the run is over budget having elided nothing.
+    const plan = await planStructural(budgetInput(BUDGET_RUNG_BUDGET));
+    expect(plan.elisions, 'nothing elided — every assertion below is vacuous').toHaveLength(1);
+    const elision = plan.elisions[0]!;
+    const cut = elision.range.end - elision.range.start;
+    expect(cut).toBe(BUDGET_RUNG_CUT_BYTES);
+    expect(markerPricing('python').costBytes(elision.reason, cut)).toBe(BUDGET_RUNG_MARKER_BYTES);
+  });
+
+  it('keeps the focus-matched declaration whole, at every budget it is squeezed to', async () => {
+    for (const budget of [BUDGET_RUNG_BUDGET, 64, 8, 1]) {
+      const plan = await planStructural(budgetInput(budget));
+      const result = applyPlan(BUDGET_RUNG_PY, plan, new MemoryElisionStore());
+      expect(result.text, `budget ${String(budget)}`).toContain('def alpha_gate(flag):');
+      expect(result.text, `budget ${String(budget)}`).toContain('return 1 if flag else -1');
+      expect(result.outputBytes, `budget ${String(budget)}`).toBeLessThan(result.inputBytes);
+      expect(result.elisions.length, `budget ${String(budget)}: vacuous`).toBeGreaterThan(0);
+      expect(
+        result.elisions.every(({ reason }) => !reason.explanation.includes('function')),
+        `budget ${String(budget)}: a marker claims to have collapsed a function — the ` +
+          'only function in this fixture is the focus match',
+      ).toBe(true);
+    }
+  });
+
+  it('never grows the output, whatever the budget asks for', async () => {
+    for (const budget of [1, 40, BUDGET_RUNG_BUDGET, 10_000]) {
+      const plan = await planStructural(budgetInput(budget));
+      const result = applyPlan(BUDGET_RUNG_PY, plan, new MemoryElisionStore());
+      expect(result.outputBytes, `budget ${String(budget)}`).toBeLessThanOrEqual(result.inputBytes);
+    }
+  });
+
+  it('is deterministic, and reversible like every other plan', async () => {
+    const first = await planStructural(budgetInput(BUDGET_RUNG_BUDGET));
+    const second = await planStructural(budgetInput(BUDGET_RUNG_BUDGET));
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+
+    const smelter = createSmelter({ strategy: 'structural' });
+    const result = await smelter.smelt(BUDGET_RUNG_PY, {
+      language: 'python',
+      budgetBytes: BUDGET_RUNG_BUDGET,
+      focus: ['alpha_gate'],
+    });
+    expect(smelter.reconstruct(result)).toBe(BUDGET_RUNG_PY);
+  });
+});
+
 /**
  * The breaks this guard must catch. `pnpm mutate` applies each one to a scratch copy
  * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
@@ -785,9 +868,16 @@ export const MUTATIONS: GuardMutation[] = [
   {
     id: 'structural-marker-cost-guessed',
     file: 'plan/structural.ts',
-    find: '    if (cutBytes <= markerBytes) return;',
-    replace: '    if (cutBytes < 128) return;',
+    find: '    return savingBytes(candidate, pricing) > 0 ? candidate : undefined;',
+    replace: '    return end - start > 8 ? candidate : undefined;',
     why: 'the profitability check reverted to a guessed constant — a mixed-kind marker can cost more than the cut it replaces, and the output grows',
+  },
+  {
+    id: 'structural-budget-rung-cuts-focus-match',
+    file: 'plan/structural.ts',
+    find: '    if (cut === undefined) refused.push(group);',
+    replace: '    if (cut === undefined) refused.push(units);',
+    why: 'the budget rung searching every unit in the file instead of the units of the run the first pass refused — under budget pressure the best-priced sub-run then swallows the focus-matched declaration, and the plan is smaller, reversible, labelled structural/v1, and missing the one thing the caller went looking for',
   },
   {
     id: 'structural-new-language-dropped',
@@ -844,7 +934,7 @@ export const MUTATIONS: GuardMutation[] = [
   {
     id: 'structural-python-midline-marker-comments-out-kept-code',
     file: 'plan/structural.ts',
-    find: '    if (markerIsLineComment && !restOfLineIsBlank(input.text, group[group.length - 1]!.end)) {\n      return;\n    }',
+    find: '    if (markerIsLineComment && !restOfLineIsBlank(input.text, group[group.length - 1]!.end)) {\n      return undefined;\n    }',
     replace: '',
     why: 'the mid-line refusal dropped — a `# `-led marker replacing the first of two semicolon-separated statements comments out the kept one, syntactically alive and semantically dead',
   },

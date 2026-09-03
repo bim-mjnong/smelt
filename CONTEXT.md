@@ -103,6 +103,16 @@ codebase-design glossary.
   the strategy a caller who names none gets, read by `createSmelter`, the `smelt` verb's
   merge, the `init` wizard and the MCP server's `smelt_file` — the names were derived
   while the default stayed hand-typed in four places across two packages.
+- **Budget rung** (structural): the second pass in `planStructural`, and the reason it
+  reads `input.budgetBytes` at all. When the first pass — every maximal sibling run,
+  collapsed where that pays for its marker — comes back over budget, each run it
+  _refused_ is re-asked as that run's best profitable sub-run, earliest first, stopping
+  the moment the plan fits. Every candidate is minted by the same `collapse`, so a
+  focus-matched or pinned unit is unreachable (it is in no run), the output cannot grow
+  (nothing is minted whose marker is not strictly cheaper than the cut), and the
+  enumeration is start-ascending, length-descending, so the plan stays deterministic.
+  The lexical planner's context ladder is the sibling of this idea, and
+  `src/plan/budget.ts` is the arithmetic they share.
 - **RepoMap**: the ranked whole-tree symbol map `buildRepoMap` returns — deliberately
   **not** an `ElisionPlan` and its builder deliberately not a Planner: nothing is
   elided, stored, or reversible, so the Planner interface would claim laws the map

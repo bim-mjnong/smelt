@@ -13,6 +13,10 @@ import type { PlanInput } from '../src/types.ts';
 
 import {
   BOUNDARY_TS,
+  BUDGET_RUNG_BUDGET,
+  BUDGET_RUNG_CUT_BYTES,
+  BUDGET_RUNG_MARKER_BYTES,
+  BUDGET_RUNG_PY,
   FIXTURE_BY_LANGUAGE,
   FUNCTIONS_TS,
   LONG_DOC_TS,
@@ -117,5 +121,80 @@ describe('the structural planner', () => {
     expect(result.planner).toBe(STRUCTURAL_PLANNER_ID);
     expect(result.elisions.length).toBeGreaterThan(0);
     expect(smelter.reconstruct(result)).toBe(FUNCTIONS_TS);
+  });
+});
+
+/** The review's case as a `PlanInput`, at whatever budget is being squeezed. */
+const budgetInput = (budgetBytes: number): PlanInput => ({
+  text: BUDGET_RUNG_PY,
+  language: 'python',
+  budgetBytes,
+  focus: ['alpha_gate'],
+  pricing: markerPricing('python'),
+});
+
+/**
+ * THE BUDGET RUNG — `planStructural` reading `input.budgetBytes`, which for four
+ * versions it did not.
+ *
+ * The review's case, reproduced byte for byte: 158 bytes in, a budget of 120, and a
+ * first pass that comes back having elided nothing because the one maximal run it
+ * found prices a 106-byte marker against a 105-byte cut. Three of that run's four
+ * siblings are worth 92 bytes against an 82-byte marker, and nobody was offered them.
+ */
+describe("the structural planner's budget rung", () => {
+  it("the fixture is the review's case: 158 bytes, over a budget of 120", () => {
+    expect(Buffer.byteLength(BUDGET_RUNG_PY, 'utf8')).toBe(158);
+    expect(BUDGET_RUNG_BUDGET).toBe(120);
+  });
+
+  it('finds the profitable cut the maximal run hid, at the reviewed prices', async () => {
+    const plan = await planStructural(budgetInput(BUDGET_RUNG_BUDGET));
+    expect(plan.elisions).toHaveLength(1);
+    const [elision] = plan.elisions;
+    const cut = elision!.range.end - elision!.range.start;
+    expect(cut).toBe(BUDGET_RUNG_CUT_BYTES);
+    expect(markerPricing('python').costBytes(elision!.reason, cut)).toBe(BUDGET_RUNG_MARKER_BYTES);
+    expect(elision!.reason.explanation).toBe('collapsed 3 sibling classes');
+  });
+
+  it('shrinks the output by exactly the saving it priced, and never grows it', async () => {
+    const store = new MemoryElisionStore();
+    const plan = await planStructural(budgetInput(BUDGET_RUNG_BUDGET));
+    const result = applyPlan(BUDGET_RUNG_PY, plan, store);
+    expect(result.inputBytes).toBe(158);
+    expect(result.outputBytes).toBe(158 - BUDGET_RUNG_CUT_BYTES + BUDGET_RUNG_MARKER_BYTES);
+    expect(result.outputBytes).toBeLessThan(result.inputBytes);
+  });
+
+  it('never cuts the focus-matched declaration, even under budget pressure', async () => {
+    const plan = await planStructural(budgetInput(1));
+    const result = applyPlan(BUDGET_RUNG_PY, plan, new MemoryElisionStore());
+    expect(result.text).toContain('def alpha_gate(flag):');
+    expect(result.text).toContain('return 1 if flag else -1');
+  });
+
+  it('leaves the plan alone when the first pass already fits', async () => {
+    const plan = await planStructural(budgetInput(10_000));
+    expect(plan.elisions).toEqual([]);
+  });
+
+  it('is deterministic: same file, same budget, byte-identical plan', async () => {
+    const first = await planStructural(budgetInput(BUDGET_RUNG_BUDGET));
+    const second = await planStructural(budgetInput(BUDGET_RUNG_BUDGET));
+    const third = await new StructuralPlanner().plan(budgetInput(BUDGET_RUNG_BUDGET));
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+    expect(JSON.stringify(third)).toBe(JSON.stringify(first));
+  });
+
+  it('stays reversible: the round trip closes byte for byte', async () => {
+    const smelter = createSmelter({ strategy: 'structural' });
+    const result = await smelter.smelt(BUDGET_RUNG_PY, {
+      language: 'python',
+      budgetBytes: BUDGET_RUNG_BUDGET,
+      focus: ['alpha_gate'],
+    });
+    expect(result.elisions).toHaveLength(1);
+    expect(smelter.reconstruct(result)).toBe(BUDGET_RUNG_PY);
   });
 });

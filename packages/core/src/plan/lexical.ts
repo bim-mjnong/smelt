@@ -1,6 +1,8 @@
 import { MissingMarkerPricingError } from '../errors.ts';
 import type { ElisionPlan, MarkerPricing, PlanInput, PlannedElision, Planner } from '../types.ts';
 
+import { markerBytes, predictOutputBytes } from './budget.ts';
+
 export const LEXICAL_PLANNER_ID = 'lexical/v1';
 
 /** How hard the head/tail strategy squeezes, in order, when the budget is not met. */
@@ -126,23 +128,6 @@ function requirePricing(input: PlanInput): MarkerPricing {
   const pricing: MarkerPricing | undefined = input.pricing;
   if (pricing === undefined) throw new MissingMarkerPricingError(LEXICAL_PLANNER_ID);
   return pricing;
-}
-
-/** The exact UTF-8 cost of the marker this elision would earn. Asked, not guessed. */
-function markerBytes(elision: PlannedElision, pricing: MarkerPricing): number {
-  return pricing.costBytes(elision.reason, elision.range.end - elision.range.start);
-}
-
-function predictOutputBytes(
-  inputBytes: number,
-  elisions: readonly PlannedElision[],
-  pricing: MarkerPricing,
-): number {
-  return elisions.reduce(
-    (bytes, elision) =>
-      bytes - (elision.range.end - elision.range.start) + markerBytes(elision, pricing),
-    inputBytes,
-  );
 }
 
 function splitLines(text: string): readonly Line[] {

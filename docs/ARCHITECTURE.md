@@ -234,6 +234,7 @@ Everything below is typechecked, linted, and covered. `pnpm verify` is the gate.
 | `packages/core/src/plan/lexical.ts`    | The lexical planner: focus-window and head-tail rules, a context ladder under budget pressure, profitability check so a marker never costs more than the lines it replaces. Deterministic.                                                                                                                                                                        |
 | `packages/core/src/plan/structural.ts` | The structural planner for all fifteen supported languages. Refuses rather than falls back: an unmapped language or a failed grammar load throws `GrammarUnavailableError`, because output labelled `structural/v1` that is really line windows is undetectable from outside.                                                                                     |
 | `packages/core/src/plan/planners.ts`   | The `PLANNERS` registry, string → factory. `createSmelter`, `--strategy`/config validation and the help text all serve its keys.                                                                                                                                                                                                                                  |
+| `packages/core/src/plan/budget.ts`     | What a plan costs once its markers land — `markerBytes`, `savingBytes`, `predictOutputBytes`, over the `MarkerPricing` seam. Both planners read `budgetBytes` now, and this is the one place either of them answers "how big is the output?".                                                                                                                     |
 | `packages/core/src/plan/grammar.ts`    | Loads a prebuilt grammar `.wasm` off disk, through `assertLocalResource`. Bundled copy first, `tree-sitter-wasms` as the source-checkout fallback. Cached.                                                                                                                                                                                                        |
 | `packages/core/src/repomap/`           | `buildRepoMap()` — the ranked, budgeted whole-tree symbol map. See "The repo map" below.                                                                                                                                                                                                                                                                          |
 | `packages/core/src/cache/prefix.ts`    | Cache-prefix hygiene: `findPrefixDivergence` and `detectCacheBreakers`. Pure functions; detect and warn, never rewrite.                                                                                                                                                                                                                                           |
@@ -523,6 +524,25 @@ by a mutation:
   labelled `preprocessor directive`/`preprocessor conditional`; PHP's mixed-HTML `text`
   nodes are `html section`; Ruby's top-level control-flow blocks are `statement` — all
   counted as non-declarations by the mixed-heading rule.
+- **The plan reads its own budget.** `planStructural` used to ignore `budgetBytes`
+  entirely: it took every profitable maximal run and stopped. The review's case — 158
+  bytes against a budget of 120 — showed what that costs. The maximal run there was a
+  `VERSION = 1` statement and three classes, and pricing it whole earned a 106-byte
+  marker against a 105-byte cut: one byte the wrong side of profitable, so nothing was
+  elided and the plan came back over budget. The three classes _alone_ priced an
+  82-byte marker against 92 bytes — a real 10-byte saving nobody was offered. So there
+  is a **budget rung**, the structural answer to the lexical planner's context ladder:
+  when, and only when, the plan is still over budget, each refused run is re-asked as
+  its own best profitable sub-run, earliest first, stopping the moment the plan fits.
+  Every candidate goes through the same `collapse` the first pass uses, which is what
+  makes three things true by construction rather than by care — a focus-matched (or
+  pinned) unit is in no run and therefore in no sub-run of one; nothing is minted whose
+  marker is not strictly cheaper than what it removes, so the output cannot grow; and
+  the enumeration is start-ascending, length-descending, so the plan stays
+  byte-identical run to run. Budget pressure is the trigger rather than profitability
+  because a maximal run is the better _explanation_: one marker naming everything it
+  hid beats two naming halves of it, and trading that away is worth it to fit a budget
+  and not worth it otherwise.
 
 **Size, measured** (2026-09-02, `ls -l packages/core/grammars/` after `pnpm build`):
 the whole `grammars/` directory is 28,316,720 bytes ≈ 27.0 MiB, which is what
