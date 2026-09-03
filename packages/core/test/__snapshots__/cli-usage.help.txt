@@ -81,10 +81,12 @@ OPTIONS
                        map: symbols matching a term (by name or path) are promoted
                        to the front of the fill order, ranks unchanged.
   --language <id>      Override detection. One of: typescript, tsx, javascript, rust, python, go, java, c, cpp, c_sharp, ruby, php, kotlin, swift, bash, unknown.
-  --strategy <id>      lexical or structural. Defaults to lexical, unless
+  --strategy <id>      lexical, structural, auto. Defaults to lexical, unless
                        smelt.config.json says otherwise. structural parses
                        typescript, tsx, javascript, rust, python, go, java, c, cpp, c_sharp, ruby, php, kotlin, swift, bash;
-                       any other language is refused, never approximated.
+                       any other language is refused, never approximated. auto picks
+                       structural for those languages and lexical for the rest, and
+                       the report names whichever one actually ran.
   --ignore <entry>     map only. Repeatable. Replaces the default ignore list
                        (.git, node_modules, dist, build, out, coverage): a bare name matches any path segment,
                        an entry containing / is a root-relative prefix.

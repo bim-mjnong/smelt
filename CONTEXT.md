@@ -98,11 +98,22 @@ codebase-design glossary.
   formula; `test/bench.test.ts` pins the two copies to each other.)
 - **PLANNERS**: the one registry of planner strategies (`src/plan/planners.ts`), string →
   factory over the lexical/structural option bags. `createSmelter`, `--strategy` and
-  config validation, and the help text all serve its keys; a constructed `planner` on
-  `SmelterConfig` wins over any strategy name. **`DEFAULT_STRATEGY`** lives beside them:
+  config validation, the help text, the `init` wizard's menu and the `smelt_file` tool
+  schema all serve its keys; a constructed `planner` on `SmelterConfig` wins over any
+  strategy name. **`DEFAULT_STRATEGY`** lives beside them:
   the strategy a caller who names none gets, read by `createSmelter`, the `smelt` verb's
   merge, the `init` wizard and the MCP server's `smelt_file` — the names were derived
   while the default stayed hand-typed in four places across two packages.
+- **Selector** (`auto`): the third strategy, and not a planner — it picks one
+  (`src/plan/auto.ts`). Structural where the language carries a bundled grammar
+  (`isStructuralLanguage`, the one membership test, shared with the structural refusal),
+  lexical everywhere else, and it returns the delegate's plan **untouched**, so
+  `result.planner` reads `lexical/v1` or `structural/v1` and never `auto/v1`. It decides
+  on a fact (the language), never on an accident: a grammar that fails to load still
+  raises `GrammarUnavailableError`, and an explicit `strategy: 'structural'` still
+  refuses an unsupported language exactly as before. `DEFAULT_STRATEGY` stays `lexical`
+  — `auto` is opt-in, because a changed default is a behaviour change delivered to
+  callers who asked for nothing.
 - **Budget rung** (structural): the second pass in `planStructural`, and the reason it
   reads `input.budgetBytes` at all. When the first pass — every maximal sibling run,
   collapsed where that pays for its marker — comes back over budget, each run it

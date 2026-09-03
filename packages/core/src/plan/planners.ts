@@ -1,5 +1,6 @@
 import type { Planner } from '../types.ts';
 
+import { AutoPlanner } from './auto.ts';
 import { LexicalPlanner } from './lexical.ts';
 import type { LexicalPlannerOptions } from './lexical.ts';
 import { StructuralPlanner } from './structural.ts';
@@ -8,6 +9,7 @@ import type { StructuralPlannerOptions } from './structural.ts';
 /**
  * The option bags a strategy factory may draw from — the same fields
  * `SmelterConfig` carries, so the config object itself can be handed to a factory.
+ * `auto` draws from both, because it may run either planner.
  */
 export interface PlannerFactoryOptions {
   readonly lexical?: LexicalPlannerOptions;
@@ -18,19 +20,29 @@ export interface PlannerFactoryOptions {
  * The one registry of planner strategies — string in, constructed {@link Planner} out.
  *
  * This object is the single place the strategy names live. `createSmelter` builds from
- * it, `--strategy` and `smelt.config.json` validation accept exactly its keys, and the
- * `--help` text renders its keys — so a strategy cannot exist in one of those faces and
+ * it, `--strategy` and `smelt.config.json` validation accept exactly its keys, the
+ * `--help` text and the `init` wizard render its keys, and the `smelt_file` tool's
+ * JSON Schema enumerates them — so a strategy cannot exist in one of those faces and
  * be missing from another. Before this registry the pair was restated in three places,
  * which is how help text rots.
  *
  * `'structural'` parses every language named in {@link STRUCTURAL_LANGUAGES} with a
  * bundled grammar and throws {@link GrammarUnavailableError} for anything else — never
  * a silent lexical fallback. See {@link StructuralPlanner}.
+ *
+ * `'auto'` picks between the two on the language and **labels what ran**: its plans
+ * come back as `lexical/v1` or `structural/v1`, never as `auto`. It is a selector, not
+ * a fallback — an explicit `'structural'` on an unsupported language still refuses,
+ * because a caller who named the planner asked for its guarantees. See
+ * {@link AutoPlanner}, whose doc comment carries the reasoning.
+ *
+ * Key order is the order every rendered list uses, so append rather than reorder.
  */
 export const PLANNERS = {
   lexical: (options: PlannerFactoryOptions): Planner => new LexicalPlanner(options.lexical ?? {}),
   structural: (options: PlannerFactoryOptions): Planner =>
     new StructuralPlanner(options.structural ?? {}),
+  auto: (options: PlannerFactoryOptions): Planner => new AutoPlanner(options),
 } as const satisfies Record<string, (options: PlannerFactoryOptions) => Planner>;
 
 /** Which planner a smelter uses, named by string. Exactly the keys of {@link PLANNERS}. */
@@ -53,6 +65,12 @@ export const STRATEGIES = Object.keys(PLANNERS) as readonly Strategy[];
  * `'lexical'` is the default because it works on any text: `'structural'` refuses a
  * language it has no grammar for rather than approximating (see {@link StructuralPlanner}),
  * which is right when a caller asked for it and wrong as the answer to "no preference".
+ *
+ * `'auto'` refuses nothing either, and is the better answer for a caller smelting a
+ * mixed stream — but it stays **opt-in**. Promoting it would change which planner runs,
+ * and therefore what `result.planner` says, for every existing caller who never named a
+ * strategy: a behaviour change delivered to people who asked for nothing. A caller who
+ * wants it says so, in a flag, a config, or a tool argument.
  */
 export const DEFAULT_STRATEGY: Strategy = 'lexical';
 

@@ -169,7 +169,7 @@ describe('planners.ts owns the default strategy', () => {
     // names the fallback spelling it replaced. Everywhere else must read the constant.
     const restated = allSourceFiles()
       .filter((file) => file !== 'plan/planners.ts')
-      .filter((file) => /\?\?\s*'(?:lexical|structural)'/.test(readSource(file)));
+      .filter((file) => /\?\?\s*'(?:lexical|structural|auto)'/.test(readSource(file)));
     expect(
       restated,
       'a hardcoded strategy fallback is a second default that can drift from the registry',

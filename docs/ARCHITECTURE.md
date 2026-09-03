@@ -233,7 +233,8 @@ Everything below is typechecked, linted, and covered. `pnpm verify` is the gate.
 | `packages/core/src/apply.ts`           | `applyPlan()` (the only function that removes anything), `reconstruct()` (Law 3 as an equation), `MARKER_FORMAT_VERSION` — the wire surface, frozen — and `markerPricing()`, the one place a marker's byte cost is computed. No judgement at all.                                                                                                                 |
 | `packages/core/src/plan/lexical.ts`    | The lexical planner: focus-window and head-tail rules, a context ladder under budget pressure, profitability check so a marker never costs more than the lines it replaces. Deterministic.                                                                                                                                                                        |
 | `packages/core/src/plan/structural.ts` | The structural planner for all fifteen supported languages. Refuses rather than falls back: an unmapped language or a failed grammar load throws `GrammarUnavailableError`, because output labelled `structural/v1` that is really line windows is undetectable from outside.                                                                                     |
-| `packages/core/src/plan/planners.ts`   | The `PLANNERS` registry, string → factory. `createSmelter`, `--strategy`/config validation and the help text all serve its keys.                                                                                                                                                                                                                                  |
+| `packages/core/src/plan/planners.ts`   | The `PLANNERS` registry, string → factory, and `DEFAULT_STRATEGY` beside it. Three entries now: `lexical`, `structural`, and `auto`. `createSmelter`, `--strategy`/config validation, the `--help` text, the `init` wizard's menu and the `smelt_file` tool schema all serve its keys.                                                                            |
+| `packages/core/src/plan/auto.ts`       | The `auto` strategy: structural where a grammar is bundled, lexical everywhere else, and the delegate's plan returned untouched so `result.planner` names what ran. A selector, not a fallback — a grammar-load failure travels out of it. See "Picking a planner" below.                                                                                         |
 | `packages/core/src/plan/budget.ts`     | What a plan costs once its markers land — `markerBytes`, `savingBytes`, `predictOutputBytes`, over the `MarkerPricing` seam. Both planners read `budgetBytes` now, and this is the one place either of them answers "how big is the output?".                                                                                                                     |
 | `packages/core/src/plan/grammar.ts`    | Loads a prebuilt grammar `.wasm` off disk, through `assertLocalResource`. Bundled copy first, `tree-sitter-wasms` as the source-checkout fallback. Cached.                                                                                                                                                                                                        |
 | `packages/core/src/repomap/`           | `buildRepoMap()` — the ranked, budgeted whole-tree symbol map. See "The repo map" below.                                                                                                                                                                                                                                                                          |
@@ -279,6 +280,7 @@ Everything below is typechecked, linted, and covered. `pnpm verify` is the gate.
 | `packages/core/test/guards/harness-registry.test.ts`    | Harness totality: every profile the registry claims reaches the help text, every profile that ships a shim has a cited fixture (so the schema suite, which loops over the registry, tests it), and the one rewrite announcement stays one — including the copy spliced into the generated opencode plugin.                                                                                                                                                                                                                                            |
 | `packages/core/test/guards/subcommand-registry.test.ts` | The subcommand seam, and flag ownership. The `SUBCOMMANDS` registry carries exactly the shipped verbs with exactly the flags each documents, and **every verb is crossed with every flag it does not own** — each pair refused, with the usage exit code and a message naming the flag and the verb. Three mutations prove it can go red: a flag list widened to smuggle a foreign flag through, a verb dropped from the registry, and the generated refusal removed from the parse.                                                                  |
 | `packages/core/test/guards/planner-registry.test.ts`    | The strategy seam. The `PLANNERS` registry carries exactly the shipped strategies, and the factory, `--strategy`/config validation and the help text all serve its keys — a dropped entry goes red on every face at once.                                                                                                                                                                                                                                                                                                                             |
+| `packages/core/test/guards/auto-strategy.test.ts`       | The `auto` strategy's two promises: every plan it returns carries the id of the planner that actually ran (never `auto/v1`), and a grammar that will not load comes back as `GrammarUnavailableError` rather than as line windows. Two mutations — the selector relabelling the plan it delegated, and the selector degrading into a `catch`-and-fall-back — prove both can go red.                                                                                                                                                                   |
 | `packages/core/test/guards/config-writer.test.ts`       | The config file's two directions, and the one built-in strategy. `parseConfig(renderConfig(c))` equals `c` field for field for every shape a config can take, and the totality leg reads the key set out of the **reader's own refusal** — a key the reader learns and the writer forgets goes red without anyone remembering this file. `DEFAULT_STRATEGY` is pinned to the registry, to what a smelter given no strategy actually uses, and to the CLI's `builtin` provenance, with a scan refusing a second copy of the default anywhere in `src`. |
 | `packages/mcp/test/guards/no-network.test.ts`           | The MCP server's stdio-local surface: the SDK's HTTP/SSE transports never enter the package's import graph.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `packages/core/test/guards/_source.ts`                  | Shared source-walking helpers: `guardSrcRoot()`, `guardRoot()`, and the string/comment stripper that stops `net/policy.ts` reporting its own word list.                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -549,6 +551,43 @@ the whole `grammars/` directory is 28,316,720 bytes ≈ 27.0 MiB, which is what
 `bundle-grammars` prints — cpp 4.4, kotlin 3.9, c_sharp 3.8, swift 3.0, typescript 2.3,
 ruby 2.0, bash 1.3, php 0.8, c 0.8, javascript 0.6, java 0.4 MiB among them. That is
 the accepted tarball cost of "works offline" for fifteen languages.
+
+### Picking a planner: the `auto` strategy
+
+`lexical` and `structural` are both right answers to questions a caller may not be able
+to ask once. A consumer smelting whatever a tool handed it — a `.ts` file this call, a
+build log the next — had to name a strategy per call or accept the wrong one every other
+call, and the two wrong answers are not symmetric: `lexical` on TypeScript is a working
+planner doing a weak job, while `structural` on a build log is a `GrammarUnavailableError`.
+So most callers picked `lexical` and never got the planner this library exists for.
+
+`auto` (`src/plan/auto.ts`) is the third registry entry, and it is a **selector, not a
+fallback** — the distinction is the whole design:
+
+- It decides on a **fact**: whether the language carries a bundled grammar
+  (`isStructuralLanguage`, the same membership test the structural refusal uses, stated
+  once). That is knowable before a byte is parsed.
+- **The plan labels what ran.** `auto` returns the delegate's plan untouched, so
+  `result.planner` reads `structural/v1` or `lexical/v1` and never `auto/v1`. The id
+  `AUTO_PLANNER_ID` names the selector object and is guarded against ever reaching an
+  `ElisionPlan`, because `result.planner` is the only place the mechanism is stated.
+- It never decides on an **accident**. A grammar that fails to load on a language smelt
+  claims to support is a broken install, and `GrammarUnavailableError` travels straight
+  out of `auto` exactly as it does under `strategy: 'structural'`. Catching it and
+  answering with line windows would turn a loud environment fault into quietly worse
+  output — Law 2's no-silent-downgrade reasoning arriving through a friendlier door.
+- It changes **nothing** about an explicit `strategy: 'structural'`, which still refuses
+  an unsupported language. A caller who named the planner asked for _its_ guarantees,
+  and a refusal is the only answer that does not fabricate them. `auto` is a different
+  request — "pick for me" — answered in the open.
+
+`DEFAULT_STRATEGY` stays `lexical`, deliberately. Promoting `auto` would change which
+planner runs, and therefore what `result.planner` says, for every existing caller who
+never named a strategy: a behaviour change delivered to people who asked for nothing.
+`auto` is opt-in, through `--strategy auto`, `"strategy": "auto"`, the `init` wizard's
+third choice, or the `smelt_file` tool argument — every one of them a rendered view of
+the `PLANNERS` registry, which is why the third entry cost one line of prose per face
+and no new plumbing.
 
 ### The measurement harness
 

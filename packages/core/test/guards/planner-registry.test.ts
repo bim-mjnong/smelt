@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 // of src. See scripts/mutate.mjs.
 import { cliUsage, parseSmeltArgs } from '@guard/cli/args';
 import { parseConfig } from '@guard/cli/config';
+import { AUTO_PLANNER_ID } from '@guard/plan/auto';
 import { LEXICAL_PLANNER_ID } from '@guard/plan/lexical';
 import { isStrategy, PLANNERS, STRATEGIES } from '@guard/plan/planners';
 import { STRUCTURAL_PLANNER_ID } from '@guard/plan/structural';
@@ -23,6 +24,7 @@ import type { GuardMutation } from './_mutations.ts';
 const SHIPPED: Record<string, string> = {
   lexical: LEXICAL_PLANNER_ID,
   structural: STRUCTURAL_PLANNER_ID,
+  auto: AUTO_PLANNER_ID,
 };
 const SHIPPED_NAMES = Object.keys(SHIPPED).toSorted();
 

@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import { CliUsageError } from '../errors.ts';
-import { DEFAULT_STRATEGY } from '../plan/planners.ts';
+import { DEFAULT_STRATEGY, STRATEGIES } from '../plan/planners.ts';
 import type { Strategy } from '../plan/planners.ts';
 import { STRUCTURAL_LANGUAGES } from '../plan/structural.ts';
 
@@ -407,24 +407,43 @@ async function stepStore(io: InitIo, ask: Asker, choices: WizardChoices): Promis
   }
 }
 
+/**
+ * One sentence per strategy, for the wizard's menu — `Record<Strategy, string>`, so a
+ * strategy added to the `PLANNERS` registry without a line here is a compile error
+ * rather than an option the wizard silently never offers. The menu itself, its
+ * numbering and the re-prompt are all rendered from {@link STRATEGIES}, which is why
+ * the third choice cost one entry in this table.
+ */
+const STRATEGY_BLURB: Readonly<Record<Strategy, string>> = {
+  lexical: 'line windows around your focus terms; works on any text',
+  structural:
+    `parses ${String(STRUCTURAL_LANGUAGES.length)} languages with bundled grammars ` +
+    `(${STRUCTURAL_LANGUAGES.join(', ')}) and collapses siblings by name; refuses ` +
+    `other languages rather than approximating`,
+  auto:
+    'structural for those languages and lexical for everything else; the result ' +
+    'names whichever one actually ran',
+};
+
 async function stepStrategy(io: InitIo, ask: Asker, choices: WizardChoices): Promise<StepOutcome> {
+  const picks = STRATEGIES.map((_, index) => String(index + 1));
   io.output(
     `\nDefault planner strategy — used when a run omits --strategy:\n` +
-      `  1. lexical     — line windows around your focus terms; works on any text\n` +
-      `  2. structural  — parses ${String(STRUCTURAL_LANGUAGES.length)} languages with ` +
-      `bundled grammars (${STRUCTURAL_LANGUAGES.join(', ')}) and ` +
-      `collapses siblings by name; refuses other languages rather than approximating\n`,
+      STRATEGIES.map(
+        (name, index) => `  ${picks[index]!}. ${name.padEnd(12)}— ${STRATEGY_BLURB[name]}\n`,
+      ).join(''),
   );
   for (;;) {
-    const current = choices.strategy === 'lexical' ? '1' : '2';
-    const answer = await ask(`strategy (1/2) [${current}] (or back)> `);
+    const current = picks[STRATEGIES.indexOf(choices.strategy)]!;
+    const answer = await ask(`strategy (${picks.join('/')}) [${current}] (or back)> `);
     if (answer === 'back') return 'back';
     const pick = answer === '' ? current : answer;
-    if (pick === '1' || pick === '2') {
-      choices.strategy = pick === '1' ? 'lexical' : 'structural';
+    const index = picks.indexOf(pick);
+    if (index >= 0) {
+      choices.strategy = STRATEGIES[index]!;
       return 'ok';
     }
-    io.output(`1 for lexical, 2 for structural, or back.\n`);
+    io.output(`${STRATEGIES.map((name, i) => `${picks[i]!} for ${name}`).join(', ')}, or back.\n`);
   }
 }
 

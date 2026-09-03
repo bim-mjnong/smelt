@@ -6,6 +6,7 @@ import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CliUsageError } from '../src/errors.ts';
+import { STRATEGIES } from '../src/plan/planners.ts';
 import { STRUCTURAL_LANGUAGES } from '../src/plan/structural.ts';
 import { CONFIG_FILE_NAME, findConfigFile } from '../src/cli/config.ts';
 import type { SmeltConfig } from '../src/cli/config.ts';
@@ -84,6 +85,18 @@ describe('a fresh run', () => {
     expect(output).toContain(`parses ${String(STRUCTURAL_LANGUAGES.length)} languages`);
     expect(output).toContain(STRUCTURAL_LANGUAGES.join(', '));
     expect(output).not.toContain('typescript and tsx');
+  });
+
+  it('offers every strategy the registry carries, and writes the one that was picked', async () => {
+    // The wizard's menu, its numbering and its re-prompt all render STRATEGIES, so a
+    // strategy cannot reach `--strategy` and miss the wizard. `auto` is choice 3.
+    const { code, output } = await wizard(['4000', '1', '3', '1', '1', 'yes']);
+    expect(code).toBe(EXIT.ok);
+    for (const [index, name] of STRATEGIES.entries()) {
+      expect(output, name).toContain(`${String(index + 1)}. ${name}`);
+    }
+    expect(output).toContain(`strategy (${STRATEGIES.map((_, i) => String(i + 1)).join('/')})`);
+    expect(readConfig().strategy).toBe('auto');
   });
 
   it('generates both stubs when asked, next to the config', async () => {
