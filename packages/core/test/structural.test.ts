@@ -9,7 +9,7 @@ import {
   StructuralPlanner,
 } from '../src/plan/structural.ts';
 import { MemoryElisionStore } from '../src/store.ts';
-import type { PlanInput } from '../src/types.ts';
+import type { MarkerPricing, PlanInput } from '../src/types.ts';
 
 import {
   BOUNDARY_TS,
@@ -196,5 +196,89 @@ describe("the structural planner's budget rung", () => {
     });
     expect(result.elisions).toHaveLength(1);
     expect(smelter.reconstruct(result)).toBe(BUDGET_RUNG_PY);
+  });
+});
+
+/**
+ * A generated bash script whose *only* maximal run is the whole file: `n` `echo`
+ * commands, then a last line holding two top-level commands, the second of which the
+ * focus matches. The run ends mid-line, so the first pass refuses it on the
+ * line-comment rule rather than on price — and a run refused that way is as large as
+ * the file, which is what makes it the budget rung's worst case.
+ */
+function wholeFileRefusedBash(lines: number): string {
+  const echoes: string[] = [];
+  for (let i = 0; i < lines; i += 1)
+    echoes.push(`echo "line ${String(i)} of the generated script"`);
+  return `${[...echoes, 'cleanup_tmp; deploy_release --now'].join('\n')}\n`;
+}
+
+/** A {@link MarkerPricing} that answers exactly as the real one and counts the asking. */
+function countingPricing(): { readonly pricing: MarkerPricing; calls: () => number } {
+  const real = markerPricing('bash');
+  let calls = 0;
+  return {
+    pricing: {
+      costBytes: (reason, elidedBytes) => {
+        calls += 1;
+        return real.costBytes(reason, elidedBytes);
+      },
+    },
+    calls: () => calls,
+  };
+}
+
+async function pricedCandidates(lines: number, budgetBytes: number): Promise<number> {
+  const counter = countingPricing();
+  await planStructural({
+    text: wholeFileRefusedBash(lines),
+    language: 'bash',
+    budgetBytes,
+    focus: ['deploy_release'],
+    pricing: counter.pricing,
+  });
+  return counter.calls();
+}
+
+/**
+ * THE BUDGET RUNG'S WORK IS BOUNDED — the property that keeps the rung off the CPU.
+ *
+ * A run refused on the mid-line rule can be the whole file, and the rung fires
+ * precisely when the caller is over budget, which is the normal case. Sweeping every
+ * `(from, to)` sub-run of such a run — slicing, explaining and pricing each — was
+ * cubic: 19.5 KB in 373 ms, 159 KB in 131 s, on input a tool controls. So the count of
+ * candidates the rung actually prices is pinned here, not the wall clock: it must not
+ * grow with the file. Measured against the sweep this replaced, 202 units priced
+ * 39,801 candidates.
+ */
+describe("the structural planner's budget rung, bounded", () => {
+  it('prices a bounded number of candidates however large the refused run is', async () => {
+    const small = await pricedCandidates(100, 200);
+    const large = await pricedCandidates(800, 200);
+    expect(large).toBe(small);
+    expect(large).toBeLessThan(64);
+  });
+
+  it('stays bounded when no sub-run can reach the budget at all', async () => {
+    const small = await pricedCandidates(100, 1);
+    const large = await pricedCandidates(800, 1);
+    expect(large).toBe(small);
+    expect(large).toBeLessThan(64);
+  });
+
+  it('still finds the whole-file cut the mid-line refusal hid', async () => {
+    const text = wholeFileRefusedBash(200);
+    const plan = await planStructural({
+      text,
+      language: 'bash',
+      budgetBytes: 200,
+      focus: ['deploy_release'],
+      pricing: markerPricing('bash'),
+    });
+    expect(plan.elisions).toHaveLength(1);
+    expect(plan.elisions[0]!.reason.explanation).toBe('collapsed 200 sibling commands');
+    const result = applyPlan(text, plan, new MemoryElisionStore());
+    expect(result.text).toContain('cleanup_tmp; deploy_release --now');
+    expect(result.outputBytes).toBeLessThan(result.inputBytes);
   });
 });

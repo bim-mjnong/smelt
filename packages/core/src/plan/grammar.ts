@@ -110,6 +110,9 @@ export async function loadGrammar(language: LanguageId): Promise<Language> {
     () => Language.load(new Uint8Array(bytes)),
     `smelt: the file at "${path}" is not a loadable tree-sitter grammar for "${language}"`,
   );
+  const resolved = assertLocalResource(grammarPath(language));
+  const bytes = await readFile(fileURLToPath(resolved));
+  const grammar = await loadWasm(language, resolved, bytes);
   cache.set(language, grammar);
   return grammar;
 }
@@ -138,6 +141,31 @@ async function inContract<T>(run: () => Promise<T>, what: string): Promise<T> {
 function describeFailure(cause: unknown): string {
   if (cause instanceof Error && cause.message !== '') return cause.message;
   return String(cause);
+}
+
+ * `Language.load`, with its failure typed.
+ *
+ * A grammar file that exists but is not a loadable grammar — truncated by a partial
+ * copy, corrupted in transit, left over from a mismatched `web-tree-sitter` — comes out
+ * of tree-sitter as a bare `Error` ("need to see wasm magic number", "byte length of
+ * Uint32Array should be a multiple of 4"). That is the same environment fault as a
+ * missing file, and both `auto`'s doc comment and `docs/ARCHITECTURE.md` promise the
+ * caller one type for it: a consumer catching `GrammarUnavailableError` to decide what
+ * to do about a broken install must not have to also pattern-match a message from a
+ * dependency. The cause travels along, so nothing is hidden — only named.
+ */
+async function loadWasm(language: LanguageId, resolved: URL, bytes: Buffer): Promise<Language> {
+  try {
+    return await Language.load(new Uint8Array(bytes));
+  } catch (cause) {
+    throw new GrammarUnavailableError(
+      `smelt: the grammar for "${language}" at ${fileURLToPath(resolved)} exists but ` +
+        `could not be loaded (${cause instanceof Error ? cause.message : String(cause)}). ` +
+        `The file is present and unreadable as a grammar — a truncated or mismatched ` +
+        `copy. Re-run \`pnpm build\` in a source checkout, or reinstall the package.`,
+      { cause },
+    );
+  }
 }
 
 /** Reset the grammar cache. Tests use it; production has no reason to. */

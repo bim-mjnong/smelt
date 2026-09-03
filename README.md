@@ -112,7 +112,7 @@ const result = await smelter.smelt(toolOutput, {
   path: 'src/server.ts', // language detection
   focus: ['handleRequest'], // what you were actually looking for
   budgetBytes: 4_000,
-  strategy: 'structural', // parse-tree collapse; 'lexical' for non-code
+  strategy: 'structural', // parse-tree collapse; 'lexical' for non-code, 'auto' to pick
 });
 
 result.text; // send this

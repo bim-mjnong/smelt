@@ -14,7 +14,7 @@ import type { GuardMutation } from './_mutations.ts';
 /**
  * The PLANNERS registry is the single source of the strategy names: `createSmelter`
  * builds from it, `--strategy` and `smelt.config.json` validation accept its keys, and
- * the help text renders them. This guard restates the shipped pair independently, so
+ * the help text renders them. This guard restates the shipped set independently, so
  * dropping an entry from the registry goes red on every face at once — factory,
  * validation, and help — instead of one face quietly forgetting a strategy the others
  * still claim.
