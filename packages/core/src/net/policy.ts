@@ -78,6 +78,7 @@ export const ALLOWED_NODE_BUILTINS: readonly string[] = [
   'node:process', // argv, stdin/stdout/stderr and the exit code, for the CLI
   'node:os', // homedir(), for `smelt hooks install` harness detection — reads a path, opens nothing
   'node:readline/promises', // line-by-line answers for `smelt init` — reads streams it is handed, opens nothing
+  'node:stream', // Readable.from, adapting `smelt init`'s structural answer stream for readline — plumbing, no socket
   'node:tty', // isatty(0) for the CLI's TTY check — a plain syscall, no stream, no socket
 ];
 

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
+import { Readable } from 'node:stream';
 
 import { CliUsageError } from '../errors.ts';
 import { DEFAULT_STRATEGY } from '../plan/planners.ts';
@@ -8,6 +9,7 @@ import type { Strategy } from '../plan/planners.ts';
 import { STRUCTURAL_LANGUAGES } from '../plan/structural.ts';
 
 import { CLI_NAME } from './shell.ts';
+import type { AnswerStream } from './shell.ts';
 import {
   CONFIG_FILE_NAME,
   CONFIG_VERSION,
@@ -54,8 +56,11 @@ export const RERANK_STUB_FILE = 'smelt.rerank.ts';
 
 /** Where the wizard's bytes come from and go. Injected so `runInit` is testable in-process. */
 export interface InitIo {
-  /** Interactive input — the real stdin in `bin.ts`, a scripted stream in tests. */
-  readonly input: NodeJS.ReadableStream;
+  /**
+   * Interactive input — the real stdin in `bin.ts`, a scripted stream in tests.
+   * Structural on purpose; see {@link AnswerStream}.
+   */
+  readonly input: AnswerStream;
   readonly output: (text: string) => void;
   /**
    * Where config discovery starts, and where a fresh run's files land — unless `cwd`
@@ -103,7 +108,14 @@ interface PlannedWrite {
  *   the wizard finishes — both are usage-shaped, and nothing further is written.
  */
 export async function runInit(io: InitIo): Promise<number> {
-  const rl = createInterface({ input: io.input });
+  // `Readable.from` is the adapter between the structural {@link AnswerStream} the
+  // published surface promises and the stream readline requires. Handed a Readable
+  // (the real stdin, a scripted one) it wraps it; handed a plain async iterable it
+  // makes one. Destroyed in the `finally` below, which ends iteration of whatever it
+  // was reading — without that, a wrapper still awaiting the next chunk would hold
+  // stdin open and `smelt init` would finish its work and never exit.
+  const input = Readable.from(io.input);
+  const rl = createInterface({ input });
   const lines = rl[Symbol.asyncIterator]();
   const ask = async (prompt: string): Promise<string> => {
     io.output(prompt);
@@ -124,6 +136,7 @@ export async function runInit(io: InitIo): Promise<number> {
       : await editRun(io, ask, existing.path, existing.config);
   } finally {
     rl.close();
+    input.destroy();
   }
 }
 

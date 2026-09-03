@@ -195,6 +195,28 @@ describe('the built binary, as a real process', () => {
     expect(stats.stdout).toContain('retrieveCalls 1');
     expect(stats.stdout).toContain('uniqueRetrieved 1');
   }, 15_000);
+
+  it('runs the init wizard on a real pipe and exits when the answers run out', async () => {
+    // The process-boundary half of the wizard. `InitIo.input` is a structural
+    // `AnswerStream` — an async iterable, deliberately not `NodeJS.ReadableStream`, so
+    // the shipped `.d.ts` needs no ambient node types — and the wizard adapts it with
+    // `Readable.from`. That wrapper reads `process.stdin` through its async iterator,
+    // and a wrapper still awaiting the next chunk would hold stdin open: the wizard
+    // would write every file, print "Done." and **never exit**. No in-process test can
+    // see that, because no in-process test has an event loop to keep alive. This one
+    // spawns the real binary on a real pipe, and the `close` event is the assertion.
+    const wizardDir = join(scratch, 'init-wizard');
+    mkdirSync(wizardDir, { recursive: true });
+    const answers = ['4000', '1', '1', '2', '2', 'yes'].join('\n');
+    const { code, stdout } = await runBin(
+      ['init'],
+      { bytes: Buffer.from(`${answers}\n`, 'utf8'), delayMs: 0 },
+      wizardDir,
+    );
+    expect(code).toBe(EXIT.ok);
+    expect(stdout).toContain('wrote smelt.config.json');
+    expect(existsSync(join(wizardDir, 'smelt.config.json'))).toBe(true);
+  }, 15_000);
 });
 
 describe('the built package loads from CommonJS via require(esm)', () => {

@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSy
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
+import { Readable } from 'node:stream';
 
 import { CliUsageError } from '../errors.ts';
 import { nodeCommand, portablePath, shimScriptPath, smeltBinPath } from '../harness/paths.ts';
@@ -30,6 +31,7 @@ import { DEFAULT_SUGGESTION_BUDGET_BYTES, DEFAULT_THRESHOLD_BYTES } from '../hoo
 import type { EnforcementMode } from '../hooks/guard-core.ts';
 
 import { CLI_NAME } from './shell.ts';
+import type { AnswerStream } from './shell.ts';
 import {
   CONFIG_FILE_NAME,
   CONFIG_VERSION,
@@ -74,7 +76,11 @@ import type { SmeltConfig, SmeltConfigHooks } from './config.ts';
 
 /** Where the wizard's bytes come from and go. Injected so `runHooks` tests in-process. */
 export interface HooksIo {
-  readonly input: NodeJS.ReadableStream;
+  /**
+   * Scripted answers in, one line at a time. Structural on purpose; see
+   * {@link AnswerStream}.
+   */
+  readonly input: AnswerStream;
   readonly output: (text: string) => void;
   /** Project directory: detection, config discovery, and every write are relative to it. */
   readonly cwd: string;
@@ -734,7 +740,9 @@ export async function runHooks(
   harnessFlag: string | undefined,
   io: HooksIo,
 ): Promise<number> {
-  const rl = createInterface({ input: io.input });
+  // Same adapter, same reason, as `runInit` — see the note there.
+  const input = Readable.from(io.input);
+  const rl = createInterface({ input });
   const lines = rl[Symbol.asyncIterator]();
   const ask = async (prompt: string): Promise<string> => {
     io.output(prompt);
@@ -754,6 +762,7 @@ export async function runHooks(
       : await removeFlow(io, ask, harnessFlag);
   } finally {
     rl.close();
+    input.destroy();
   }
 }
 

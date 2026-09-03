@@ -61,7 +61,7 @@ export {
   parseSmeltArgs,
   runCli,
 } from './cli/run.ts';
-export type { CliIo, CliJsonEnvelope, SmeltInvocation } from './cli/run.ts';
+export type { AnswerStream, CliIo, CliJsonEnvelope, SmeltInvocation } from './cli/run.ts';
 export {
   ANTHROPIC_PROMPT_CACHE_FACTS,
   CACHE_BREAKER_RULES,
