@@ -5,6 +5,7 @@ import { budgetFault, budgetMalformed } from '../../ops/inputs.ts';
 import type { BudgetFault } from '../../ops/inputs.ts';
 import { STRATEGIES } from '../../plan/planners.ts';
 import { STRUCTURAL_LANGUAGES } from '../../plan/structural.ts';
+import { DEFAULT_REPO_IGNORE } from '../../repomap/map.ts';
 import { CLI_NAME } from '../shell.ts';
 
 /**
@@ -170,7 +171,9 @@ export const FLAG_HELP: Readonly<Record<FlagName, FlagHelp>> = {
     label: '--ignore <entry>',
     body: () => [
       'Repeatable. Replaces the default ignore list',
-      '(.git, node_modules): a bare name matches any path segment,',
+      // Read off DEFAULT_REPO_IGNORE, never re-typed: help text that lists a default
+      // by hand is help text that will one day describe a different default.
+      `(${DEFAULT_REPO_IGNORE.join(', ')}): a bare name matches any path segment,`,
       'an entry containing / is a root-relative prefix.',
     ],
   },
