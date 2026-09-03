@@ -81,6 +81,8 @@ in 7,297 B → out 985 B   (-86.5%, 3 elisions)
   tree-sitter tags, deterministic PageRank, every included symbol stating why it ranked.
   Modelled on Aider's repo-map, credited as such. The map fits itself to the budget by
   construction.
+- `smelt agents lint` measures the other blob an agent loads on every request: your
+  `AGENTS.md`. See [`smelt agents`](#smelt-agents--the-file-that-loads-on-every-request).
 - The exit code is non-zero when the plan came back over budget, and the report says so.
   `1` over budget, `2` usage, `3` refused, `4` unexpected.
 
@@ -239,6 +241,9 @@ works across processes:
 - **stats on Stop** (default on): `smelt stats` at session end — the expansion rate
   where the turn ends. Observation only.
 - **repo map on SessionStart** (opt-in): a budgeted `smelt map` as opening context.
+- **instruction-file lint on SessionStart** (opt-in): `smelt agents lint .` — a report
+  on the AGENTS.md/CLAUDE.md/GEMINI.md that session is about to load on every request.
+  Advisory; never blocks. See [`smelt agents`](#smelt-agents--the-file-that-loads-on-every-request).
 
 Enforcement defaults to **deny-with-reason**: the transcript stays truthful and the
 model learns to run the replacement itself. `"hooks": {"enforcement": "rewrite"}`
@@ -284,6 +289,59 @@ claude mcp add smelt -- npx @smeltjs/mcp
 Codex and Grok TOML snippets, the tool contract, and the stdio-local guarantee (the
 SDK's HTTP transports never enter the import graph — guard-enforced):
 [`packages/mcp/README.md`](packages/mcp/README.md).
+
+## `smelt agents` — the file that loads on every request
+
+Your `AGENTS.md` is the one blob a coding agent pays for on **every single request**,
+relevant or not. That is a context-budget problem, which is smelt's whole subject — so
+smelt measures it:
+
+```sh
+smelt agents lint              # measure and explain; exit 0
+smelt agents lint . --strict   # any finding exits 1, for CI
+smelt agents lint . --json     # the versioned envelope
+smelt agents split             # the mechanical half of the guide's refactor
+```
+
+It lints the **merged set** — every `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` in the
+tree, because a nested one merges with the root, so the sum is the honest number — and
+reports bytes per level, a total, and an imperative count labelled a heuristic. Then
+eight advisory rules, each with a stable id and an explanation citing the guide it
+applies ([aihero.dev/a-complete-guide-to-agents-md](https://www.aihero.dev/a-complete-guide-to-agents-md)):
+
+| Rule                    | What it notices                                                           |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `dead-path`             | a path-like token that resolves to nothing in the real tree               |
+| `dead-link`             | a Markdown link whose relative target has moved or gone                   |
+| `forcing-language`      | "always", "never", ALL-CAPS shouting                                      |
+| `structure-dump`        | a directory tree, or a run of bare path lines                             |
+| `generated-boilerplate` | init-script fingerprints (**the softest rule, and its own text says so**) |
+| `language-rule`         | a const/let, interface-vs-type or quote-style rule loaded every request   |
+| `mirror-drift`          | a `CLAUDE.md`/`GEMINI.md` that has diverged from its `AGENTS.md`          |
+| `restated-at-level`     | the same line written at two levels of the merged set                     |
+
+`dead-path` and `dead-link` are the point. Everyone else is linting Markdown; the
+thing that has rotted is the repository the Markdown describes, and a renamed
+`src/auth/handlers.ts` is not an invalid file — it is a lie the agent believes on
+every request.
+
+**No built-in size limit.** The guide's cited "~150-200 instructions" is printed as a
+citation and compared to nothing. Set `{"agents": {"budgetBytes": 2000}}` in
+`smelt.config.json` and exceeding **your** number exits 1, exactly as every other smelt
+budget does. Findings alone exit 0 unless you pass `--strict`.
+
+**There is no `smelt agents init`, and there will not be one.** The guide says in as
+many words never to auto-generate an AGENTS.md, and smelt will not build the thing its
+own source warns against. `smelt agents split` does the _mechanical_ half of the
+guide's refactor — partition by `##` heading into `docs/`, rewrite the relative links
+that moved a directory deeper, leave a link list behind, under `smelt init`'s consent
+discipline — and then prints the guide's own refactor prompt with your real section
+headings filled in, for you to hand to your own agent. Deciding which sections are
+essential is a reading of your project; that needs a model, and smelt has none by law.
+
+smelt's own [`AGENTS.md`](AGENTS.md) is written by hand to the guide's minimum
+checklist and linted by this command, with [`CLAUDE.md`](CLAUDE.md) as the symlink the
+guide recommends.
 
 ## Fine print on the API
 
@@ -337,6 +395,12 @@ Three things that look like bugs and are not:
   by guard: the runner writes that file and refuses to run when it is stale, so the
   number is measured wherever it is read and stated nowhere else. Every guarantee in
   this README has a guard.
+- **The honesty machinery** — twenty-four guard suites (twenty-one in the core, three guarding
+  the MCP server's stdio-local surface and the shared operations seam) that walk the
+  real import graph, assert byte-exact reversibility, pin the wire format, and re-derive
+  the attribution file; plus a mutation runner (`pnpm mutate`) that breaks the source on
+  purpose — 121 mutations across 25 guards, each watched going red — and fails if a guard
+  does not notice. Every guarantee in this README has a guard.
 
 ## Measured numbers
 
