@@ -176,9 +176,20 @@ codebase-design glossary.
   `stripStringsAndComments`). The seam is `classify(edge): Classification` — one small
   function per package holding only that package's **ruling** (the core partitions
   against `net/policy.ts`; the mcp package adds a stdio-only SDK subpath allowlist).
-  Each package's `test/guards/_source.ts` stays as its anchor: only `packageRoot()` and
-  `repoRoot()` are package-local, and `SMELT_GUARD_SRC` / `SMELT_GUARD_ROOT` keep
-  exactly the semantics `scripts/mutate.mjs` sets them with. It also owns the
+  Each package's `test/guards/_source.ts` stays as its anchor, and the anchor is one
+  call: `guardAnchor(import.meta.url)` derives `packageRoot()`/`repoRoot()` from the
+  anchor's own location and returns the bound helpers, so nothing in the anchor is
+  package-local but the `import.meta.url` it passes (the two anchors used to carry a
+  byte-identical `packageRoot()` each). `GuardMutation` lives in the kit too; each
+  package's `_mutations.ts` re-exports it, so a guard's import and the runner's
+  textual anchor are unchanged. `SMELT_GUARD_SRC` / `SMELT_GUARD_ROOT` keep exactly
+  the semantics `scripts/mutate.mjs` sets them with. The kit also owns the one
+  registry invariant no `Record<Id, Profile>` can type-check — `assertKeyedById(
+registry, idField)`: the key **is** the id, and the entry's id field agrees, so a
+  by-key lookup (`profileFor`, `subcommandFor`) and a by-field one (`harnessById`,
+  `HARNESS_IDS`) name one profile per id. It is an assertion applied to each registry,
+  not a shared Registry module (ruling: a module fails the deletion test; the
+  registries stay plain objects). It also owns the
   **packaging** machine — `packPackage`, which runs the real `npm pack` and extracts
   it, plus the three rules that read the result: no shipped declaration names an
   ambient global namespace, no sourcemap points outside the tarball, and a tool schema

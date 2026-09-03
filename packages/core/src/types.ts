@@ -182,18 +182,6 @@ export interface SmeltResult {
   readonly measured?: MeasuredSize;
 }
 
-/** Options for a single `smelt()` call. */
-export interface SmeltOptions {
-  /** Soft ceiling for the emitted output, in UTF-8 bytes. */
-  readonly budgetBytes: number;
-  /** Filename or path, used to detect the language. Optional; detection falls back to `'unknown'`. */
-  readonly path?: string;
-  /** Override language detection entirely. */
-  readonly language?: DetectedLanguage;
-  /** What the caller was looking for. See {@link PlanInput.focus}. */
-  readonly focus?: readonly string[];
-}
-
 /**
  * Reversibility, as a callable. Takes a {@link SmeltResult} and the store that holds its
  * elided bytes, and returns the original text — byte for byte.

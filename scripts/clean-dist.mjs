@@ -8,10 +8,8 @@
  * wholesale. Clearing first makes the build's output a function of the source alone.
  */
 import { rmSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
 const packageDir = process.cwd();
 const dist = join(packageDir, 'dist');
-void resolve(dirname(fileURLToPath(import.meta.url)));
 rmSync(dist, { recursive: true, force: true });

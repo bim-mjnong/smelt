@@ -149,10 +149,12 @@ here: the runner verifies any count the docs do state and fails on drift.
    the owning package's `vitest.config.ts` can be redirected at a broken copy. If your
    guard reads a _committed artefact_ rather than source, read it through `guardRoot()`
    from `test/guards/_source.ts` so it can be redirected too. That file is the package's
-   anchor — it binds the shared helpers in `packages/guard-kit` (test-only, `private`,
-   never published) to this package's own root.
+   anchor — one `guardAnchor(import.meta.url)` call that binds the shared helpers in
+   `packages/guard-kit` (test-only, `private`, never published) to this package's own
+   root.
 2. Export the mutations **from the guard file itself**: `export const MUTATIONS:
-GuardMutation[] = […]` (the type lives in `test/guards/_mutations.ts`), each entry
+GuardMutation[] = […]` (the type lives in `packages/guard-kit`, re-exported from
+   `test/guards/_mutations.ts`), each entry
    naming the exact source string to change and _why that break matters_ — beside the
    assertions that must catch it, so the check and its proof-of-failure travel
    together. Entries are literal data; a guard over an artefact takes

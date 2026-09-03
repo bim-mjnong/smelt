@@ -3,9 +3,9 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { SUPPORTED_LANGUAGES } from '@guard/detect';
-import { structuralLanguages } from '@guard/lang/registry';
-import { WASM_BY_LANGUAGE } from '@guard/plan/grammar';
+import { assertKeyedById } from '@smelt/guard-kit';
+
+import { LANGUAGE_PROFILES, structuralLanguages } from '@guard/lang/registry';
 
 import { FIXTURE_BY_LANGUAGE } from '../structural-fixtures.ts';
 
@@ -27,7 +27,10 @@ import { packageRoot } from './_source.ts';
  * So this guard closes the loop the type system cannot: for **every** language id the
  * structural planner claims, there must be
  *
- *   1. a grammar mapping and a `SUPPORTED_LANGUAGES` entry (the language is real),
+ *   1. one profile under that id — the registry key and the profile's own `id` agree,
+ *      so `profileFor(id)` (by key) and `structuralLanguages()` (from the field) name
+ *      the same profile; `SUPPORTED_LANGUAGES` and `WASM_BY_LANGUAGE` are derived from
+ *      the same registry, so their agreement is not a check but an identity,
  *   2. a fixture in `FIXTURE_BY_LANGUAGE` — with a focus, a signature line, and a
  *      **doc-comment case**: a doc comment in the language's own idiom that appears
  *      in the fixture and is asserted to survive by the structural guard, which
@@ -53,17 +56,8 @@ describe('structural totality — every claimed language has a fixture, a snapsh
     expect(claimed.length).toBeGreaterThanOrEqual(15);
   });
 
-  it('every claimed language is a supported language with a grammar mapping', () => {
-    for (const language of claimed) {
-      expect(
-        SUPPORTED_LANGUAGES,
-        `${language}: claimed by the structural planner but missing from SUPPORTED_LANGUAGES`,
-      ).toContain(language);
-      expect(
-        Object.keys(WASM_BY_LANGUAGE),
-        `${language}: claimed by the structural planner but has no grammar in WASM_BY_LANGUAGE`,
-      ).toContain(language);
-    }
+  it('keys every profile by its own id — the by-key and from-field readers agree', () => {
+    assertKeyedById(LANGUAGE_PROFILES, 'id');
   });
 
   it('every claimed language has a fixture with a focus, a signature and a doc-comment case', () => {

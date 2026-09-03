@@ -11,12 +11,16 @@
  */
 export {
   allSourceFiles,
+  guardAnchor,
   guardRoot,
   guardSrcRoot,
   importSpecifiers,
   readSource,
   stripStringsAndComments,
+  type GuardAnchor,
 } from './source.ts';
+export { type GuardMutation } from './mutation.ts';
+export { assertKeyedById } from './keyed.ts';
 export {
   classifyEdge,
   distPaths,
