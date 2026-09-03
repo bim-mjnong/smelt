@@ -9,8 +9,8 @@
   "scripts": {
     "build": "pnpm -r --filter \"./packages/**\" run build",
     "test": "pnpm -r --filter \"./packages/**\" run test",
-    "typecheck": "pnpm -r --filter \"./packages/**\" run typecheck",
-    "lint": "oxlint --deny-warnings packages",
+    "typecheck": "pnpm -r --filter \"./packages/**\" --filter @smeltjs/site run typecheck",
+    "lint": "oxlint --deny-warnings packages site/scripts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "mutate": "node scripts/mutate.mjs",

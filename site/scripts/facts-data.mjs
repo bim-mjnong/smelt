@@ -18,9 +18,14 @@
  *
  * The sources, in order:
  *
- *   - `packages/core/package.json` and `packages/mcp/package.json` — the versions. Read
- *     from the manifests themselves, so the site cannot name a version that was never
- *     published; `packages/core/test/guards/site-facts.test.ts` pins that.
+ *   - `packages/core/package.json` and `packages/mcp/package.json` — the versions. The
+ *     manifests are the *repository's* record of the release, not npm's: what this
+ *     guarantees is that the page says what the manifests say, character for character
+ *     (`packages/core/test/guards/site-facts.test.ts` pins that), which is the drift
+ *     that was live. It cannot guarantee the version is published — a version bump
+ *     merged before `npm publish` deploys a page naming a release that is on no
+ *     registry yet, and nothing here can see that. Publish, then merge the bump; the
+ *     window is the length of that gap.
  *   - `HARNESS_PROFILES`, through `harnessesByTier()` — the tier table, grouped by
  *     `HarnessProfile.tier` with `TIER_HONESTY`'s line per tier.
  *   - `structuralLanguages()` and `WASM_BY_LANGUAGE` — which languages the structural
@@ -55,12 +60,16 @@ function readJson(root, relative, what) {
   try {
     text = readFileSync(path, 'utf8');
   } catch {
-    throw new Error(`${what} is missing (${relative}) — the site cannot state a fact it cannot read`);
+    throw new Error(
+      `${what} is missing (${relative}) — the site cannot state a fact it cannot read`,
+    );
   }
   try {
     return JSON.parse(text);
   } catch (error) {
-    throw new Error(`${what} is not parseable JSON (${relative}): ${error.message}`);
+    throw new Error(`${what} is not parseable JSON (${relative}): ${error.message}`, {
+      cause: error,
+    });
   }
 }
 
@@ -99,6 +108,7 @@ export async function renderFacts(root = REPO_ROOT) {
       `@smeltjs/core could not be imported: ${error.message}. The site renders the ` +
         `package's own registries, so the package must be built first — ` +
         `\`pnpm --filter "@smeltjs/site..." build\` does that in order.`,
+      { cause: error },
     );
   }
 

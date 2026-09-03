@@ -23,7 +23,7 @@ nothing to build and nothing to download at runtime.
 | `pnpm verify`                       | Everything below, in order, one verdict. **This is the green signal.** |
 | `pnpm build`                        | `tsc` per package into `dist/`, then bundles the grammars              |
 | `pnpm test`                         | vitest, all packages                                                   |
-| `pnpm typecheck`                    | `tsc --noEmit`, including tests                                        |
+| `pnpm typecheck`                    | `tsc --noEmit`, including tests and `site/`                            |
 | `pnpm lint`                         | oxlint, warnings are errors                                            |
 | `pnpm format` / `pnpm format:check` | prettier                                                               |
 | `pnpm mutate`                       | the mutation suite — see below                                         |

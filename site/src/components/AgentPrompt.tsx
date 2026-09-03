@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import facts from '@/generated/facts.json';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { Tabs } from '@/components/ui/Tabs';
 import { CopyButton } from '@/components/ui/CopyButton';
@@ -46,11 +47,43 @@ From now on: read big files through \`smelt <file> --budget 4000 --focus <what y
 
 type PromptId = keyof typeof PROMPTS;
 
-const TIERS: Record<PromptId, { file: string; badge: string }> = {
-  'claude-code': { file: 'paste-into-claude-code.txt', badge: 'hooks tier: verified' },
-  codex: { file: 'paste-into-codex.txt', badge: 'hooks tier: verified' },
-  mcp: { file: 'paste-into-any-mcp-client.txt', badge: 'stdio-local, guard-enforced' },
+/**
+ * Each tab's download name and its one-line badge.
+ *
+ * The badge for a harness tab is its **tier**, and a tier is a package fact
+ * (`HarnessProfile.tier`, grouped by `harnessesByTier()`): it is looked up in
+ * `facts.json` by harness id, never typed here. It was typed here — both harness tabs
+ * said `hooks tier: verified` — which is the same drift the tier table below this
+ * section had, and it survived the table being derived: flipping a profile to
+ * `advisory` moved it in the table while this badge kept advertising the old tier on
+ * the same page. `site-facts.test.ts` now refuses a tier word written into any site
+ * component.
+ *
+ * The MCP tab names no harness, so it carries a description of the transport instead
+ * of a tier — there is no `HarnessProfile` behind it to state one.
+ */
+const TABS: Record<PromptId, { file: string; harness?: string; note?: string }> = {
+  'claude-code': { file: 'paste-into-claude-code.txt', harness: 'claude-code' },
+  codex: { file: 'paste-into-codex.txt', harness: 'codex' },
+  mcp: { file: 'paste-into-any-mcp-client.txt', note: 'stdio-local, guard-enforced' },
 };
+
+/**
+ * The tier `facts.json` records for a harness, as a badge — or a throw. A tab whose
+ * harness the registry no longer carries would otherwise render `hooks tier: undefined`,
+ * and a hole rendered quietly is the failure this generator exists to end.
+ */
+function badge({ harness, note }: { harness?: string; note?: string }): string {
+  if (harness === undefined) return note ?? '';
+  const group = facts.tiers.find((tier) => tier.harnesses.some((one) => one.id === harness));
+  if (group === undefined) {
+    throw new Error(
+      `facts.json states no tier for the harness "${harness}" — the tab would advertise a ` +
+        `tier nothing measured`,
+    );
+  }
+  return `hooks tier: ${group.tier}`;
+}
 
 /** Backtick spans render as commands (ash); prose stays slag. Copy gets the raw text. */
 function PromptBody({ text }: { text: string }) {
@@ -107,8 +140,8 @@ export function AgentPrompt() {
               content: (
                 <Frame>
                   <FrameBar
-                    label={TIERS[id].file}
-                    meta={TIERS[id].badge}
+                    label={TABS[id].file}
+                    meta={badge(TABS[id])}
                     right={
                       <CopyButton
                         text={PROMPTS[id]}

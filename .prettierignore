@@ -9,8 +9,11 @@ assets/*.svg
 # bench corpus — byte-exact committed tool outputs; formatting them would falsify them
 packages/core/bench/corpus/
 
-# the site is its own world: root verify must stay untouched by site code
-site/
+# the site's app sources are its own world — but its build-time generators are not:
+# root verify runs site/scripts/facts-data.mjs (the site-facts guard spawns it), so the
+# code verify executes is formatted and linted like everything else verify executes.
+site/*
+!site/scripts/
 
 # guard scratch — isolated copies of `src` a guard makes and removes
 packages/core/.guard-scratch/

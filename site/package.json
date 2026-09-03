@@ -7,7 +7,8 @@
     "generate": "node scripts/bench-data.mjs && node scripts/facts-data.mjs",
     "bench-data": "node scripts/bench-data.mjs",
     "dev": "pnpm run generate && vite",
-    "build": "pnpm run generate && tsc --noEmit && vite build",
+    "typecheck": "pnpm run generate && tsc --noEmit",
+    "build": "pnpm run typecheck && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -713,7 +713,7 @@ definition site and the measured reference counts that ranked it. The tags cache
 plain JSON keyed by content hash — Aider persists through SQLite, but this repo ships
 zero new runtime dependencies — and it lives **only** in a directory the caller
 explicitly hands in; a corrupt entry is deleted and reported as a warning in the result,
-never trusted. Guarded by `test/guards/repo-map.test.ts`, with ten mutations proving
+never trusted. Guarded by `test/guards/repo-map.test.ts`, whose mutations prove that
 the budget, the tie-break, cache invalidation, the corrupt-entry discard, the symlink
 refusal, the default ignore list, the error wrap, the cache bound and the two statements
 of the resolution limit can each go red.
@@ -875,7 +875,10 @@ pnpm verify        # format:check → lint → build → typecheck → test → 
 ```
 
 (Build precedes typecheck because `@smeltjs/mcp` typechecks against the core's built
-declarations — on a fresh clone, typecheck-first would fail before the types exist.)
+declarations — on a fresh clone, typecheck-first would fail before the types exist. The
+same order is what lets `typecheck` reach `site/`: its generator imports the built core,
+and the site's components consume the core's shape through the JSON that generator
+writes, so a renamed field is red here rather than on the deployed page.)
 
 Individual gates: `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint`,
 `pnpm format`, `pnpm mutate`. Generated files: `pnpm generate:third-party` rewrites

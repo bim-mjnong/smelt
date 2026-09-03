@@ -76,7 +76,7 @@ export function HowItWorks() {
           >
             <Stage
               name="plan"
-              note="blob + budget + focus → an elision plan; nothing removed yet"
+              note={`blob + budget + focus → an elision plan; nothing removed yet. Structural in the ${String(facts.structuralLanguages.length)} languages with a bundled grammar, lexical everywhere else.`}
             />
             <Arrow />
             <Stage name="apply" note="the only byte-remover; every cut leaves a one-line marker" />

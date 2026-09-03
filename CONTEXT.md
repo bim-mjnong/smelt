@@ -69,8 +69,8 @@ codebase-design glossary.
   stays public as the escape hatch for a harness a table cannot express. The **tier
   grouping** is a view too: `harnessesByTier()` folds `profile.tier` into
   `{tier, honesty, harnesses}` rows in `TIER_HONESTY`'s key order, and the `hooks` help
-  body, the wizard and the site's table render it — it was hand-typed in five places, so
-  a promoted harness stayed under its old tier in four of them. `wiresLifecycle(profile)`
+  body, the wizard and the site's table and prompt badges render it — it was hand-typed
+  in five places, so a promoted harness stayed under its old tier in four of them. `wiresLifecycle(profile)`
   is its sibling and the correction of a confusion: the stats/map toggles wire wherever a
   JSON hook step declares `lifecycle`, which the wizard called "verified-tier harnesses"
   because the two sets happen to coincide. Because every _rendered_ grouping now derives

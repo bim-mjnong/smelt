@@ -1,6 +1,6 @@
 {
   "guards": 26,
-  "mutations": 119,
+  "mutations": 121,
   "byGuard": [
     {
       "guard": "packages/core/test/guards/auto-strategy.test.ts",
@@ -76,11 +76,11 @@
     },
     {
       "guard": "packages/core/test/guards/site-facts.test.ts",
-      "count": 1
+      "count": 2
     },
     {
       "guard": "packages/core/test/guards/structural-totality.test.ts",
-      "count": 1
+      "count": 2
     },
     {
       "guard": "packages/core/test/guards/structural.test.ts",

@@ -6,11 +6,12 @@ import { describe, expect, it } from 'vitest';
 import { assertKeyedById } from '@smelt/guard-kit';
 
 import { LANGUAGE_PROFILES, structuralLanguages } from '@guard/lang/registry';
+import { WASM_BY_LANGUAGE } from '@guard/plan/grammar';
 
 import { FIXTURE_BY_LANGUAGE } from '../structural-fixtures.ts';
 
 import type { GuardMutation } from './_mutations.ts';
-import { packageRoot } from './_source.ts';
+import { guardRoot, packageRoot, repoRoot } from './_source.ts';
 
 /**
  * STRUCTURAL TOTALITY GUARD — a language cannot be claimed without tests.
@@ -118,6 +119,152 @@ describe('structural totality — every claimed language has a fixture, a snapsh
 });
 
 /**
+ * THE DOCUMENTS NAME THE SAME LANGUAGES — the other half of the claim.
+ *
+ * The registry is the single home of per-language facts, and everything the *code*
+ * renders is a view over it. The prose was not: README.md typed "**fifteen languages**"
+ * and all fifteen ids, docs/ARCHITECTURE.md typed "Fifteen languages: TypeScript, …"
+ * and CONTRIBUTING.md's release checklist typed "all fifteen `grammars/*.wasm`" — four
+ * hand-written copies of a derivable fact, with only a `>= 15` vacuity floor above
+ * them. A sixteenth language would have left every document saying fifteen beside a
+ * fifteen-name list, silently: the exact failure this branch removed for the mutation
+ * tally and the tier table, still live one document over.
+ *
+ * The ruling that keeps the README's tier table hand-written applies here too — a
+ * generated language list would be a view agreeing with itself. So the lists stay
+ * written by a human and are *pinned* to the registry: the ids as README spells them,
+ * the display names as ARCHITECTURE spells them (normalised: `C++` → `cpp`, `C#` →
+ * `c_sharp`), and every spelled-out number a sentence about languages or grammars
+ * carries.
+ */
+
+const NUMBER_WORDS = [
+  'zero',
+  'one',
+  'two',
+  'three',
+  'four',
+  'five',
+  'six',
+  'seven',
+  'eight',
+  'nine',
+  'ten',
+  'eleven',
+  'twelve',
+  'thirteen',
+  'fourteen',
+  'fifteen',
+  'sixteen',
+  'seventeen',
+  'eighteen',
+  'nineteen',
+  'twenty',
+] as const;
+
+/**
+ * A repository document. Normally read from the repository; from the mutation runner's
+ * scratch root when it made one — which is exactly when `guardRoot()` stops being this
+ * package's own root. The indirection matters: `packages/core/README.md` exists too, so
+ * joining `guardRoot()` blindly would read the wrong README on every ordinary run.
+ */
+function document(relative: string): string {
+  const root = guardRoot() === packageRoot() ? repoRoot() : guardRoot();
+  const staled = join(root, relative);
+  return readFileSync(existsSync(staled) ? staled : join(repoRoot(), relative), 'utf8');
+}
+
+/** `bash` from `` `bash` ``; the ids a markdown list spells in backticks, in order. */
+const backticked = (list: string): readonly string[] =>
+  [...list.matchAll(/`(?<id>[a-z_0-9]+)`/gu)].map((match) => match.groups!['id']!);
+
+/** `C++` → `cpp`, `C#` → `c_sharp`, `TypeScript` → `typescript` — no hand-written map. */
+const asId = (name: string): string =>
+  name.trim().toLowerCase().replace('++', 'pp').replace('#', '_sharp');
+
+describe('the documents name the languages the registry claims', () => {
+  const claimed = structuralLanguages();
+  const grammars = new Set(Object.values(WASM_BY_LANGUAGE)).size;
+
+  it("README's structural-planner bullet lists the claimed ids, in order", () => {
+    const bullet = /languages\*\*\s*\((?<list>[^)]*)\)/u.exec(document('README.md'));
+    expect(
+      bullet?.groups?.['list'],
+      'README.md no longer lists the structural languages where this guard reads them ' +
+        '(a `**… languages**` phrase followed by a parenthesised list of backticked ids) — ' +
+        'the list is pinned to the registry, so it has to be findable',
+    ).toBeDefined();
+    expect(
+      backticked(bullet!.groups!['list']!),
+      'README.md names a different set of structural languages than the registry claims',
+    ).toEqual([...claimed]);
+  });
+
+  it("ARCHITECTURE's language sentence names the claimed languages, in order", () => {
+    const sentence = /(?<count>[A-Za-z]+)\s+languages:\s+(?<list>[^—]+)—/u.exec(
+      document('docs/ARCHITECTURE.md'),
+    );
+    expect(
+      sentence?.groups?.['list'],
+      'docs/ARCHITECTURE.md no longer names the structural languages where this guard ' +
+        'reads them (a "… languages: A, B and C —" sentence)',
+    ).toBeDefined();
+    const named = sentence!
+      .groups!['list']!.split(/,\s*|\s+and\s+/u)
+      .filter((name) => name.trim() !== '');
+    expect(
+      named.map(asId),
+      'docs/ARCHITECTURE.md names a different set of structural languages than the ' +
+        'registry claims — a language added to the registry, and a sentence nobody edited',
+    ).toEqual([...claimed]);
+  });
+
+  it('no document spells a count of languages or grammars the registry disagrees with', () => {
+    // Every spelled-out number in a clause about languages, grammars or their licences.
+    // Digits are not scanned: these documents state counts in words, and the tally's own
+    // guard (`guards-manifest.test.ts`) owns the digit case.
+    const words = NUMBER_WORDS.join('|');
+    const expected = (count: number): string => {
+      expect(
+        count,
+        `the registry claims ${String(count)} of a thing the documents spell out in ` +
+          `words, and NUMBER_WORDS stops at ${String(NUMBER_WORDS.length - 1)} — extend it`,
+      ).toBeLessThan(NUMBER_WORDS.length);
+      return NUMBER_WORDS[count]!;
+    };
+    const contexts = [
+      // The noun the number counts, immediately after it — "fifteen languages",
+      // "fifteen supported languages", "fifteen `grammars/*.wasm`", "all fifteen are
+      // MIT". Deliberately tight: a window of any 40 characters caught "One" in a
+      // sentence that happens to mention languages later.
+      {
+        about: 'languages',
+        after: String.raw`(?:supported\s+|structural\s+)?languages?`,
+        count: claimed.length,
+      },
+      { about: 'grammars', after: String.raw`\x60?grammars?|are\s+MIT`, count: grammars },
+    ];
+    for (const relative of ['README.md', 'docs/ARCHITECTURE.md', 'CONTRIBUTING.md']) {
+      const text = document(relative);
+      for (const context of contexts) {
+        // `\s+` rather than a space: README wraps "**fifteen\n  languages**" across two
+        // lines, and the drift is the same drift on either side of a line break.
+        const pattern = new RegExp(`\\b(${words})\\b\\s+(?:${context.after})\\b`, 'giu');
+        for (const match of text.matchAll(pattern)) {
+          expect(
+            match[1]!.toLowerCase(),
+            `${relative} says "${match[1]!}" where the registry has ${String(context.count)} ` +
+              `${context.about}. The list is hand-written on purpose — an outside witness — ` +
+              `but it is pinned: update the sentence, or the document is the last place ` +
+              `still saying the old number.`,
+          ).toBe(expected(context.count));
+        }
+      }
+    }
+  });
+});
+
+/**
  * The breaks this guard must catch. `pnpm mutate` applies each one to a scratch copy
  * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
  */
@@ -128,5 +275,13 @@ export const MUTATIONS: GuardMutation[] = [
     find: '  swift,\n  bash,\n};',
     replace: "  swift,\n  bash,\n  lua: { ...bash, id: 'lua', extensions: ['lua'] },\n};",
     why: 'a language claimed by a registry profile with no fixture, no snapshot and no doc-comment case — exactly the untested-language ship the totality guard exists to refuse',
+  },
+  {
+    kind: 'artifact',
+    id: 'documents-name-a-language-set-of-their-own',
+    file: 'docs/ARCHITECTURE.md',
+    find: 'Kotlin, Swift and Bash',
+    replace: 'Kotlin and Swift',
+    why: 'a document listing one language fewer than the registry claims — the drift that was live in two documents at once, under a `>= 15` floor that a fourteen-name list and the word "fifteen" both satisfy',
   },
 ];

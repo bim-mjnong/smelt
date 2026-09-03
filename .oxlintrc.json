@@ -19,6 +19,12 @@
       "rules": {
         "no-console": "off"
       }
+    },
+    {
+      "files": ["site/scripts/**"],
+      "rules": {
+        "no-console": "off"
+      }
     }
   ]
 }
