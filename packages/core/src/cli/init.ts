@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
 import { CliUsageError } from '../errors.ts';
@@ -33,6 +33,12 @@ import type { SmeltConfig, SmeltConfigHooks, SmeltConfigStore } from './config.t
  *     anything but a literal `yes` skips it. Guarded by
  *     `test/guards/init-wizard.test.ts`, with a mutation proving the guard goes red.
  *  3. **Every step accepts `back`.** A wizard you cannot reverse inside is a form.
+ *  4. **Everything lands in one named directory.** A fresh run inside a workspace asks
+ *     which end of config discovery to write to (see `chooseDirectory`) and an edit run
+ *     writes beside the config it found; either way the directory is printed in the
+ *     "About to write" listing before the confirm, and nothing is ever written outside
+ *     it. A wizard that writes where the user cannot see is a wizard writing somewhere
+ *     they did not agree to.
  *
  * Law 4 note: the wizard's copy states what each choice *does*, never what it saves —
  * no percentages, no rates, no numbers smelt has not measured.
@@ -50,9 +56,11 @@ export interface InitIo {
   readonly input: NodeJS.ReadableStream;
   readonly output: (text: string) => void;
   /**
-   * Where config discovery starts, and where a fresh run's files land. An edit run
-   * writes next to the discovered config instead — which may be an ancestor of `cwd`,
-   * and the "About to write" listing names that directory before anything is written.
+   * Where config discovery starts, and where a fresh run's files land — unless `cwd`
+   * is inside a workspace and the user picks its root instead (`chooseDirectory`). An
+   * edit run writes next to the discovered config, which may be an ancestor of `cwd`.
+   * In every flow the "About to write" listing names the directory before anything is
+   * written, and nothing is written outside it.
    */
   readonly cwd: string;
 }
@@ -145,8 +153,11 @@ const STEPS: readonly Step[] = [
 ];
 
 async function freshRun(io: InitIo, ask: Asker): Promise<number> {
+  const dir = await chooseDirectory(io, ask);
   io.output(
-    `${CLI_NAME} init — sets up ${CONFIG_FILE_NAME} in ${io.cwd}.\n` +
+    `${CLI_NAME} init — sets up ${CONFIG_FILE_NAME} in ${dir}.\n` +
+      `A run reads the nearest ${CONFIG_FILE_NAME}, walking UP from the directory it ` +
+      `is run in, so this one is found from ${dir} and everything below it.\n` +
       `Answer \`back\` at any step to return to the previous one. ` +
       `Nothing is written until you confirm at the end.\n\n`,
   );
@@ -162,7 +173,7 @@ async function freshRun(io: InitIo, ask: Asker): Promise<number> {
   let index = 0;
   for (;;) {
     while (index < STEPS.length) {
-      const outcome = await STEPS[index]!.run(io, ask, choices, io.cwd);
+      const outcome = await STEPS[index]!.run(io, ask, choices, dir);
       if (outcome === 'back') {
         if (index === 0) io.output(`This is the first step — there is nothing before it.\n`);
         else index -= 1;
@@ -170,10 +181,85 @@ async function freshRun(io: InitIo, ask: Asker): Promise<number> {
         index += 1;
       }
     }
-    const verdict = await confirmAndWrite(io, ask, choices, io.cwd);
+    const verdict = await confirmAndWrite(io, ask, choices, dir);
     if (verdict !== 'back') return 0;
     index = STEPS.length - 1;
   }
+}
+
+/**
+ * Which directory this fresh run writes into — and the wizard's answer to the
+ * monorepo trap.
+ *
+ * `smelt init` in `packages/web` used to write a config in `packages/web`, silently,
+ * while discovery walks **up**: every run from the repo root then found no config and
+ * used none, and the user had watched themselves set a budget. So when the working
+ * directory sits inside a workspace (`pnpm-workspace.yaml`, or a `package.json` with a
+ * `workspaces` field, in any ancestor), the wizard states the discovery rule and asks
+ * which end of it to write to, defaulting to the root that covers the whole tree.
+ *
+ * The answer becomes the directory every later step, the "About to write" listing and
+ * every `writeFileSync` uses — so the wizard still writes only inside the one directory
+ * the user was shown and confirmed, here as much as anywhere else. Outside a workspace
+ * there is nothing to choose and nothing is asked; the discovery rule is stated either
+ * way, because "where will runs look for this?" is not a question a user should have to
+ * infer from a path.
+ */
+async function chooseDirectory(io: InitIo, ask: Asker): Promise<string> {
+  const root = findWorkspaceRoot(io.cwd);
+  if (root === undefined) return io.cwd;
+
+  io.output(
+    `${CLI_NAME} init — ${io.cwd} is inside a workspace rooted at ${root}.\n` +
+      `A run reads the nearest ${CONFIG_FILE_NAME}, walking UP from the directory it is ` +
+      `run in. A config written here is found from here and below; a run from ${root} ` +
+      `would not find it. One at the workspace root is found from every package in it.\n` +
+      `  1. ${root} (the workspace root)\n` +
+      `  2. ${io.cwd} (here — this package only)\n`,
+  );
+  for (;;) {
+    const answer = await ask(`where should ${CONFIG_FILE_NAME} go? (1/2) [1]> `);
+    if (answer === 'back') {
+      io.output(`This is the first question — there is nothing before it.\n`);
+      continue;
+    }
+    const pick = answer === '' ? '1' : answer;
+    if (pick === '1') return root;
+    if (pick === '2') return io.cwd;
+    io.output(`1 for the workspace root, 2 for here.\n`);
+  }
+}
+
+/**
+ * The nearest **ancestor** of `cwd` that declares a workspace, or `undefined`.
+ *
+ * Ancestors only: a `cwd` that is itself the workspace root has nothing to choose
+ * between, so it is asked nothing. Two markers, because those are the two the
+ * ecosystem writes — pnpm's `pnpm-workspace.yaml`, and the `workspaces` field npm,
+ * yarn and bun read out of `package.json`. Detection never reads a lockfile and never
+ * shells out; a `package.json` it cannot parse claims nothing, so it is not a root.
+ */
+export function findWorkspaceRoot(cwd: string): string | undefined {
+  let dir = resolve(cwd);
+  for (;;) {
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+    if (declaresWorkspace(dir)) return dir;
+  }
+}
+
+function declaresWorkspace(dir: string): boolean {
+  if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return true;
+  const manifest = join(dir, 'package.json');
+  if (!existsSync(manifest)) return false;
+  let workspaces: unknown;
+  try {
+    ({ workspaces } = JSON.parse(readFileSync(manifest, 'utf8')) as { workspaces?: unknown });
+  } catch {
+    return false; // a package.json smelt cannot read is not a claim about anything
+  }
+  return Array.isArray(workspaces) || (typeof workspaces === 'object' && workspaces !== null);
 }
 
 async function editRun(
