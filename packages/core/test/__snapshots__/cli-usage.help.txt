@@ -8,9 +8,11 @@ USAGE
   smelt stats [--json]
   smelt hooks install [--harness <id>]
   smelt hooks remove [--harness <id>]
+  smelt agents lint [dir] [--strict] [--json]
   smelt --reconstruct <result.json>
   smelt --reconstruct < result.json
   smelt init
+  smelt agents split [dir]
 
 Smelted text goes to stdout and the report goes to stderr, so the two can be piped
 apart:  smelt big.log --budget 4000 > small.log
@@ -71,6 +73,36 @@ HOOKS
   deny is the default — rewrite substitutes commands in-flight only where a
   harness supports it, and never silently.
 
+AGENTS
+  smelt agents lint audits the instruction files an agent loads on every
+  request — every AGENTS.md, CLAUDE.md and GEMINI.md in the tree, because a
+  nested one merges with the root. A merge runs up the tree and never across
+  it, so it reports bytes per level, the per-request worst case (the heaviest
+  level plus its ancestors — what one agent actually loads) and the whole-tree
+  surface, plus an imperative count labelled a heuristic. Then eight advisory
+  rules: dead-path and dead-link (path-like tokens and links resolved against
+  the real tree — the check nobody else makes, and the reason to run this in
+  CI), forcing-language, structure-dump, generated-boilerplate, language-rule,
+  mirror-drift and restated-at-level. Every finding carries a stable rule id
+  and a sentence citing the guide it applies
+  (aihero.dev/a-complete-guide-to-agents-md). Findings exit 0; --strict makes
+  any finding exit 1. There is no built-in size limit: set agents.budgetBytes
+  in smelt.config.json and exceeding it exits 1, as every other smelt
+  budget does. The guide's own "~150-200 instructions" figure is printed as a
+  citation and compared to nothing.
+
+  smelt agents split does the MECHANICAL half of the guide's refactor:
+  partition the root file by ## heading into one Markdown file per section
+  under docs/, rewrite the relative links that moved a directory deeper, and
+  leave a link list behind. Same discipline as init and hooks — every file
+  listed, one confirm, an existing file never overwritten without a per-file
+  yes. It does NOT decide which sections are essential: that is a reading of
+  your project, so it needs a model, and smelt has none by law. Instead it
+  prints the guide's own refactor prompt with your real section headings filled
+  in, for you to hand to your own agent. That seam is the point, not an
+  omission. There is no `smelt agents init`: the guide says never to
+  auto-generate an AGENTS.md.
+
 OPTIONS
   --budget <bytes>     Required, unless smelt.config.json sets defaultBudgetBytes.
                        Soft ceiling for the output, in UTF-8 bytes (for map: a hard
@@ -95,12 +127,18 @@ OPTIONS
   --harness <id>       hooks only. Skip harness detection and target one id:
                        claude-code, codex, gemini, grok, hermes, cursor, opencode,
                        cline, kilocode, aider.
+  --strict             agents only. Turn any lint finding into exit 1, for CI. Findings are
+                       advisory by default: the rules are heuristics about somebody
+                       else's house style, and enforcing them uninvited would be
+                       smelt deciding it. A budget you set yourself is different —
+                       exceeding agents.budgetBytes exits 1 with or without --strict.
   --json               Print a JSON envelope on stdout instead of the text:
                        { format, result, elided } for a smelt run — `result` is
                        the SmeltResult verbatim, `elided` carries the bytes, so
                        the envelope can be reconstructed; feed it back with
                        --reconstruct. For map: { format, map }, the RepoMap
-                       structure verbatim.
+                       structure verbatim. For agents lint: { format, report },
+                       the measured levels and every finding with its rule id.
   --reconstruct        Read a --json envelope and print the original text, byte for
                        byte. This is Law 3 you can run from a shell.
   -h, --help           This text.

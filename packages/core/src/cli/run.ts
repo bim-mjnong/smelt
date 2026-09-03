@@ -15,6 +15,7 @@ export type { AnswerStream, CliIo } from './shell.ts';
 export { cliUsage } from './usage.ts';
 export { parseSmeltArgs } from './args.ts';
 export type {
+  AgentsInvocation,
   CliInvocation,
   HooksInvocation,
   InitInvocation,
@@ -23,8 +24,8 @@ export type {
   SmeltInvocation,
   StatsInvocation,
 } from './args.ts';
-export { formatMapReport, formatReport } from './report.ts';
-export type { MapReportInput, ReportInput } from './report.ts';
+export { formatAgentsReport, formatMapReport, formatReport } from './report.ts';
+export type { AgentsReportInput, MapReportInput, ReportInput } from './report.ts';
 export { CLI_JSON_FORMAT, resolveRun } from './subcommands/smelt.ts';
 export type { CliJsonEnvelope, ResolvedRun } from './subcommands/smelt.ts';
 export { CLI_MAP_JSON_FORMAT, resolveMapRun } from './subcommands/map.ts';
@@ -33,6 +34,8 @@ export { resolveStoreRun } from './subcommands/retrieve.ts';
 export type { ResolvedStoreRun } from './subcommands/retrieve.ts';
 export { CLI_STATS_JSON_FORMAT } from './subcommands/stats.ts';
 export type { CliStatsJsonEnvelope } from './subcommands/stats.ts';
+export { CLI_AGENTS_JSON_FORMAT, resolveAgentsRun } from './subcommands/agents.ts';
+export type { CliAgentsJsonEnvelope, ResolvedAgentsRun } from './subcommands/agents.ts';
 
 /**
  * The whole CLI, as a function that returns an exit code instead of calling `exit`.

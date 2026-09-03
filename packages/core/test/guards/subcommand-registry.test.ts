@@ -35,7 +35,7 @@ import type { GuardMutation } from './_mutations.ts';
  * a registry that is its own witness proves nothing.
  */
 
-/** Restated by hand: the six verbs, and a minimal way to invoke each. */
+/** Restated by hand: the seven verbs, and a minimal way to invoke each. */
 const SHIPPED: Record<Verb, readonly string[]> = {
   smelt: [],
   init: ['init'],
@@ -43,6 +43,7 @@ const SHIPPED: Record<Verb, readonly string[]> = {
   retrieve: ['retrieve', 'deadbeefdeadbeef'],
   stats: ['stats'],
   hooks: ['hooks', 'install'],
+  agents: ['agents', 'lint'],
 };
 const SHIPPED_VERBS = Object.keys(SHIPPED).toSorted();
 
@@ -55,6 +56,7 @@ const FLAG_ARGV: Record<VerbFlag, readonly string[]> = {
   ignore: ['--ignore', 'vendor'],
   cache: ['--cache', '.smelt-tags'],
   harness: ['--harness', 'codex'],
+  strict: ['--strict'],
   json: ['--json'],
   reconstruct: ['--reconstruct'],
 };
@@ -67,6 +69,7 @@ const OWNED: Record<Verb, readonly VerbFlag[]> = {
   retrieve: [],
   stats: ['json'],
   hooks: ['harness'],
+  agents: ['strict', 'json'],
 };
 
 /** How a verb is named in its own refusal — the default verb has no word to use. */

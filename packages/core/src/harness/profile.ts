@@ -139,6 +139,8 @@ export interface HarnessInstallContext {
   readonly guard: boolean;
   readonly statsOnStop: boolean;
   readonly mapOnStart: boolean;
+  /** Opt-in `smelt agents lint` at session start — shares SessionStart with the map. */
+  readonly lintOnStart: boolean;
   readonly thresholdBytes: number;
   /** The `--budget` every suggested command and the snippet quote. */
   readonly budgetBytes: number;
@@ -178,7 +180,8 @@ export interface HarnessJsonHooks {
   readonly entry: 'command-list' | 'bare-command';
   /**
    * True for a harness whose schema also carries the session-lifecycle events this
-   * preset offers — `smelt stats` on Stop, `smelt map` on SessionStart. The other
+   * preset offers — `smelt stats` on Stop, `smelt map` and `smelt agents lint` on
+   * SessionStart. The other
    * harnesses wire the guard only, and the wizard's toggles say so.
    */
   readonly lifecycle: boolean;

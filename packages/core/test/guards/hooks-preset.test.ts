@@ -80,8 +80,8 @@ describe('the installer never touches an existing file without a per-file yes', 
   it('asks per file, and anything but a literal yes keeps the existing bytes', async () => {
     writeFileSync(join(dir, 'CLAUDE.md'), sentinel);
     for (const refusal of ['no', '', 'y', 'ok', 'overwrite']) {
-      // Enter through the five steps, confirm the plan, refuse the CLAUDE.md write.
-      const output = await install(['', '', '', '', '', 'yes', refusal]);
+      // Enter through the six steps, confirm the plan, refuse the CLAUDE.md write.
+      const output = await install(['', '', '', '', '', '', 'yes', refusal]);
       expect(output, refusal).toContain('CLAUDE.md exists');
       expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8'), refusal).toBe(sentinel);
       // The files that were new (config, settings) may write; clear them per round.
@@ -92,7 +92,7 @@ describe('the installer never touches an existing file without a per-file yes', 
 
   it('an explicit yes is honoured — the rule is consent, not read-only', async () => {
     writeFileSync(join(dir, 'CLAUDE.md'), sentinel);
-    await install(['', '', '', '', '', 'yes', 'yes']);
+    await install(['', '', '', '', '', '', 'yes', 'yes']);
     const written = readFileSync(join(dir, 'CLAUDE.md'), 'utf8');
     expect(written).toContain(sentinel.trim()); // appended, not replaced
     expect(written).toContain('smelt retrieve');
@@ -100,7 +100,7 @@ describe('the installer never touches an existing file without a per-file yes', 
 
   it('writes nothing at all before the final confirm', async () => {
     writeFileSync(join(dir, 'CLAUDE.md'), sentinel);
-    const output = await install(['', '', '', '', '', 'no']);
+    const output = await install(['', '', '', '', '', '', 'no']);
     expect(output).toContain('Nothing was written');
     expect(existsSync(join(dir, 'smelt.config.json'))).toBe(false);
     expect(existsSync(join(dir, '.claude'))).toBe(false);

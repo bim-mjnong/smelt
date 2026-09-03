@@ -222,8 +222,7 @@ registry, idField)`: the key **is** the id, and the entry's id field agrees, so 
   property that could not be expressed while two modules hand-built the file, and the
   guard reads the key set out of the reader's own refusal, so a field the writer forgets
   goes red rather than becoming a setting the user believed was in force.
-- **Byte-faithful editor**: `src/text/json-edit.ts`. `editTopLevelProperty` replaces,
-  inserts or removes (`value === undefined`) **one top-level property** of a JSON object
+- **Byte-faithful editor**: `src/text/json-edit.ts`. `editTopLevelProperty` replaces, inserts or removes (`value === undefined`) **one top-level property** of a JSON object
   in its source text, and `upsertMarkerBlock` / `stripMarkerBlock` do the same for a
   block between two marker lines. The contract is the whole interface: change what you
   were asked to and leave every other byte alone — indentation, key order, escapes,
@@ -232,3 +231,36 @@ registry, idField)`: the key **is** the id, and the entry's id field agrees, so 
   `src/text/`, not `cli/`, because it is strings in, strings out — no argv, no stdout,
   no CLI import — and the next byte-faithful edit (an instruction file) is its sibling,
   not a CLI detail. `test/guards/json-edit.test.ts` pins the round trip.
+- **Instruction set** (`smelt agents`): the `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` an
+  agent loads on **every request**, as `src/agents/instructions.ts` finds them —
+  through `RepoReader`, so the walk is injectable and its claims are asserted by
+  counting calls. The guide's rule is that a nested file _merges with_ the root — a
+  merge that runs **up** the tree and never across it, which makes two different
+  numbers: the **per-request** cost (`perRequestBytes`, the heaviest level plus its
+  ancestors — what one agent actually loads) and the **whole-tree surface**
+  (`totalBytes`, every level summed — what a team maintains). Siblings never merge, so
+  summing them and calling the result a per-request cost states a cost nobody pays.
+  Each directory contributes one **primary** (its `AGENTS.md`, or whichever file stands
+  alone there) and any number of **mirrors** — the other two names beside it. A mirror
+  is counted for **drift** and never for bytes: one agent loads one of them, so summing
+  all three would triple a cost nobody pays, and a symlinked mirror (the arrangement
+  the guide recommends) cannot drift at all.
+- **Finding** (`smelt agents lint`): what the lint noticed at one place, carrying an
+  `ElisionReason` — the same stable `rule` id plus explanation an elision carries, for
+  the same reason. Eight rules, in `src/agents/lint.ts`; the explanation always ends
+  with an attributed fragment of the guide, so smelt's measurement and the guide's
+  opinion are never mistaken for each other. Findings are **advisory** — exit 0 —
+  until `--strict`.
+- **Imperatives (heuristic)**: the count of instruction-looking lines, reported beside
+  the byte total and never as a precise figure. It is a companion measurement, not a
+  finding: an instruction file is _made_ of imperatives, so counting them as defects
+  would make `--strict` red on every real file. The guide's cited "~150–200
+  instructions" is printed as a citation and compared to nothing — expansion rate's
+  ruling, applied to prose.
+- **Split seam** (`smelt agents split`): the line between the guide's refactor's
+  mechanical half — partition by `##` heading, rewrite the links that moved a directory
+  deeper, write nothing without a per-file `yes` — and its judgment half, _which
+  sections are essential_. The second needs a reading of the project, which needs a
+  model, which Law 1 forbids; so smelt does the first and prints the guide's own
+  refactor prompt, filled in with the file's real headings, for the user's own agent.
+  The unconfigured rerank stage, applied to prose.

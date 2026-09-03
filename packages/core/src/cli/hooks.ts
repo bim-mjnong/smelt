@@ -139,9 +139,15 @@ function shimCommand(profile: HarnessProfile, cwd: string): string {
 
 /**
  * One harness's hook entries: the guard under each matcher its schema spells, plus
- * the two session-lifecycle hooks for the harnesses whose schema carries them. Every
+ * the session-lifecycle hooks for the harnesses whose schema carries them. Every
  * toggle the wizard offers is a key that is present or absent here — an absent key is
  * how a re-run turns a toggle *off*, because the merge deletes what it no longer sees.
+ *
+ * The two `SessionStart` toggles — the opening map and the instruction-file lint —
+ * are **concatenated into one array**, not spread as two objects. Spreading would put
+ * the same computed key twice in one literal, and the second would silently replace
+ * the first: turning the lint on would turn the map off, with no error anywhere. It is
+ * the shape of bug this file exists to refuse, one layer up from the config it writes.
  */
 function jsonHookEvents(
   step: HarnessJsonHooks,
@@ -154,8 +160,18 @@ function jsonHookEvents(
   const map = `${nodeCommand(
     ctx.cwd,
     smeltBinPath(),
-    `map . --budget ${String(ctx.budgetBytes)} --cache .smelt/tags`,
+    `${MAP_ON_START_ARGS} --budget ${String(ctx.budgetBytes)} --cache .smelt/tags`,
   )} 2>/dev/null || true # ${OURS_TOKEN}`;
+  const lint = `${nodeCommand(
+    ctx.cwd,
+    smeltBinPath(),
+    AGENTS_LINT_ARGS,
+  )} 2>/dev/null || true # ${OURS_TOKEN}`;
+
+  const sessionStart = [
+    ...(ctx.mapOnStart ? [commandEntry(SESSION_START_MATCHER, map)] : []),
+    ...(ctx.lintOnStart ? [commandEntry(SESSION_START_MATCHER, lint)] : []),
+  ];
 
   return {
     ...(ctx.guard
@@ -168,11 +184,22 @@ function jsonHookEvents(
     ...(step.lifecycle && ctx.statsOnStop
       ? { [LIFECYCLE_EVENTS.stats]: [commandEntry(undefined, stats)] }
       : {}),
-    ...(step.lifecycle && ctx.mapOnStart
-      ? { [LIFECYCLE_EVENTS.map]: [commandEntry('startup|resume|clear|compact', map)] }
-      : {}),
+    ...(step.lifecycle && sessionStart.length > 0 ? { [LIFECYCLE_EVENTS.map]: sessionStart } : {}),
   };
 }
+
+/** The matcher both `SessionStart` entries fire under — a session opening, however. */
+const SESSION_START_MATCHER = 'startup|resume|clear|compact';
+
+/**
+ * The two `SessionStart` commands' distinguishing arguments, and **the substrings a
+ * re-run recognises each entry by**. Spelled once so the writer and the reader cannot
+ * drift: `presetToggles` tells the two entries apart by the command each one runs, and
+ * a wizard that wrote `agents lint .` while its reader looked for `agents lint` would
+ * read every re-run's lint toggle back as off and quietly delete it.
+ */
+const MAP_ON_START_ARGS = 'map .';
+export const AGENTS_LINT_ARGS = 'agents lint .';
 
 /**
  * True for a hook entry this installer wrote. Matched on the shim script paths and the
@@ -294,6 +321,7 @@ export interface HooksChoices {
   guard: boolean;
   statsOnStop: boolean;
   mapOnStart: boolean;
+  lintOnStart: boolean;
   enforcement: EnforcementMode;
   thresholdBytes: number;
 }
@@ -355,6 +383,7 @@ export function planInstall(cwd: string, choices: HooksChoices): InstallPlan {
     guard: choices.guard,
     statsOnStop: choices.statsOnStop,
     mapOnStart: choices.mapOnStart,
+    lintOnStart: choices.lintOnStart,
     thresholdBytes: choices.thresholdBytes,
     budgetBytes,
   };
@@ -454,17 +483,21 @@ export const DEFAULT_STORE_DIR = '.smelt/store';
  * That store injection is this verb's **policy**, which is why it lives here; the
  * bytes are written by `renderConfig` in `config.ts`, the one writer, so a key added
  * to the schema reaches this file and `init`'s together or not at all.
+ *
+ * "Carried verbatim" is spelled as a spread rather than as a list of the fields to
+ * copy, and that is load-bearing: the list version silently dropped every key nobody
+ * remembered to add to it — `agents` was added to the schema and this function kept
+ * writing configs without it, which is a setting the user believed was in force,
+ * caught by `test/guards/config-writer.test.ts`. Only the two fields this verb
+ * actually decides are named.
  */
 export function renderConfigWithHooks(
   existing: SmeltConfig | undefined,
   hooks: SmeltConfigHooks,
 ): string {
   return renderConfig({
+    ...existing,
     smeltConfig: CONFIG_VERSION,
-    ...(existing?.defaultBudgetBytes === undefined
-      ? {}
-      : { defaultBudgetBytes: existing.defaultBudgetBytes }),
-    ...(existing?.strategy === undefined ? {} : { strategy: existing.strategy }),
     store: existing?.store ?? { kind: 'directory', path: DEFAULT_STORE_DIR },
     hooks,
   });
@@ -660,6 +693,22 @@ async function installFlow(
           choices.mapOnStart = on;
         },
       ),
+    async (io_, ask_) =>
+      stepToggle(
+        io_,
+        ask_,
+        'instruction-file lint on SessionStart',
+        `\`smelt agents lint .\` runs at session start and reports on the AGENTS.md, ` +
+          `CLAUDE.md and GEMINI.md this session is about to load on every request — ` +
+          `bytes per level, and any path or link in them that no longer resolves. ` +
+          `Advisory: it never blocks, and it exits 0 unless you set ` +
+          `agents.budgetBytes in ${CONFIG_FILE_NAME}. Wired for verified-tier ` +
+          `harnesses (Claude Code, Codex).`,
+        choices.lintOnStart,
+        (on) => {
+          choices.lintOnStart = on;
+        },
+      ),
     async (io_, ask_) => stepEnforcement(io_, ask_, choices),
     async (io_, ask_) => stepThreshold(io_, ask_, choices),
   ];
@@ -812,13 +861,21 @@ async function stepThreshold(
  * (gemini, grok, cursor, hermes, opencode, cline) persist no stats/map entries, so
  * after a re-run scoped to them those toggles read back as off; the defaults below
  * apply only when nothing of smelt's is installed at all.
+ *
+ * The two `SessionStart` toggles share one event, so they are told apart by **the
+ * command each entry runs**, not by the key it sits under. Reading `SessionStart` as
+ * one boolean would make a re-run with the map on and the lint off write both back —
+ * or neither — which is a toggle the user believed they had set.
  */
-function presetToggles(cwd: string): Pick<HooksChoices, 'guard' | 'statsOnStop' | 'mapOnStart'> {
-  const defaults = { guard: true, statsOnStop: true, mapOnStart: false };
+function presetToggles(
+  cwd: string,
+): Pick<HooksChoices, 'guard' | 'statsOnStop' | 'mapOnStart' | 'lintOnStart'> {
+  const defaults = { guard: true, statsOnStop: true, mapOnStart: false, lintOnStart: false };
   let anyOurs = false;
   let guard = false;
   let statsOnStop = false;
   let mapOnStart = false;
+  let lintOnStart = false;
 
   for (const name of JSON_HOOK_FILES) {
     const text = readIfExists(join(cwd, name));
@@ -839,14 +896,20 @@ function presetToggles(cwd: string): Pick<HooksChoices, 'guard' | 'statsOnStop' 
     }
     if (hooks === undefined) continue;
     const installed = hooks;
-    const hasOurs = (event: string): boolean =>
-      Array.isArray(installed[event]) &&
-      (installed[event] as unknown[]).some((entry) => isOursEntry(entry));
+    const oursUnder = (event: string): readonly unknown[] =>
+      Array.isArray(installed[event])
+        ? (installed[event] as unknown[]).filter((entry) => isOursEntry(entry))
+        : [];
+    const hasOurs = (event: string): boolean => oursUnder(event).length > 0;
+    /** One of ours under `event` whose command carries `needle`. */
+    const hasOursRunning = (event: string, needle: string): boolean =>
+      oursUnder(event).some((entry) => (JSON.stringify(entry) ?? '').includes(needle));
     if (!MANAGED_EVENTS.some((event) => hasOurs(event))) continue;
     anyOurs = true;
     guard ||= GUARD_EVENTS.some((event) => hasOurs(event));
-    statsOnStop ||= hasOurs('Stop');
-    mapOnStart ||= hasOurs('SessionStart');
+    statsOnStop ||= hasOurs(LIFECYCLE_EVENTS.stats);
+    mapOnStart ||= hasOursRunning(LIFECYCLE_EVENTS.map, MAP_ON_START_ARGS);
+    lintOnStart ||= hasOursRunning(LIFECYCLE_EVENTS.lint, AGENTS_LINT_ARGS);
   }
 
   for (const name of GUARD_ONLY_FILES) {
@@ -857,7 +920,7 @@ function presetToggles(cwd: string): Pick<HooksChoices, 'guard' | 'statsOnStop' 
     }
   }
 
-  return anyOurs ? { guard, statsOnStop, mapOnStart } : defaults;
+  return anyOurs ? { guard, statsOnStop, mapOnStart, lintOnStart } : defaults;
 }
 
 const fileLabel = (file: PlannedFile): string => {

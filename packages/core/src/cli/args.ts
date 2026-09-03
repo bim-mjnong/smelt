@@ -9,6 +9,7 @@ import { refuseForeignFlags, subcommandFor } from './subcommands/registry.ts';
 export { CLI_NAME } from './shell.ts';
 export { cliUsage } from './usage.ts';
 export type { CliInvocation } from './subcommands/registry.ts';
+export type { AgentsInvocation } from './subcommands/agents.ts';
 export type { HooksInvocation } from './subcommands/hooks.ts';
 export type { InitInvocation } from './subcommands/init.ts';
 export type { MapInvocation } from './subcommands/map.ts';

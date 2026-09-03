@@ -51,8 +51,8 @@ async function hooks(
   return { code, output };
 }
 
-/** guard on, stats on, map off, deny, 8192 — Enter through every step, then confirm. */
-const DEFAULT_ANSWERS = ['', '', '', '', '', 'yes'];
+/** guard on, stats on, map off, lint off, deny, 8192 — Enter every step, then confirm. */
+const DEFAULT_ANSWERS = ['', '', '', '', '', '', 'yes'];
 
 function readJson(name: string): Record<string, unknown> {
   return JSON.parse(readFileSync(join(dir, name), 'utf8')) as Record<string, unknown>;
@@ -92,14 +92,14 @@ describe('a fresh claude-code install', () => {
   });
 
   it('map-on-start is opt-in: switching it on writes the SessionStart hook with the matcher', async () => {
-    await hooks('install', 'claude-code', ['', '', 'on', '', '', 'yes']);
+    await hooks('install', 'claude-code', ['', '', 'on', '', '', '', 'yes']);
     const events = readJson('.claude/settings.json')['hooks'] as Record<string, unknown>;
     expect(JSON.stringify(events['SessionStart'])).toContain('startup|resume|clear|compact');
     expect(JSON.stringify(events['SessionStart'])).toContain('map . --budget');
   });
 
   it('declining the final confirm writes nothing at all', async () => {
-    const { output } = await hooks('install', 'claude-code', ['', '', '', '', '', 'no']);
+    const { output } = await hooks('install', 'claude-code', ['', '', '', '', '', '', 'no']);
     expect(output).toContain('Nothing was written');
     expect(existsSync(join(dir, 'smelt.config.json'))).toBe(false);
     expect(existsSync(join(dir, '.claude'))).toBe(false);
@@ -116,7 +116,7 @@ describe('a fresh claude-code install', () => {
       join(dir, 'smelt.config.json'),
       `${JSON.stringify({ smeltConfig: 1, defaultBudgetBytes: 4000 })}\n`,
     );
-    await hooks('install', 'claude-code', ['', '', '', '', '', 'yes', 'yes']);
+    await hooks('install', 'claude-code', ['', '', '', '', '', '', 'yes', 'yes']);
     const config = parseConfig(
       readFileSync(join(dir, 'smelt.config.json'), 'utf8'),
       join(dir, 'smelt.config.json'),
@@ -131,7 +131,7 @@ describe('a fresh claude-code install', () => {
       join(dir, 'smelt.config.json'),
       `${JSON.stringify({ smeltConfig: 1, store: { kind: 'memory' } })}\n`,
     );
-    await hooks('install', 'claude-code', ['', '', '', '', '', 'yes', 'yes']);
+    await hooks('install', 'claude-code', ['', '', '', '', '', '', 'yes', 'yes']);
     const config = parseConfig(readFileSync(join(dir, 'smelt.config.json'), 'utf8'), 'x');
     expect(config.store).toEqual({ kind: 'memory' });
   });
@@ -150,7 +150,7 @@ describe("merging never clobbers other people's config", () => {
     writeFileSync(join(dir, '.claude/settings.json'), `${JSON.stringify(foreign, null, 2)}\n`);
 
     // settings.json exists → the per-file consent question appears; answer yes.
-    await hooks('install', 'claude-code', ['', '', '', '', '', 'yes', 'yes']);
+    await hooks('install', 'claude-code', ['', '', '', '', '', '', 'yes', 'yes']);
 
     const settings = readJson('.claude/settings.json');
     expect(settings['permissions']).toEqual({ allow: ['Bash(ls:*)'] });
@@ -178,7 +178,7 @@ describe("merging never clobbers other people's config", () => {
       '}\n';
     writeFileSync(join(dir, '.claude/settings.json'), foreign);
 
-    await hooks('install', 'claude-code', ['', '', '', '', '', 'yes', 'yes']);
+    await hooks('install', 'claude-code', ['', '', '', '', '', '', 'yes', 'yes']);
 
     const written = readFileSync(join(dir, '.claude/settings.json'), 'utf8');
     // Every foreign byte rides through verbatim — indentation, escape, number form.
@@ -203,7 +203,7 @@ describe("merging never clobbers other people's config", () => {
       join(dir, '.claude/settings.json'),
       `${JSON.stringify({ hooks: { PreToolUse: [foreignEntry] } }, null, 2)}\n`,
     );
-    await hooks('install', 'claude-code', ['', '', '', '', '', 'yes', 'yes']);
+    await hooks('install', 'claude-code', ['', '', '', '', '', '', 'yes', 'yes']);
     await hooks('remove', 'claude-code', ['yes', 'yes', 'yes', 'yes']);
     const settings = readJson('.claude/settings.json');
     // The consent shown was "remove smelt entries, keep the rest" — a generic
@@ -221,7 +221,7 @@ describe("merging never clobbers other people's config", () => {
 
   it('appends the snippet to an existing CLAUDE.md (with consent) instead of replacing it', async () => {
     writeFileSync(join(dir, 'CLAUDE.md'), '# My project\n\nHand-written rules.\n');
-    await hooks('install', 'claude-code', ['', '', '', '', '', 'yes', 'yes']);
+    await hooks('install', 'claude-code', ['', '', '', '', '', '', 'yes', 'yes']);
     const claudeMd = readFileSync(join(dir, 'CLAUDE.md'), 'utf8');
     expect(claudeMd).toContain('Hand-written rules.');
     expect(claudeMd).toContain(SNIPPET_START_MD);
@@ -232,13 +232,24 @@ describe('a re-run edits toggles instead of duplicating entries', () => {
   it('turning map on and stats off on a second run updates the same file, no duplicates', async () => {
     await hooks('install', 'claude-code', DEFAULT_ANSWERS);
     // Second run: keep guard, stats off, map on. Existing files → consent per file.
-    await hooks('install', 'claude-code', ['', 'off', 'on', '', '', 'yes', 'yes', 'yes', 'yes']);
+    await hooks('install', 'claude-code', [
+      '',
+      'off',
+      'on',
+      '',
+      '',
+      '',
+      'yes',
+      'yes',
+      'yes',
+      'yes',
+    ]);
     const events = readJson('.claude/settings.json')['hooks'] as Record<string, unknown[]>;
     expect(Object.keys(events).toSorted()).toEqual(['PreToolUse', 'SessionStart']);
     expect(events['PreToolUse']).toHaveLength(2); // replaced, not appended
 
     // Third run presets from what is installed: Enter-through keeps map on.
-    await hooks('install', 'claude-code', ['', '', '', '', '', 'yes', 'yes', 'yes', 'yes']);
+    await hooks('install', 'claude-code', ['', '', '', '', '', '', 'yes', 'yes', 'yes', 'yes']);
     const again = readJson('.claude/settings.json')['hooks'] as Record<string, unknown[]>;
     expect(Object.keys(again).toSorted()).toEqual(['PreToolUse', 'SessionStart']);
   });
@@ -252,7 +263,7 @@ describe('smelt hooks remove', () => {
       `${JSON.stringify({ permissions: { allow: ['Bash(ls:*)'] } }, null, 2)}\n`,
     );
     writeFileSync(join(dir, 'CLAUDE.md'), '# Mine\n');
-    await hooks('install', 'claude-code', ['', '', '', '', '', 'yes', 'yes', 'yes']);
+    await hooks('install', 'claude-code', ['', '', '', '', '', '', 'yes', 'yes', 'yes']);
 
     const { output } = await hooks('remove', 'claude-code', ['yes', 'yes', 'yes']);
     expect(output).toContain('left untouched'); // the config stays; it says so
@@ -361,14 +372,14 @@ describe('harness detection', () => {
   it('with no --harness, detected harnesses (project or home config dirs) are preselected', async () => {
     mkdirSync(join(dir, '.claude'), { recursive: true });
     mkdirSync(join(home, '.codex'), { recursive: true });
-    const { output } = await hooks('install', undefined, ['', '', '', '', '', '', 'yes']);
+    const { output } = await hooks('install', undefined, ['', '', '', '', '', '', '', 'yes']);
     expect(output).toContain('* claude-code');
     expect(output).toContain('* codex');
     expect(output).toContain('Enter = claude-code,codex');
   });
 
   it('with nothing detected and nothing chosen, it does nothing and says so', async () => {
-    const { output } = await hooks('install', undefined, ['', '', '', '', '', '']);
+    const { output } = await hooks('install', undefined, ['', '', '', '', '', '', '']);
     expect(output).toContain('No harness selected');
     expect(existsSync(join(dir, 'smelt.config.json'))).toBe(false);
   });
@@ -380,7 +391,7 @@ describe('smelt init keeps the hooks block', () => {
       join(dir, 'smelt.config.json'),
       `${JSON.stringify({ smeltConfig: 1, defaultBudgetBytes: 4000 })}\n`,
     );
-    await hooks('install', 'claude-code', ['', '', '', '', '', 'yes', 'yes']);
+    await hooks('install', 'claude-code', ['', '', '', '', '', '', 'yes', 'yes']);
     let output = '';
     await runInit({
       input: Readable.from(['done\nyes\nyes\n']),
