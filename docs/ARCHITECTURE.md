@@ -643,9 +643,62 @@ definition site and the measured reference counts that ranked it. The tags cache
 plain JSON keyed by content hash — Aider persists through SQLite, but this repo ships
 zero new runtime dependencies — and it lives **only** in a directory the caller
 explicitly hands in; a corrupt entry is deleted and reported as a warning in the result,
-never trusted. Guarded by `test/guards/repo-map.test.ts`, with five mutations proving
-the budget, the tie-break, cache invalidation, the corrupt-entry discard and the
-symlink refusal can each go red.
+never trusted. Guarded by `test/guards/repo-map.test.ts`, with ten mutations proving
+the budget, the tie-break, cache invalidation, the corrupt-entry discard, the symlink
+refusal, the default ignore list, the error wrap, the cache bound and the two statements
+of the resolution limit can each go red.
+
+**What the ranking resolves, and what it does not.** A reference binds to a definition
+**by bare identifier**. The tags carry names, not resolved symbols, so every definition
+of a name receives every reference to that name wherever either lives: two files that
+both define `run` share one another's inbound references and rank alike, two overloads
+of a name each count the whole traffic to it, and a common identifier (`get`, `main`)
+collects references that in truth belong to something else. This is Aider's design,
+inherited on purpose — resolving properly means per-language import and scope
+resolution, which is a type checker per language, and the map is a _ranking heuristic_
+for what to read first, not a symbol resolver. What matters under Law 4 is that nothing
+claims otherwise: `refsIn` and `refsInFiles` are honestly the references to, and the
+files mentioning, the **name**, and each receipt says so. Anything that needs true
+binding — rename, call graph, dead-code detection — needs a different tool. The
+statement lives in the doc comments on `repomap/map.ts` and `repomap/rank.ts`, pinned
+by mutation `repomap-ranking-limit-undocumented`.
+
+**The default ignore list is `.git`, `node_modules`, `dist`, `build`, `out`,
+`coverage`.** The first two are object storage and other people's code; the rest are
+build outputs, and they are the sharper case. On a built TypeScript repo `dist/x.js`
+and `dist/x.d.ts` sit beside `src/x.ts`, so a default list without them ranked and
+rendered every symbol three times over, the copies referencing each other — the default
+map of the commonest repo shape in this ecosystem was two-thirds its own compiler
+output. It is still deliberately tiny and deliberately not a `.gitignore` parser, and a
+caller-supplied list still **replaces** it wholesale rather than adding to it: a merge
+leaves no way to say "map my `dist`, I meant it", and a default that cannot be turned
+off is not a default. `--ignore`'s help text reads the list off `DEFAULT_REPO_IGNORE`
+rather than restating it.
+
+**Every failure is a `SmeltError`.** The consumer contract makes exactly one promise
+about errors, and the repo map is the module most able to break it, because it walks a
+whole tree the caller named: `buildRepoMap({ root: '/nonexistent' })` threw the raw
+`ENOENT` from `readdirSync`, straight past a consumer catching `SmeltError` exactly as
+documented. Every `node:fs` call under `src/repomap/` — the walk's `list`/`stat`/`read`,
+and the tags cache's own reads and writes — now goes through `fsCall` in
+`repomap/io.ts`, which raises `RepoMapIoError` naming the path and keeping the original
+as `cause`. It adds no behaviour: the call fails at the same moment for the same reason,
+inside the contract instead of beside it. A `SmeltError` from a caller's own
+`RepoReader` passes through untouched.
+
+**The tags cache is bounded, and the bound is a sweep.** Because the key is a content
+hash, an edit does not replace an entry — it mints a new one and orphans the old, which
+is invisible and permanent, so a long session accumulated the pre-edit version of every
+file it ever mapped. Each build now deletes every entry it did not use, leaving exactly
+the tags of the tree as it stands: an entry survives a build only if that build used it,
+so the cache is at most one entry per mappable file. The safety rule any policy here has
+to meet is that **a miss can only make a map slower, never wrong** — a missing entry is
+re-extracted from the file's own bytes and a present one is only ever served for the
+content that hashed to its key — so sweeping too much costs a re-parse and sweeping too
+little costs disk, and neither can change a symbol in the map. The cost falls on a
+caller pointing one cache directory at several trees, which is why the sweep's count
+rides back in `RepoMap.cache.pruned` and is printed in `smelt map`'s report rather than
+being hidden: one cache directory per tree is the shape this is tuned for.
 
 **The seam: `RepoReader`.** The map reads its tree through one small, optional,
 read-only interface — `list(dir)`, `read(path)`, `stat(path)` in
@@ -700,8 +753,9 @@ The properties it holds:
   ranked. Two runs are byte-identical (asserted, with and without a warm cache), and
   each entry's `reason` states the definition site, references in (and from how many
   files), and its file's references out.
-- Cached on disk, invalidated by content hash, no network. The key hashes format
-  version + language + file content, so an edit is a miss by construction; the module is
+- Cached on disk, invalidated by content hash, bounded by a sweep, no network. The key
+  hashes format version + language + file content, so an edit is a miss by construction
+  and its superseded entry is deleted by the build that noticed; the module is
   reachable from the entrypoint and classified by the zero-network guard.
 - Credits Aider's repo-map explicitly, in the code and in this document; the README's
   prior-art section carries the same credit.
@@ -875,7 +929,10 @@ same stdout/stderr split.
 4. Every `AppliedElision` has a non-empty `reason.rule` and `reason.explanation`.
 5. `reconstruct(result)` returns the original text byte for byte, as long as the store
    still holds the bytes.
-6. Every thrown error is an `instanceof SmeltError`.
+6. Every thrown error is an `instanceof SmeltError`. That covers the whole exported
+   surface, `buildRepoMap()` included: a filesystem failure under the repo map arrives
+   as `RepoMapIoError` naming the path, never as a raw Node `ENOENT`, because a promise
+   with one undocumented exception is no promise at all.
 7. **The marker format is stable from 0.1 and treated as 1.0.** `<<smelt/v1: … >>` will
    not change shape. A future format arrives as `smelt/v2`, identifiable in band, never
    as a quiet substitution — see Decision 3, and the guard that enforces it.
