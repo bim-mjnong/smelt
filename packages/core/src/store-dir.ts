@@ -78,17 +78,25 @@ export interface DirectoryElisionStoreOptions {
  * - **Writes are crash-safe.** A blob is written to `tmp/`, `fsync`ed, then `link(2)`ed
  *   into `blobs/` — an atomic, no-clobber publish. A torn write dies in `tmp/`, where
  *   nothing looks; a name in `blobs/` always refers to a fully written file.
- * - **`fsync` is only as strong as the platform makes it.** On macOS, `fsync(2)` hands
- *   the write to the drive but does not force the drive to flush its own cache; only
- *   `fcntl(F_FULLFSYNC)` does, and Node's `fsyncSync` does not issue it. The directory
- *   flush after a publish is the same call, so it is `F_FULLFSYNC` there no more than
- *   the blob's own flush is. A **power loss** on such a platform (or on any drive that
- *   lies about its write cache) can therefore lose a blob or a journal line this code
- *   has already `fsync`ed and reported as written. A **process** crash cannot: the
- *   bytes are in the page cache and the publish is still atomic. Nothing is ever handed
- *   back unverified either way, so the worst a lost blob can produce is
+ * - **`fsync` is only as strong as the platform makes it.** Every flush here is Node's
+ *   `fsyncSync`, which is libuv's `uv_fs_fsync`, and what that reaches the hardware with
+ *   differs by platform. On Apple it is strong: libuv knows macOS's own `fsync(2)` only
+ *   hands the write to the drive, so its `__APPLE__` branch issues
+ *   `fcntl(fd, F_FULLFSYNC)` — a real drive-cache flush — before falling back to
+ *   `F_BARRIERFSYNC` and then plain `fsync(2)`. Measured here (Node 26, libuv 1.52,
+ *   internal APFS SSD): an 11-byte append costs 0.01 ms unflushed, 5.5 ms through
+ *   `fsyncSync`, and 0.10 ms through a raw `fsync(2)` against 4.8 ms through a raw
+ *   `F_FULLFSYNC` — the cost says which syscall is being made. Everywhere else libuv
+ *   calls plain `fsync(2)`, which is as durable as the drive's honesty about its own
+ *   write cache. So a **power loss** can lose a blob or a journal line this code has
+ *   already `fsync`ed and reported as written on any non-Apple platform whose drive
+ *   lies, and on Apple only where `F_FULLFSYNC` itself fails and libuv degrades
+ *   silently — some non-APFS and network mounts. A **process** crash cannot lose one
+ *   anywhere: the bytes are in the page cache and the publish is still atomic. Nothing
+ *   is ever handed back unverified either way, so the worst a lost blob can produce is
  *   {@link UnknownHashError} — never wrong bytes presented as right ones. "Crash-safe"
- *   is the claim, deliberately not "power-loss-proof".
+ *   is the claim, deliberately not "power-loss-proof": the durability is real, it is
+ *   just not unconditional.
  * - **Reads verify.** `retrieve()`, `peek()` and `has()` re-hash the bytes and refuse a
  *   mismatch with {@link StoreCorruptionError} — a damaged blob is never handed back as
  *   a retrieval nor reported as present, and "we hold damaged bytes" is distinct from
@@ -417,8 +425,9 @@ export class DirectoryElisionStore implements ElisionStore {
  * own schedule. Only that refusal is swallowed: a real I/O failure (`EIO`) propagates,
  * because "the disk could not flush" must never be reported as a successful put.
  *
- * Where it does work it is still a plain `fsync`, not `F_FULLFSYNC` — see the
- * durability note on {@link DirectoryElisionStore} for what that costs on macOS.
+ * Where it does work it is the same `fsyncSync` the blob's own flush uses, and so is
+ * exactly as strong as that — see the durability note on {@link DirectoryElisionStore}
+ * for what that means per platform.
  */
 function fsyncDirBestEffort(path: string): void {
   let fd: number;

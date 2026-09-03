@@ -238,6 +238,22 @@ describe('a fresh run inside a monorepo package', () => {
     expect(existsSync(join(pkg, CONFIG_FILE_NAME))).toBe(false);
   });
 
+  it('reverses into the directory question, keeping the answers given since (Rule 3)', async () => {
+    // The directory is the one answer you cannot change afterwards, so it must be the
+    // one you can get back to. `back` off the front of the steps re-asks it; the budget
+    // already answered is still the default, so reversing is not restarting.
+    const { code, output } = await wizard(
+      ['2', '4000', 'back', 'back', '1', '', ...MINIMAL_ANSWERS.slice(1)],
+      pkg,
+    );
+    expect(code).toBe(EXIT.ok);
+    expect(output).not.toContain('first step'); // there IS something before it
+    expect(output.split(`where should ${CONFIG_FILE_NAME} go?`)).toHaveLength(3); // asked twice
+    expect(output).toContain(`About to write, into ${root}`);
+    expect(existsSync(join(pkg, CONFIG_FILE_NAME))).toBe(false);
+    expect(readConfig(root).defaultBudgetBytes).toBe(4000);
+  });
+
   it('defaults to the root, and re-asks an answer it does not understand', async () => {
     const { code, output } = await wizard(['3', '', ...MINIMAL_ANSWERS], pkg);
     expect(code).toBe(EXIT.ok);

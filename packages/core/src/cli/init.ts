@@ -32,7 +32,9 @@ import type { SmeltConfig, SmeltConfigHooks, SmeltConfigStore } from './config.t
  *     a global "overwrite all", not a default — one question per existing file, and
  *     anything but a literal `yes` skips it. Guarded by
  *     `test/guards/init-wizard.test.ts`, with a mutation proving the guard goes red.
- *  3. **Every step accepts `back`.** A wizard you cannot reverse inside is a form.
+ *  3. **Every step accepts `back`.** A wizard you cannot reverse inside is a form. That
+ *     includes the directory question a fresh run asks inside a workspace: `back` from
+ *     the first step returns to it, keeping the answers given since.
  *  4. **Everything lands in one named directory.** A fresh run inside a workspace asks
  *     which end of config discovery to write to (see `chooseDirectory`) and an edit run
  *     writes beside the config it found; either way the directory is printed in the
@@ -153,14 +155,6 @@ const STEPS: readonly Step[] = [
 ];
 
 async function freshRun(io: InitIo, ask: Asker): Promise<number> {
-  const dir = await chooseDirectory(io, ask);
-  io.output(
-    `${CLI_NAME} init — sets up ${CONFIG_FILE_NAME} in ${dir}.\n` +
-      `A run reads the nearest ${CONFIG_FILE_NAME}, walking UP from the directory it ` +
-      `is run in, so this one is found from ${dir} and everything below it.\n` +
-      `Answer \`back\` at any step to return to the previous one. ` +
-      `Nothing is written until you confirm at the end.\n\n`,
-  );
   const choices: WizardChoices = {
     budgetBytes: undefined,
     store: { kind: 'memory' },
@@ -170,19 +164,52 @@ async function freshRun(io: InitIo, ask: Asker): Promise<number> {
     hooks: undefined,
   };
 
+  // Outside a workspace there is no directory question, so the first step really is the
+  // first thing asked. Inside one there is, and `back` from the first step returns to it
+  // — with every answer so far carried along, because reversing is not restarting.
+  const root = findWorkspaceRoot(io.cwd);
+  for (;;) {
+    const dir = root === undefined ? io.cwd : await chooseDirectory(io, ask, root);
+    io.output(
+      `${CLI_NAME} init — sets up ${CONFIG_FILE_NAME} in ${dir}.\n` +
+        `A run reads the nearest ${CONFIG_FILE_NAME}, walking UP from the directory it ` +
+        `is run in, so this one is found from ${dir} and everything below it.\n` +
+        `Answer \`back\` at any step to return to the previous one. ` +
+        `Nothing is written until you confirm at the end.\n\n`,
+    );
+    if ((await runSteps(io, ask, choices, dir, root !== undefined)) === 'done') return 0;
+  }
+}
+
+/**
+ * The step loop for one chosen directory: every step, then the confirm, with `back`
+ * reversing all the way through both. Returns `'directory'` when `back` walks off the
+ * front and there is a directory question to walk back into — `freshRun` re-asks it and
+ * calls this again with the same {@link WizardChoices}.
+ */
+async function runSteps(
+  io: InitIo,
+  ask: Asker,
+  choices: WizardChoices,
+  dir: string,
+  canReopenDirectory: boolean,
+): Promise<'done' | 'directory'> {
   let index = 0;
   for (;;) {
     while (index < STEPS.length) {
       const outcome = await STEPS[index]!.run(io, ask, choices, dir);
-      if (outcome === 'back') {
-        if (index === 0) io.output(`This is the first step — there is nothing before it.\n`);
-        else index -= 1;
-      } else {
+      if (outcome !== 'back') {
         index += 1;
+      } else if (index > 0) {
+        index -= 1;
+      } else if (canReopenDirectory) {
+        return 'directory';
+      } else {
+        io.output(`This is the first step — there is nothing before it.\n`);
       }
     }
     const verdict = await confirmAndWrite(io, ask, choices, dir);
-    if (verdict !== 'back') return 0;
+    if (verdict !== 'back') return 'done';
     index = STEPS.length - 1;
   }
 }
@@ -204,11 +231,13 @@ async function freshRun(io: InitIo, ask: Asker): Promise<number> {
  * there is nothing to choose and nothing is asked; the discovery rule is stated either
  * way, because "where will runs look for this?" is not a question a user should have to
  * infer from a path.
+ *
+ * Rule 3 holds here too: this is genuinely the first question, so `back` at it has
+ * nowhere to go — but `back` from the first *step* comes back to it (see `freshRun`),
+ * carrying the answers already given. The most consequential question in the wizard is
+ * not the one you cannot reverse into.
  */
-async function chooseDirectory(io: InitIo, ask: Asker): Promise<string> {
-  const root = findWorkspaceRoot(io.cwd);
-  if (root === undefined) return io.cwd;
-
+async function chooseDirectory(io: InitIo, ask: Asker, root: string): Promise<string> {
   io.output(
     `${CLI_NAME} init — ${io.cwd} is inside a workspace rooted at ${root}.\n` +
       `A run reads the nearest ${CONFIG_FILE_NAME}, walking UP from the directory it is ` +
