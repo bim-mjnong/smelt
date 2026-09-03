@@ -27,6 +27,12 @@ import {
 } from '../harness/snippet.ts';
 import { DEFAULT_SUGGESTION_BUDGET_BYTES, DEFAULT_THRESHOLD_BYTES } from '../hooks/guard-core.ts';
 import type { EnforcementMode } from '../hooks/guard-core.ts';
+import {
+  editTopLevelProperty,
+  jsonStyle,
+  stripMarkerBlock,
+  upsertMarkerBlock,
+} from '../text/json-edit.ts';
 
 import { answerReader, CLI_NAME } from './shell.ts';
 import type { AnswerStream } from './shell.ts';
@@ -50,9 +56,11 @@ import type { SmeltConfig, SmeltConfigHooks } from './config.ts';
  *
  * Every per-harness fact lives in that harness's {@link HarnessProfile}
  * (`src/harness/<id>.ts`), including what to write and how to take it back out. This
- * module owns only what is the *same* for every harness: the byte-faithful JSON merge,
- * the marker-block upsert, the wizard, and the two plans below — folds over
- * `profile.install`, with no case list of its own.
+ * module owns only what is the *same* for every harness: the hooks merge (which entries
+ * are ours, what a re-run replaces), the wizard, and the two plans below — folds over
+ * `profile.install`, with no case list of its own. The byte-faithful editing itself —
+ * one top-level JSON property, one delimited text block — is `src/text/json-edit.ts`,
+ * which knows nothing about harnesses.
  *
  * Harnesses come in three honesty tiers (docs/research/2026-09-02-harness-capability-matrix.md):
  *
@@ -232,210 +240,21 @@ export function mergeJsonHooks(
   const needsVersion = shape.version !== undefined && root['version'] === undefined;
   if (!hooksChanged && !needsVersion) return existingText;
 
-  const newline = existingText.includes('\r\n') ? '\r\n' : '\n';
-  const indent = /\n([ \t]+)"/.exec(existingText)?.[1] ?? '  ';
-  let text = existingText;
+  // The style is read once, off the original: a second edit must match the first.
+  const style = jsonStyle(existingText);
+  let text: string | undefined = existingText;
 
   if (hooksChanged) {
-    const scan = scanJsonTopLevel(text);
+    text = editTopLevelProperty(text, 'hooks', mergedHooks, style);
     /* v8 ignore next -- unreachable: JSON.parse accepted the same text above */
-    if (scan === undefined) return undefined;
-    const property = scan.properties.find((candidate) => candidate.key === 'hooks');
-    if (mergedHooks === undefined) {
-      if (property !== undefined) text = removeJsonProperty(text, scan, property);
-    } else {
-      const rendered = renderJsonValue(mergedHooks, indent, newline);
-      text =
-        property !== undefined
-          ? `${text.slice(0, property.valueStart)}${rendered}${text.slice(property.valueEnd)}`
-          : insertJsonProperty(text, scan, 'hooks', rendered, indent, newline);
-    }
+    if (text === undefined) return undefined;
   }
   if (needsVersion) {
-    const scan = scanJsonTopLevel(text);
+    text = editTopLevelProperty(text, 'version', shape.version, style);
     /* v8 ignore next -- unreachable: every splice above keeps the text valid JSON */
-    if (scan === undefined) return undefined;
-    text = insertJsonProperty(
-      text,
-      scan,
-      'version',
-      JSON.stringify(shape.version),
-      indent,
-      newline,
-    );
+    if (text === undefined) return undefined;
   }
   return text;
-}
-
-/** One top-level property of a JSON object, located by offsets in its source text. */
-interface JsonTopLevelProperty {
-  readonly key: string;
-  /** Offset of the key's opening quote. */
-  readonly keyStart: number;
-  /** Offset of the value's first byte. */
-  readonly valueStart: number;
-  /** Offset one past the value's last byte. */
-  readonly valueEnd: number;
-}
-
-interface JsonTopLevelScan {
-  /** Offset of the root object's `{`. */
-  readonly open: number;
-  /** Offset of the root object's `}`. */
-  readonly close: number;
-  readonly properties: readonly JsonTopLevelProperty[];
-}
-
-/**
- * Locate the top-level properties of a JSON object *in its source text*, so one
- * property can be replaced, inserted or removed while every other byte of the file
- * rides through verbatim. `undefined` when the text is not an object — callers have
- * already `JSON.parse`d it, so that is belt and braces, not a validator.
- */
-function scanJsonTopLevel(text: string): JsonTopLevelScan | undefined {
-  let i = skipJsonWhitespace(text, 0);
-  if (text[i] !== '{') return undefined;
-  const open = i;
-  i = skipJsonWhitespace(text, i + 1);
-  const properties: JsonTopLevelProperty[] = [];
-  if (text[i] === '}') return { open, close: i, properties };
-  for (;;) {
-    if (text[i] !== '"') return undefined;
-    const keyStart = i;
-    const keyEnd = skipJsonString(text, i);
-    if (keyEnd === undefined) return undefined;
-    const key = JSON.parse(text.slice(keyStart, keyEnd)) as string;
-    i = skipJsonWhitespace(text, keyEnd);
-    if (text[i] !== ':') return undefined;
-    const valueStart = skipJsonWhitespace(text, i + 1);
-    const valueEnd = skipJsonValue(text, valueStart);
-    if (valueEnd === undefined) return undefined;
-    properties.push({ key, keyStart, valueStart, valueEnd });
-    i = skipJsonWhitespace(text, valueEnd);
-    if (text[i] === ',') {
-      i = skipJsonWhitespace(text, i + 1);
-      continue;
-    }
-    if (text[i] === '}') return { open, close: i, properties };
-    return undefined;
-  }
-}
-
-function skipJsonWhitespace(text: string, from: number): number {
-  let i = from;
-  while (i < text.length && ' \t\r\n'.includes(text[i]!)) i += 1;
-  return i;
-}
-
-/** `from` points at `"`; returns the offset one past the closing quote. */
-function skipJsonString(text: string, from: number): number | undefined {
-  let i = from + 1;
-  while (i < text.length) {
-    if (text[i] === '\\') i += 2;
-    else if (text[i] === '"') return i + 1;
-    else i += 1;
-  }
-  return undefined;
-}
-
-function skipJsonValue(text: string, from: number): number | undefined {
-  const first = text[from];
-  if (first === '"') return skipJsonString(text, from);
-  if (first === '{' || first === '[') {
-    let depth = 0;
-    let i = from;
-    while (i < text.length) {
-      const ch = text[i]!;
-      if (ch === '"') {
-        const end = skipJsonString(text, i);
-        if (end === undefined) return undefined;
-        i = end;
-        continue;
-      }
-      if (ch === '{' || ch === '[') depth += 1;
-      else if (ch === '}' || ch === ']') {
-        depth -= 1;
-        if (depth === 0) return i + 1;
-      }
-      i += 1;
-    }
-    return undefined;
-  }
-  // number / true / false / null
-  let i = from;
-  while (i < text.length && !',}] \t\r\n'.includes(text[i]!)) i += 1;
-  return i > from ? i : undefined;
-}
-
-/** A JSON value indented for embedding at a top-level property position. */
-function renderJsonValue(value: unknown, indent: string, newline: string): string {
-  return JSON.stringify(value, null, indent).split('\n').join(`${newline}${indent}`);
-}
-
-function removeJsonProperty(
-  text: string,
-  scan: JsonTopLevelScan,
-  property: JsonTopLevelProperty,
-): string {
-  const index = scan.properties.indexOf(property);
-  const next = scan.properties[index + 1];
-  if (next !== undefined) {
-    // Delete through the separating comma and whitespace, up to the next key.
-    return text.slice(0, property.keyStart) + text.slice(next.keyStart);
-  }
-  const previous = scan.properties[index - 1];
-  // Last (or only) property: delete the preceding comma (if any) with it.
-  const from = previous !== undefined ? previous.valueEnd : scan.open + 1;
-  return text.slice(0, from) + text.slice(property.valueEnd);
-}
-
-function insertJsonProperty(
-  text: string,
-  scan: JsonTopLevelScan,
-  key: string,
-  renderedValue: string,
-  indent: string,
-  newline: string,
-): string {
-  const entry = `${JSON.stringify(key)}: ${renderedValue}`;
-  if (scan.properties.length === 0) {
-    return `${text.slice(0, scan.open + 1)}${newline}${indent}${entry}${newline}${text.slice(scan.close)}`;
-  }
-  const last = scan.properties[scan.properties.length - 1]!;
-  return `${text.slice(0, last.valueEnd)},${newline}${indent}${entry}${text.slice(last.valueEnd)}`;
-}
-
-/** Replace this installer's marker block in `existingText`, or append it. */
-export function upsertMarkerBlock(
-  existingText: string | undefined,
-  block: string,
-  start: string,
-  end: string,
-): string {
-  if (existingText === undefined || existingText.trim() === '') return block;
-  const startIndex = existingText.indexOf(start);
-  const endIndex = existingText.indexOf(end);
-  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    const before = existingText.slice(0, startIndex);
-    const after = existingText.slice(endIndex + end.length).replace(/^\n/, '');
-    return `${before}${block}${after}`;
-  }
-  return `${existingText.replace(/\n*$/, '\n\n')}${block}`;
-}
-
-/** Remove the marker block. `undefined` when nothing (or only whitespace) remains. */
-export function stripMarkerBlock(
-  existingText: string,
-  start: string,
-  end: string,
-): string | undefined {
-  const startIndex = existingText.indexOf(start);
-  const endIndex = existingText.indexOf(end);
-  if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) return existingText;
-  const stripped =
-    existingText.slice(0, startIndex).replace(/\n+$/, '\n') +
-    existingText.slice(endIndex + end.length).replace(/^\n+/, '');
-  return stripped.trim() === '' ? undefined : stripped;
 }
 
 /* ------------------------------------------------------------------------------------
