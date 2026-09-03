@@ -259,6 +259,13 @@ One guard core, thin per-harness shims, three honesty tiers
 | experimental | Gemini, Grok, Hermes, Cursor, opencode, Cline | schema mapped from the capability matrix, **not yet smoke-tested against the real binary** |
 | advisory     | KiloCode, Aider                               | no usable hook API — instructions only, and nothing enforces them                          |
 
+This table is written by hand, and deliberately: `--help`, the install wizard and the
+site all render the tier grouping from `HarnessProfile.tier`, so a mis-tiered profile
+would move every one of them together and they would go on agreeing with each other.
+This is the outside voice — `test/guards/harness-registry.test.ts` reads it and fails
+when it and the registry disagree, and `pnpm mutate` promotes a harness to watch that
+happen. A generated copy of the registry could not catch the registry being wrong.
+
 Every install also writes the harness's instruction file (`CLAUDE.md`, `AGENTS.md`,
 `GEMINI.md`, `CONVENTIONS.md`) with the pattern above — belt and braces, and the part
 that teaches `smelt retrieve` after a deny.
@@ -321,12 +328,15 @@ Three things that look like bugs and are not:
   tiered honestly (verified / experimental / advisory — see the harness guide above).
   Deny-with-reason by default; rewrite opt-in and always announced — in the decision
   reason where the harness has one, on stderr where it does not.
-- **The honesty machinery** — twenty-four guard suites (twenty-one in the core, three guarding
-  the MCP server's stdio-local surface and the shared operations seam) that walk the
-  real import graph, assert byte-exact reversibility, pin the wire format, and re-derive
-  the attribution file; plus a mutation runner (`pnpm mutate`) that breaks the source on
-  purpose — 114 mutations across 24 guards, each watched going red — and fails if a guard
-  does not notice. Every guarantee in this README has a guard.
+- **The honesty machinery** — a guard suite per law and per guarantee, in the core and
+  around the MCP server's stdio-local surface and the shared operations seam, that walk
+  the real import graph, assert byte-exact reversibility, pin the wire format, and
+  re-derive the attribution file; plus a mutation runner (`pnpm mutate`) that breaks the
+  source on purpose — every mutation watched going red — and fails if a guard does not
+  notice. The tally it counted last is committed in [`guards.json`](guards.json), guard
+  by guard: the runner writes that file and refuses to run when it is stale, so the
+  number is measured wherever it is read and stated nowhere else. Every guarantee in
+  this README has a guard.
 
 ## Measured numbers
 

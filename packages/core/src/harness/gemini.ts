@@ -41,6 +41,7 @@ const HOOKS: HarnessHookSchema = {
 export const gemini: ShimmedHarnessProfile = {
   id: 'gemini',
   name: 'Gemini CLI',
+  shortName: 'Gemini',
   tier: 'experimental',
   detect: ['.gemini'],
   detectHome: ['.gemini'],

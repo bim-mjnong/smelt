@@ -30,6 +30,7 @@ const HOOKS: HarnessHookSchema = {
 export const grok: ShimmedHarnessProfile = {
   id: 'grok',
   name: 'Grok CLI',
+  shortName: 'Grok',
   tier: 'experimental',
   detect: ['.grok'],
   detectHome: ['.grok'],

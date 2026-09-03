@@ -1,6 +1,8 @@
 import process from 'node:process';
 
 import { CliUsageError } from '../../errors.ts';
+import { harnessesByTier, harnessNames } from '../../harness/registry.ts';
+import type { HarnessTier } from '../../harness/profile.ts';
 import { runHooks } from '../hooks.ts';
 import { CLI_NAME } from '../shell.ts';
 import type { CliIo } from '../shell.ts';
@@ -25,6 +27,22 @@ export interface HooksInvocation {
   readonly harness?: string;
 }
 
+/**
+ * The harnesses at one tier, as the HOOKS paragraph spells them — from
+ * `HarnessProfile.tier`, never a second list. A tier no profile claims renders empty
+ * rather than naming a harness that moved.
+ *
+ * The line breaks around these are still hand-placed, and deliberately: this body is
+ * byte-pinned by `test/__snapshots__/cli-usage.help.txt`, its paragraph is wrapped by
+ * hand at no single width, and a generic wrapper would rewrite every line of the help
+ * to derive three lists. The *membership* is what drifted — a promoted harness stayed
+ * under its old tier — and membership is what this derives.
+ */
+function tierNames(tier: HarnessTier): string {
+  const group = harnessesByTier().find((candidate) => candidate.tier === tier);
+  return group === undefined ? '' : harnessNames(group.harnesses);
+}
+
 export const hooksCommand: Subcommand<HooksInvocation, HooksInvocation> = {
   name: 'hooks',
   flags: ['harness'],
@@ -39,9 +57,9 @@ export const hooksCommand: Subcommand<HooksInvocation, HooksInvocation> = {
         `  replacement command (default on), \`${CLI_NAME} stats\` at session end (default\n` +
         `  on), and an opening \`${CLI_NAME} map\` at session start (opt-in) — plus an\n` +
         `  instruction-file snippet that teaches \`${CLI_NAME} retrieve\` after a deny.\n` +
-        `  Harnesses are tiered honestly: verified (Claude Code, Codex), experimental\n` +
-        `  (Gemini, Grok, Hermes, Cursor, opencode, Cline — schemas from the capability\n` +
-        `  matrix, not yet smoke-tested), advisory (KiloCode, Aider — instructions only,\n` +
+        `  Harnesses are tiered honestly: verified (${tierNames('verified')}), experimental\n` +
+        `  (${tierNames('experimental')} — schemas from the capability\n` +
+        `  matrix, not yet smoke-tested), advisory (${tierNames('advisory')} — instructions only,\n` +
         `  nothing enforced). Same discipline as init: every file listed before a final\n` +
         `  confirm, no existing file overwritten without a per-file yes, re-runs edit\n` +
         `  toggles. ${CLI_NAME} hooks remove takes it back out. Guard settings live in\n` +

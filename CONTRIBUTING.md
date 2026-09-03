@@ -23,7 +23,7 @@ nothing to build and nothing to download at runtime.
 | `pnpm verify`                       | Everything below, in order, one verdict. **This is the green signal.** |
 | `pnpm build`                        | `tsc` per package into `dist/`, then bundles the grammars              |
 | `pnpm test`                         | vitest, all packages                                                   |
-| `pnpm typecheck`                    | `tsc --noEmit`, including tests                                        |
+| `pnpm typecheck`                    | `tsc --noEmit`, including tests and `site/`                            |
 | `pnpm lint`                         | oxlint, warnings are errors                                            |
 | `pnpm format` / `pnpm format:check` | prettier                                                               |
 | `pnpm mutate`                       | the mutation suite — see below                                         |
@@ -140,8 +140,10 @@ $ pnpm mutate
 ```
 
 The run ends with a `caught/total` tally, counted from the guard files themselves —
-anything short of every mutation caught exits 1. The tally is printed, never typed
-here: the runner verifies any count the docs do state and fails on drift.
+anything short of every mutation caught exits 1. The tally is written, never typed:
+`guards.json` at the repository root holds it guard by guard, `pnpm generate:guards`
+regenerates it, and the runner refuses to start when the committed copy has fallen
+behind the guard files. Documents point at that file rather than repeating its digits.
 
 **Adding a guard? The convention is three steps:**
 
@@ -158,7 +160,8 @@ GuardMutation[] = […]` (the type lives in `packages/guard-kit`, re-exported fr
    naming the exact source string to change and _why that break matters_ — beside the
    assertions that must catch it, so the check and its proof-of-failure travel
    together. Entries are literal data; a guard over an artefact takes
-   `kind: 'artifact'` and its `file` is relative to `packages/core`. The runner
+   `kind: 'artifact'` and its `file` is resolved against the owning package first and the
+   repository root second (`guards.json` counts every package, so it belongs to none). The runner
    (`scripts/mutate.mjs`) discovers guard files by name — there is no list to update.
 3. Run `pnpm mutate`. If the guard survives, the guard is wrong — fix the guard, not the
    mutation.

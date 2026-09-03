@@ -33,6 +33,15 @@ export interface HarnessProfile {
   readonly id: HarnessId;
   /** The harness's own name, as its makers spell it. Shown wherever a tier is. */
   readonly name: string;
+  /**
+   * The name a *list* of harnesses uses, where the maker's own spelling carries a
+   * category suffix a list does not need — "Codex CLI" is "Codex" in a tier clause,
+   * "Hermes Agent" is "Hermes". Optional, and defaulted by {@link harnessLabel} to
+   * {@link name}: only a harness whose prose name differs from its full name carries
+   * one, and it carries it here rather than in each of the four places a tier list is
+   * rendered. "Claude Code" has no suffix to drop, and so has none.
+   */
+  readonly shortName?: string;
   readonly tier: HarnessTier;
   /** Paths (relative to the project) whose existence means "this harness is in use here". */
   readonly detect: readonly string[];
@@ -101,6 +110,23 @@ export const TIER_HONESTY: Record<HarnessTier, string> = {
     'schema mapped from the 2026-09-02 capability matrix, not yet smoke-tested against the real binary',
   advisory: 'no usable hook API — instructions only, nothing enforces them',
 };
+
+/**
+ * The tiers, in the order every rendered tier list walks them — most claimed first.
+ * {@link TIER_HONESTY}'s key order *is* that order, so a tier cannot exist without a
+ * line saying what it means, and the order lives once.
+ */
+export const HARNESS_TIERS: readonly HarnessTier[] = Object.keys(TIER_HONESTY) as HarnessTier[];
+
+/**
+ * How a list of harnesses spells this one: {@link HarnessProfile.shortName} where the
+ * maker's own name carries a suffix a list does not need, else {@link
+ * HarnessProfile.name}. The help's tier clause, the wizard's sentences and the site's
+ * tier table all render through this, so they cannot spell a harness three ways.
+ */
+export function harnessLabel(profile: HarnessProfile): string {
+  return profile.shortName ?? profile.name;
+}
 
 /**
  * What the wizard settled on, as the installer's renderers see it: the toggles, the

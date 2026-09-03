@@ -132,6 +132,16 @@ export {
   structuralLanguages,
 } from './lang/registry.ts';
 export type { LanguageProfile, LanguageStructure, RepoMapFacts } from './lang/profile.ts';
+/**
+ * The harness registry's rendered views. Public for the same reason the ops seam is:
+ * something outside this package renders them — the site's `facts.json` generator —
+ * and the alternative is a second copy of the tier table typed into a React component,
+ * which is exactly the drift `harnessesByTier()` exists to end.
+ */
+export { harnessesByTier, harnessNames, HARNESSES, HARNESS_IDS } from './harness/registry.ts';
+export type { HarnessTierGroup } from './harness/registry.ts';
+export { harnessLabel, HARNESS_TIERS, TIER_HONESTY } from './harness/profile.ts';
+export type { HarnessId, HarnessTier } from './harness/profile.ts';
 export { resolveRun } from './cli/subcommands/smelt.ts';
 export type { ResolvedRun } from './cli/subcommands/smelt.ts';
 export { REPO_MAP_FOCUS_RULE } from './repomap/map.ts';

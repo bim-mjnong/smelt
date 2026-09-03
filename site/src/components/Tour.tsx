@@ -6,7 +6,15 @@ import { Reveal } from '@/components/ui/Reveal';
  * Every byte below was captured from a real run of the built CLI on 2026-09-02 against
  * the repo's own `src/plan/lexical.ts`, in a fresh directory store. Nothing is edited.
  * Law 4 applies to terminal screenshots too.
+ *
+ * Which is why this version string is the one on the page that is NOT generated: it is
+ * provenance, a fact about the recording, and pointing it at the current release would
+ * claim a run that never happened. It travels beside the transcript it describes, and
+ * `packages/core/test/guards/site-facts.test.ts` holds it to the only thing a
+ * provenance can be checked against — it may never name a version the packages have
+ * not reached. Re-record the transcript and it moves; until then it says when.
  */
+const RECORDED = { version: '0.2.0', date: '2026-09-02' };
 const STEPS: readonly { cmd: string; out: string; emberLine?: number }[] = [
   {
     cmd: 'smelt src/plan/lexical.ts --budget 4000 --focus planLexical --strategy structural > out.ts',
@@ -63,7 +71,10 @@ export function Tour() {
         />
         <Reveal className="mt-10">
           <Frame>
-            <FrameBar label="~/demo" meta="@smeltjs/core v0.2.0 · recorded 2026-09-02" />
+            <FrameBar
+              label="~/demo"
+              meta={`recorded ${RECORDED.date} · @smeltjs/core v${RECORDED.version}`}
+            />
             <div className="relative scroll-hint">
               <pre className="overflow-x-auto p-4 font-mono text-[13px] leading-[1.7] sm:p-5">
                 <code>

@@ -15,8 +15,10 @@ import {
   GUARD_ONLY_FILES,
   HARNESSES,
   harnessById,
+  harnessNames,
   JSON_HOOK_FILES,
   LIFECYCLE_EVENTS,
+  lifecycleHarnesses,
   MANAGED_EVENTS,
 } from '../harness/registry.ts';
 import {
@@ -62,16 +64,18 @@ import type { SmeltConfig, SmeltConfigHooks } from './config.ts';
  * one top-level JSON property, one delimited text block — is `src/text/json-edit.ts`,
  * which knows nothing about harnesses.
  *
- * Harnesses come in three honesty tiers (docs/research/2026-09-02-harness-capability-matrix.md):
+ * Harnesses come in three honesty tiers (docs/research/2026-09-02-harness-capability-matrix.md),
+ * and which harness sits at which is `HarnessProfile.tier` — read through
+ * `harnessesByTier()`, never listed again here:
  *
- *  - **verified** — Claude Code, Codex: schemas verified against primary docs and
- *    exercised against recorded fixtures; first-class targets.
- *  - **experimental** — Gemini, Grok, Hermes, Cursor, opencode, Cline: hook schemas
- *    mapped from the capability matrix but not yet smoke-tested green against the
- *    real binary. Labelled as such in code, docs, and this installer's output.
- *  - **advisory** — KiloCode, Aider: no usable hook API, so what ships is
- *    instructions (and, for KiloCode, a permissions/MCP sketch). Nothing enforces
- *    them, and the output says so rather than implying a guard exists.
+ *  - **verified** — schemas verified against primary docs and exercised against
+ *    recorded fixtures; first-class targets.
+ *  - **experimental** — hook schemas mapped from the capability matrix but not yet
+ *    smoke-tested green against the real binary. Labelled as such in code, docs, and
+ *    this installer's output.
+ *  - **advisory** — no usable hook API, so what ships is instructions (and, for
+ *    KiloCode, a permissions/MCP sketch). Nothing enforces them, and the output says
+ *    so rather than implying a guard exists.
  *
  * The wizard discipline is `smelt init`'s, verbatim: every step accepts `back`,
  * nothing is written until a final confirm that lists every file, and an existing
@@ -635,8 +639,8 @@ async function installFlow(
         ask_,
         'stats on Stop',
         `\`smelt stats\` runs when a session ends — the honest signal (expansion rate) ` +
-          `surfaced where the turn ends. Observation only; never blocks. Wired for ` +
-          `verified-tier harnesses (Claude Code, Codex).`,
+          `surfaced where the turn ends. Observation only; never blocks. Wired for the ` +
+          `harnesses whose hooks carry session events (${harnessNames(lifecycleHarnesses())}).`,
         choices.statsOnStop,
         (on) => {
           choices.statsOnStop = on;
@@ -649,7 +653,8 @@ async function installFlow(
         'repo map on SessionStart',
         `\`smelt map . --budget …\` runs at session start and its output opens the ` +
           `context — the agent starts oriented. Costs one map build per session. ` +
-          `Wired for verified-tier harnesses (Claude Code, Codex).`,
+          `Wired for the harnesses whose hooks carry session events ` +
+          `(${harnessNames(lifecycleHarnesses())}).`,
         choices.mapOnStart,
         (on) => {
           choices.mapOnStart = on;

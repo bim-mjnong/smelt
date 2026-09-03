@@ -4,9 +4,17 @@ name: site
 #
 # Deliberately keyless: the build needs ZERO React Bits registry access. The
 # REACTBITS_LICENSE_KEY exists only on a developer machine, and only for INSTALLING
-# new registry items into the source tree; building renders committed sources plus
-# packages/core/bench/RESULTS.md (parsed at build time — Law 4 lives in
-# site/scripts/bench-data.mjs). No secret is read anywhere in this workflow.
+# new registry items into the source tree; building renders committed sources plus the
+# facts the packages own, parsed at build time — Law 4 lives in site/scripts/. No
+# secret is read anywhere in this workflow, and nothing it runs touches the network.
+#
+# The trigger paths are the site's real inputs, not just its directory. The site used
+# to redeploy on `site/**` alone, so a release moved the version on npm and left the
+# deployed page advertising the previous one, with nothing anywhere going red. Every
+# source `site/scripts/facts-data.mjs` reads is listed here — including
+# `plan/grammar.ts`, which is where `WASM_BY_LANGUAGE` (the grammar count the page
+# prints) is folded out of the language registry: a change to that fold, and not to a
+# profile, would move the number with no redeploy.
 
 on:
   push:
@@ -14,6 +22,11 @@ on:
     paths:
       - 'site/**'
       - 'packages/core/bench/RESULTS.md'
+      - 'packages/*/package.json'
+      - 'packages/core/src/harness/**'
+      - 'packages/core/src/lang/**'
+      - 'packages/core/src/plan/grammar.ts'
+      - 'guards.json'
       - '.github/workflows/site.yml'
   workflow_dispatch:
 
@@ -43,7 +56,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm --filter @smeltjs/site build
+      # `...` selects the site *and its dependencies*, in topological order, so
+      # @smeltjs/core is built before the site's generator imports its registries.
+      - run: pnpm --filter "@smeltjs/site..." build
 
       - uses: actions/upload-pages-artifact@v3
         with:
