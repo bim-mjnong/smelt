@@ -37,6 +37,7 @@ export const CLI_FLAGS = {
   ignore: { type: 'string', multiple: true },
   cache: { type: 'string' },
   harness: { type: 'string' },
+  strict: { type: 'boolean' },
   json: { type: 'boolean' },
   reconstruct: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
@@ -193,6 +194,16 @@ export const FLAG_HELP: Readonly<Record<FlagName, FlagHelp>> = {
       ...optionList(HARNESS_IDS, OPTION_BODY_WIDTH),
     ],
   },
+  strict: {
+    label: '--strict',
+    body: () => [
+      'Turn any lint finding into exit 1, for CI. Findings are',
+      'advisory by default: the rules are heuristics about somebody',
+      "else's house style, and enforcing them uninvited would be",
+      `${CLI_NAME} deciding it. A budget you set yourself is different —`,
+      'exceeding agents.budgetBytes exits 1 with or without --strict.',
+    ],
+  },
   json: {
     label: '--json',
     body: () => [
@@ -201,7 +212,8 @@ export const FLAG_HELP: Readonly<Record<FlagName, FlagHelp>> = {
       'the SmeltResult verbatim, `elided` carries the bytes, so',
       'the envelope can be reconstructed; feed it back with',
       '--reconstruct. For map: { format, map }, the RepoMap',
-      'structure verbatim.',
+      'structure verbatim. For agents lint: { format, report },',
+      'the measured levels and every finding with its rule id.',
     ],
   },
   reconstruct: {

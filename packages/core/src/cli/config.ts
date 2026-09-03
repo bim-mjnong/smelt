@@ -61,6 +61,25 @@ export interface SmeltConfigHooks {
   readonly enforcement?: EnforcementMode;
 }
 
+/**
+ * The `agents` block — settings for `smelt agents lint`.
+ *
+ * One key, and it is the user's number: how many UTF-8 bytes of instruction file this
+ * project is willing to pay on every request. **There is no default and there never
+ * will be** — the same ruling as `--budget`, for the same reason. A budget smelt
+ * invented would be smelt deciding how much of somebody's context window their own
+ * house rules deserve, at a number nobody chose. The guide's cited "~150-200
+ * instructions" figure is printed by the lint as a citation and compared to nothing.
+ */
+export interface SmeltConfigAgents {
+  /**
+   * The merged set's byte ceiling — every `AGENTS.md`/`CLAUDE.md`/`GEMINI.md` in the
+   * tree, summed. Absent means unbudgeted: the lint measures and reports, and no
+   * number can fail.
+   */
+  readonly budgetBytes?: number;
+}
+
 /** The parsed shape of `smelt.config.json`. Every field beyond the version is optional. */
 export interface SmeltConfig {
   readonly smeltConfig: typeof CONFIG_VERSION;
@@ -72,6 +91,8 @@ export interface SmeltConfig {
   readonly store?: SmeltConfigStore;
   /** Settings for the harness guard. See {@link SmeltConfigHooks}. */
   readonly hooks?: SmeltConfigHooks;
+  /** Settings for `smelt agents lint`. See {@link SmeltConfigAgents}. */
+  readonly agents?: SmeltConfigAgents;
 }
 
 /** A config plus where it was found — the path matters for resolving `store.path`. */
@@ -147,7 +168,7 @@ export function parseConfig(text: string, path: string): SmeltConfig {
     );
   }
 
-  const known = ['smeltConfig', 'defaultBudgetBytes', 'strategy', 'store', 'hooks'];
+  const known = ['smeltConfig', 'defaultBudgetBytes', 'strategy', 'store', 'hooks', 'agents'];
   const unknown = Object.keys(fields).filter((key) => !known.includes(key));
   if (unknown.length > 0) {
     throw bad(
@@ -175,6 +196,7 @@ export function parseConfig(text: string, path: string): SmeltConfig {
 
   const store = parseStore(fields['store'], bad);
   const hooks = parseHooks(fields['hooks'], bad);
+  const agents = parseAgents(fields['agents'], bad);
 
   return {
     smeltConfig: CONFIG_VERSION,
@@ -182,6 +204,7 @@ export function parseConfig(text: string, path: string): SmeltConfig {
     ...(strategy === undefined ? {} : { strategy }),
     ...(store === undefined ? {} : { store }),
     ...(hooks === undefined ? {} : { hooks }),
+    ...(agents === undefined ? {} : { agents }),
   };
 }
 
@@ -213,6 +236,7 @@ export function renderConfig(config: SmeltConfig): string {
     ...(config.strategy === undefined ? {} : { strategy: config.strategy }),
     ...(config.store === undefined ? {} : { store: renderStore(config.store) }),
     ...(config.hooks === undefined ? {} : { hooks: renderHooks(config.hooks) }),
+    ...(config.agents === undefined ? {} : { agents: renderAgents(config.agents) }),
   };
   return `${JSON.stringify(ordered, null, 2)}\n`;
 }
@@ -226,6 +250,10 @@ function renderHooks(hooks: SmeltConfigHooks): SmeltConfigHooks {
     ...(hooks.thresholdBytes === undefined ? {} : { thresholdBytes: hooks.thresholdBytes }),
     ...(hooks.enforcement === undefined ? {} : { enforcement: hooks.enforcement }),
   };
+}
+
+function renderAgents(agents: SmeltConfigAgents): SmeltConfigAgents {
+  return agents.budgetBytes === undefined ? {} : { budgetBytes: agents.budgetBytes };
 }
 
 function parseStore(
@@ -296,11 +324,42 @@ function parseHooks(
   };
 }
 
+/**
+ * The `agents` block, parsed as strictly as every other: one key, a whole number of
+ * bytes greater than zero.
+ *
+ * A malformed `agents.budgetBytes` is refused rather than ignored for the reason the
+ * whole file is parsed strictly — an ignored budget is a ceiling the user believed was
+ * in force. And there is no coercion from a string: `"budgetBytes": "4kb"` is a
+ * mistake with a right answer, and guessing it would be smelt inventing a number.
+ */
+function parseAgents(
+  value: unknown,
+  bad: (why: string) => CliUsageError,
+): SmeltConfigAgents | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw bad(`"agents" must be an object like {"budgetBytes":2000}.`);
+  }
+  const fields = value as Record<string, unknown>;
+  const extra = Object.keys(fields).filter((key) => key !== 'budgetBytes');
+  if (extra.length > 0) {
+    throw bad(`"agents" takes only "budgetBytes", got ${extra.map((k) => `"${k}"`).join(', ')}.`);
+  }
+  const budget = fields['budgetBytes'];
+  if (
+    budget !== undefined &&
+    (typeof budget !== 'number' || !Number.isInteger(budget) || budget <= 0)
+  ) {
+    throw bad(`"agents".budgetBytes must be a whole number of bytes greater than zero.`);
+  }
+  return budget === undefined ? {} : { budgetBytes: budget as number };
+}
+
 /** `store.path` is relative to the config file, so the config works from any cwd. */
 export function resolveStorePath(loaded: LoadedConfig, path: string): string {
   return resolve(dirname(loaded.path), path);
 }
-
 /**
  * The store decision a config carries, with `path` already resolved against the config
  * file's directory — one config serves every subdirectory it covers without scattering

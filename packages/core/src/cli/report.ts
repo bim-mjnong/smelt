@@ -1,6 +1,10 @@
+import { GUIDE_TITLE } from '../agents/guide.ts';
+import { overBudgetBytes } from '../agents/lint.ts';
+import type { AgentsLintReport, AgentsMirrorReport } from '../agents/lint.ts';
 import type { RepoMap } from '../repomap/map.ts';
 import type { SmeltResult } from '../types.ts';
 
+import { CONFIG_FILE_NAME } from './config.ts';
 import { CLI_NAME } from './shell.ts';
 
 export interface ReportInput {
@@ -152,8 +156,162 @@ export function formatMapReport({ map, source, budgetSource }: MapReportInput): 
   return `${lines.join('\n')}\n`;
 }
 
-/** How many lines a byte range covers in the input. Derived, never tallied separately. */
-function lineSpan(text: string, start: number, end: number): number {
+/** What `smelt agents lint` prints. */
+export interface AgentsReportInput {
+  /** The directory named on the command line, exactly as the user wrote it. */
+  readonly source: string;
+  /** Whether `--strict` was given — it changes what the closing line promises. */
+  readonly strict: boolean;
+}
+
+/**
+ * The lint report — and unlike the other two, it goes to **stdout**, because here the
+ * report *is* the output. `smelt` and `smelt map` put a payload on stdout and their
+ * report on stderr so the two can be piped apart; a lint has no payload to separate
+ * from, and sending its only output to stderr would make `smelt agents lint > audit.txt`
+ * write an empty file.
+ *
+ * Same law as the other two, though: every number is read off the
+ * {@link AgentsLintReport} the library returned. The renderer counts nothing, so it
+ * cannot disagree with what was measured — and in particular the total is the sum the
+ * lint computed over the levels, not a second tally over the printed rows.
+ */
+export function formatAgentsReport(
+  report: AgentsLintReport,
+  { source, strict }: AgentsReportInput,
+): string {
+  const lines: string[] = [`${CLI_NAME} agents lint  ${source}`];
+
+  if (report.levels.length === 0) {
+    lines.push('');
+    lines.push(`  no AGENTS.md, CLAUDE.md or GEMINI.md under ${source} — nothing is loaded on`);
+    lines.push('  every request, so there is nothing to measure. That is a fine state, not a');
+    lines.push(`  failure; \`${CLI_NAME} agents lint\` has no opinion about whether you want one.`);
+    return `${lines.join('\n')}\n`;
+  }
+
+  lines.push('');
+  lines.push('  what an agent loads on every request');
+  const labelWidth = report.levels.reduce(
+    (widest, level) =>
+      Math.max(widest, level.path.length, ...level.mirrors.map((m) => m.path.length)),
+    IMPERATIVES_LABEL.length,
+  );
+  for (const level of report.levels) {
+    lines.push(`    ${level.path.padEnd(labelWidth)}  ${group(level.bytes).padStart(9)} B`);
+    for (const mirror of level.mirrors) {
+      lines.push(
+        `    ${mirror.path.padEnd(labelWidth)}  ${' '.repeat(11)}${mirrorNote(mirror.standing)}`,
+      );
+    }
+  }
+  lines.push(`    ${'total'.padEnd(labelWidth)}  ${group(report.totalBytes).padStart(9)} B`);
+  lines.push(
+    `    ${IMPERATIVES_LABEL.padEnd(labelWidth)}  ` +
+      `${group(report.imperatives.length).padStart(9)}`,
+  );
+  lines.push(`    ${GUIDE_TITLE} cites ~150-200 instructions as what a frontier`);
+  lines.push('    thinking model follows consistently. Printed as a citation, compared');
+  lines.push('    to nothing: the only ceiling here is the one you set.');
+
+  const over = overBudgetBytes(report);
+  lines.push('');
+  if (report.budgetBytes === undefined) {
+    lines.push(`  no budget set — add {"agents":{"budgetBytes":N}} to ${CONFIG_FILE_NAME} and`);
+    lines.push(`  exceeding it exits 1. ${CLI_NAME} will never invent that number for you.`);
+  } else if (over === undefined) {
+    lines.push(
+      `  within budget  ${group(report.totalBytes)} B of ${group(report.budgetBytes)} B ` +
+        `(${CONFIG_FILE_NAME}: agents.budgetBytes).`,
+    );
+  } else {
+    lines.push(
+      `  OVER BUDGET  ${group(report.totalBytes)} B against your ${group(report.budgetBytes)} B ` +
+        `budget — over by ${group(over)} B.`,
+    );
+    lines.push(`               The budget is yours, from ${CONFIG_FILE_NAME}; exit 1 is the same`);
+    lines.push('               over-budget code every other smelt run uses.');
+  }
+
+  if (report.findings.length === 0) {
+    lines.push('');
+    lines.push('  no findings. Eight advisory rules ran and none matched — either the file is');
+    lines.push('  in good shape, or a rule is asleep. `pnpm mutate` is how this repo tells the');
+    lines.push('  difference about its own guards; a fixture per rule is how it tells it here.');
+    return `${lines.join('\n')}\n`;
+  }
+
+  const rows = report.findings.map((finding) => ({
+    place: `${finding.file}:${String(finding.line)}`,
+    rule: finding.reason.rule,
+    explanation: finding.reason.explanation,
+  }));
+  const ruleWidth = width(
+    '',
+    rows.map((row) => row.rule),
+  );
+
+  lines.push('');
+  for (const row of rows) {
+    lines.push(`  ${row.rule.padEnd(ruleWidth)}  ${row.place}`);
+    // The explanation gets its own wrapped lines rather than a fourth column. It is
+    // the *reason*, which is the part a reader actually has to read — clipped to a
+    // terminal column it becomes an ellipsis, and Law 2 promises an explanation, not
+    // the first 46 characters of one.
+    for (const wrapped of wrap(row.explanation, EXPLANATION_WRAP)) lines.push(`      ${wrapped}`);
+  }
+
+  lines.push('');
+  lines.push(
+    `  ${count(report.findings.length, 'finding')}. ` +
+      (strict
+        ? 'Exit 1: --strict was given.'
+        : `Advisory — exit 0. Pass --strict to fail a CI run on any of them.`),
+  );
+
+  return `${lines.join('\n')}\n`;
+}
+
+/** The label the imperative count is reported under. Never "instructions": R6. */
+const IMPERATIVES_LABEL = 'imperatives (heuristic)';
+
+/** Where a finding's explanation wraps, once its six-column indent is removed. */
+const EXPLANATION_WRAP = 84;
+
+/** Greedy word wrap. No ICU, no dependency — the output is identical everywhere. */
+function wrap(text: string, columns: number): readonly string[] {
+  const out: string[] = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    const candidate = line === '' ? word : `${line} ${word}`;
+    if (line !== '' && candidate.length > columns) {
+      out.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line !== '') out.push(line);
+  return out;
+}
+
+/** How a mirror stands beside its AGENTS.md, in one clause. */
+function mirrorNote(standing: AgentsMirrorReport['standing']): string {
+  switch (standing) {
+    case 'symlink':
+      return 'symlink — cannot drift, and costs no extra bytes';
+    case 'copy':
+      return 'copy, byte-identical today — a symlink could not drift';
+    case 'drift':
+      return 'DIVERGED — see mirror-drift below';
+  }
+}
+
+/** How many lines a byte range covers in the input. Derived, never tallied separately. */ function lineSpan(
+  text: string,
+  start: number,
+  end: number,
+): number {
   const slice = Buffer.from(text, 'utf8').subarray(start, end).toString('utf8');
   return slice.split('\n').length;
 }

@@ -50,6 +50,7 @@ const FULL: SmeltConfig = {
   strategy: 'structural',
   store: { kind: 'directory', path: '.smelt/store' },
   hooks: { thresholdBytes: 2048, enforcement: 'rewrite' },
+  agents: { budgetBytes: 2000 },
 };
 
 /** Every shape a config can take, one field at a time and all of them at once. */
@@ -66,6 +67,8 @@ const CONFIGS: readonly (readonly [string, SmeltConfig])[] = [
   ['empty hooks block', { smeltConfig: CONFIG_VERSION, hooks: {} }],
   ['hooks threshold only', { smeltConfig: CONFIG_VERSION, hooks: { thresholdBytes: 1 } }],
   ['hooks enforcement only', { smeltConfig: CONFIG_VERSION, hooks: { enforcement: 'deny' } }],
+  ['empty agents block', { smeltConfig: CONFIG_VERSION, agents: {} }],
+  ['agents budget only', { smeltConfig: CONFIG_VERSION, agents: { budgetBytes: 1 } }],
   ['every field', FULL],
 ];
 
@@ -106,10 +109,12 @@ describe('config.ts owns both directions: parseConfig(renderConfig(c)) === c', (
       'strategy',
       'store',
       'hooks',
+      'agents',
     ]);
     // The same fields handed over in a different order still render identically:
     // the writer imposes the order, callers do not carry it.
     const shuffled: SmeltConfig = {
+      agents: { budgetBytes: 2000 },
       hooks: { enforcement: 'rewrite', thresholdBytes: 2048 },
       store: { kind: 'directory', path: '.smelt/store' },
       strategy: 'structural',
