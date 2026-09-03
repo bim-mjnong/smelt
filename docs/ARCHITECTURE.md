@@ -931,8 +931,11 @@ same stdout/stderr split.
    still holds the bytes.
 6. Every thrown error is an `instanceof SmeltError`. That covers the whole exported
    surface, `buildRepoMap()` included: a filesystem failure under the repo map arrives
-   as `RepoMapIoError` naming the path, never as a raw Node `ENOENT`, because a promise
-   with one undocumented exception is no promise at all.
+   as `RepoMapIoError` naming the path, never as a raw Node `ENOENT`, and a grammar
+   that resolves but will not load — unreadable, truncated, half-extracted — arrives as
+   `GrammarUnavailableError` naming the `.wasm`, never as a raw `EACCES` or a V8
+   `CompileError`, because a promise with one undocumented exception is no promise at
+   all.
 7. **The marker format is stable from 0.1 and treated as 1.0.** `<<smelt/v1: … >>` will
    not change shape. A future format arrives as `smelt/v2`, identifiable in band, never
    as a quiet substitution — see Decision 3, and the guard that enforces it.

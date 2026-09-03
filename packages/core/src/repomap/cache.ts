@@ -41,13 +41,17 @@ import type { LanguageId } from '../types.ts';
  * deletes every entry the build it just finished did not use, leaving exactly the tags
  * of the tree as it now stands. The policy is stated as a bound anyone can check: **an
  * entry survives a build only if that build used it**, so the cache is at most one
- * entry per mappable file in the tree.
+ * entry per mappable file in the tree — plus whatever a crash left mid-write, which
+ * no sweep can safely reclaim; see {@link ENTRY_FILE}.
  *
  * Why that is safe, and the rule any other policy would also have to meet: **a miss
  * can only make a map slower, never wrong.** A missing entry is re-extracted from the
  * file's own bytes, and a present entry is only ever served for the exact content that
  * hashed to its key — so sweeping too much costs a re-parse and sweeping too little
- * costs disk, and neither can change a single symbol in the emitted map.
+ * costs disk, and neither can change a single symbol in the emitted map. The same rule
+ * is why the sweep never throws: it runs after the map is finished, so a cache
+ * directory that will not list postpones the bound to the next build rather than
+ * turning a computed map into no map at all.
  *
  * The cost is paid by a caller who points *one* cache directory at *several* trees:
  * each build sweeps the others' entries, and every build then re-parses. That is a
@@ -79,6 +83,14 @@ export type TagsCacheLookup = FileTags | 'corrupt' | undefined;
  * ever swept: a temp file from a write in flight (`<key>.json.tmp-<pid>`) does not
  * match, so a sweep cannot delete the file another process is at that moment renaming
  * into place.
+ *
+ * The price of that exclusion, stated rather than hidden: the bound above is over
+ * *entries*, and a process killed between the `writeFileSync` and the `renameSync` in
+ * {@link TagsCache.write} leaves a temp file no later sweep reclaims. Reclaiming one
+ * safely needs a liveness test this cache cannot make — a pid can be reused, and an
+ * mtime cutoff is a number smelt would have invented — and the alternative, deleting
+ * a temp file a live writer is about to rename, fails that writer's build. So a
+ * crash's leftovers are counted as the known cost of never racing a concurrent write.
  */
 const ENTRY_FILE = /^([0-9a-f]+)\.json$/;
 
@@ -154,14 +166,26 @@ export class TagsCache {
    * accumulate forever are gone.
    *
    * Returns how many entries were removed, so the caller can report a measured number
-   * rather than a claim. Deleting one entry is best effort: a file that will not
-   * unlink is left where it is, because failing a whole map over a cache file smelt
-   * only wanted to tidy would trade a slower map for no map at all.
+   * rather than a claim.
+   *
+   * **The whole sweep is best effort, listing included.** A directory that will not
+   * list — an unreadable cache directory, or one an external cleaner removed between
+   * the last write and this call — reports `0` pruned and leaves the map alone. It
+   * runs after the tree has been walked, ranked and rendered, so a throw here would
+   * destroy a finished map over housekeeping smelt only wanted to do: no map at all
+   * instead of a slower one, which is the trade this cache is forbidden to make.
+   * Deleting one entry is best effort for the same reason. Nothing is lost by
+   * skipping a sweep — the entries are offered again on the next build, and until
+   * then nothing reads them, because nothing will ever look up a key no file hashes
+   * to.
    */
   sweep(live: ReadonlySet<string>): number {
-    const names = fsCall('list the tags cache directory', this.#entriesDir, () =>
-      readdirSync(this.#entriesDir),
-    );
+    let names: string[];
+    try {
+      names = readdirSync(this.#entriesDir);
+    } catch {
+      return 0;
+    }
     let pruned = 0;
     for (const name of names.toSorted()) {
       const key = ENTRY_FILE.exec(name)?.[1];

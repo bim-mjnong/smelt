@@ -23,3 +23,7 @@ site/.env*.local
 site/prompts/
 site/recipes/
 site/src/generated/
+
+# guard scratch — isolated copies of `src` a guard makes and removes (see
+# packages/core/test/guards/repo-map.test.ts)
+packages/core/.guard-scratch/

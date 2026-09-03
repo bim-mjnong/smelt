@@ -39,7 +39,9 @@ import type { FileTags } from './tags.ts';
  *  - **The cache lives only in a directory the caller explicitly hands in**, a corrupt
  *    entry is discarded loudly — a warning in the result — never trusted, and it is
  *    bounded: each build sweeps the entries it did not use, so the superseded
- *    pre-edit version of every file does not accumulate forever. See `cache.ts`.
+ *    pre-edit version of every file does not accumulate forever. The sweep is
+ *    housekeeping and never fatal: it runs after the map is computed, so a cache it
+ *    cannot tidy costs a re-parse next time, never this map. See `cache.ts`.
  *  - **Every failure is a `SmeltError`**: the consumer contract's one promise about
  *    errors holds here too, so a missing root or an unreadable file arrives as
  *    {@link RepoMapIoError} naming the path, not as a raw Node `ENOENT`. Every

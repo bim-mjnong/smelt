@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { Language, Parser } from 'web-tree-sitter';
 
-import { GrammarUnavailableError } from '../errors.ts';
+import { GrammarUnavailableError, SmeltError } from '../errors.ts';
 import { LANGUAGE_PROFILES } from '../lang/registry.ts';
 import { assertLocalResource } from '../net/policy.ts';
 import type { LanguageId } from '../types.ts';
@@ -76,19 +76,68 @@ export function grammarPath(language: LanguageId): string {
  * ordinary happy path. Reading the file ourselves removes that capability instead of
  * documenting it, and {@link assertLocalResource} rejects a remote path before we get
  * that far.
+ *
+ * **Every failure here is a `GrammarUnavailableError`.** The consumer contract makes
+ * exactly one promise about errors — every error smelt throws is an `instanceof
+ * SmeltError` — and this function is on the path of both `smelt()` and
+ * `buildRepoMap()`, for every file in a language smelt claims to parse. Only
+ * *resolution* used to be inside the contract: `grammarPath` throws for a grammar it
+ * cannot find, and {@link existsSync} then reports a file's **presence**, never its
+ * readability. So a grammar that resolved and then would not load leaked the raw
+ * error — `EACCES` from an unreadable `.wasm`, a V8 `CompileError` or `RangeError`
+ * from a truncated one, a half-extracted tarball — straight past a caller's
+ * documented `catch`. Each step is wrapped instead, naming the language and the path
+ * and keeping the original as `cause`: bringing the failure inside the contract, not
+ * hiding what Node or V8 said. A promise with one undocumented exception is no
+ * promise at all.
  */
 export async function loadGrammar(language: LanguageId): Promise<Language> {
   const cached = cache.get(language);
   if (cached !== undefined) return cached;
 
-  runtimeReady ??= Parser.init();
-  await runtimeReady;
+  const path = fileURLToPath(assertLocalResource(grammarPath(language)));
 
-  const resolved = assertLocalResource(grammarPath(language));
-  const bytes = await readFile(fileURLToPath(resolved));
-  const grammar = await Language.load(new Uint8Array(bytes));
+  const ready = (runtimeReady ??= Parser.init());
+  await inContract(
+    () => ready,
+    `smelt: the tree-sitter WASM runtime would not start, so no grammar can be loaded`,
+  );
+  const bytes = await inContract(
+    () => readFile(path),
+    `smelt: the grammar for "${language}" could not be read from "${path}"`,
+  );
+  const grammar = await inContract(
+    () => Language.load(new Uint8Array(bytes)),
+    `smelt: the file at "${path}" is not a loadable tree-sitter grammar for "${language}"`,
+  );
   cache.set(language, grammar);
   return grammar;
+}
+
+/**
+ * Run one step of the load and keep its failure inside the consumer contract.
+ *
+ * A {@link SmeltError} passes through untouched — `assertLocalResource` and
+ * `grammarPath` already refuse in smelt's own currency, and rewrapping would bury a
+ * sentence written deliberately under a generic one.
+ */
+async function inContract<T>(run: () => Promise<T>, what: string): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof SmeltError) throw error;
+    throw new GrammarUnavailableError(`${what}: ${describeFailure(error)}.`, { cause: error });
+  }
+}
+
+/**
+ * What Node or V8 actually said. Never invented, never swallowed — the wasm cases
+ * (`CompileError`, `RangeError`) carry no `errno`, and their message is the whole
+ * diagnosis.
+ */
+function describeFailure(cause: unknown): string {
+  if (cause instanceof Error && cause.message !== '') return cause.message;
+  return String(cause);
 }
 
 /** Reset the grammar cache. Tests use it; production has no reason to. */

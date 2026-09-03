@@ -1,4 +1,6 @@
 import {
+  chmodSync,
+  cpSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -10,11 +12,11 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { tagsCacheKey, TAGS_CACHE_FORMAT } from '@guard/repomap/cache';
+import { TagsCache, tagsCacheKey, TAGS_CACHE_FORMAT } from '@guard/repomap/cache';
 import {
   buildRepoMap,
   DEFAULT_REPO_IGNORE,
@@ -31,7 +33,7 @@ import { extractTags } from '@guard/repomap/tags';
 import { nodeFsReader } from '@guard/repomap/reader';
 
 import { STUB_ROOT, stubReader } from '../repo-reader-stub.ts';
-import { readSource } from './_source.ts';
+import { guardSrcRoot, packageRoot, readSource } from './_source.ts';
 import type { GuardMutation } from './_mutations.ts';
 
 /**
@@ -77,10 +79,16 @@ import type { GuardMutation } from './_mutations.ts';
  *     promise about errors, and the repo map is the module most able to break it: it
  *     walks a whole tree. A missing root, an unreadable file, an unusable cache
  *     directory — each arrives wrapped, naming the path, never as a raw Node errno.
- * 11. **The tags cache is bounded.** The key is a content hash, so an edit orphans an
- *     entry rather than replacing it; unswept, every pre-edit version of every file
- *     lives forever. Each build sweeps what it did not use — and a miss may only make
- *     the next map slower, never different.
+ *     The tree is not the only way out: every mappable file also reaches the grammar
+ *     loader, where `existsSync` reports a `.wasm`'s *presence* and never its
+ *     readability, so an unreadable or truncated grammar leaked a raw `EACCES` or a
+ *     V8 `RangeError` past the same `catch`. That path is pinned here too.
+ * 11. **The tags cache is bounded, and the bound is never fatal.** The key is a
+ *     content hash, so an edit orphans an entry rather than replacing it; unswept,
+ *     every pre-edit version of every file lives forever. Each build sweeps what it
+ *     did not use — and a miss may only make the next map slower, never different,
+ *     which is also why a sweep that cannot even list its directory reports `0`
+ *     rather than throwing away a map that was already computed.
  * 12. **The ranking's resolution limit is written down.** References bind by bare
  *     identifier, so same-name symbols share rank. That is Aider's design and not a
  *     bug — but undocumented it is a trap, so the behaviour and the sentences
@@ -742,6 +750,97 @@ describe('the repo map keeps its claims', () => {
     expect(cold.text, 'an emptied cache changed the map instead of only slowing it').toBe(last);
   });
 
+  it('keeps a grammar that resolves but will not load inside the contract', async () => {
+    // The SmeltError promise is not only about `node:fs` under src/repomap/. Every
+    // mappable file in the tree reaches the grammar loader, and `grammarPath`'s
+    // `existsSync` reports a `.wasm`'s PRESENCE, never its readability — so a grammar
+    // that resolved and then would not load threw a raw error: `EACCES` from an
+    // unreadable file, a V8 `RangeError`/`CompileError` from a truncated or
+    // half-extracted one, straight past a caller catching SmeltError.
+    //
+    // Breaking the real bundled grammars would race every other test file, so the
+    // loader is exercised in an isolated copy of the guard source instead:
+    // `grammar.ts` resolves `../../grammars/` against its own module URL, so a copy at
+    // <scratch>/src/plan/grammar.ts reads <scratch>/grammars/. The copy is taken from
+    // the guard source root, so a mutation applied to `plan/grammar.ts` travels into
+    // it, and `errors.ts` is imported from the same copy because class identity does
+    // not cross module graphs.
+    const parent = join(packageRoot(), '.guard-scratch');
+    mkdirSync(parent, { recursive: true });
+    const isolated = mkdtempSync(join(parent, 'grammar-'));
+    scratchDirs.push(isolated);
+    cpSync(guardSrcRoot(), join(isolated, 'src'), { recursive: true });
+    const grammars = join(isolated, 'grammars');
+    mkdirSync(grammars, { recursive: true });
+    // Present, and unreadable: a directory where the `.wasm` belongs, so the read
+    // fails with an errno the way a permission or ownership problem does.
+    mkdirSync(join(grammars, 'tree-sitter-typescript.wasm'));
+    // Present, readable, and not a grammar: the truncated-tarball case, where the
+    // raw error comes from V8 rather than from Node and carries no `code` at all.
+    writeFileSync(join(grammars, 'tree-sitter-python.wasm'), 'not a wasm module\n');
+
+    const loader: typeof import('@guard/plan/grammar') = await import(
+      pathToFileURL(join(isolated, 'src', 'plan', 'grammar.ts')).href
+    );
+    const errors: typeof import('@guard/errors') = await import(
+      pathToFileURL(join(isolated, 'src', 'errors.ts')).href
+    );
+
+    for (const language of ['typescript', 'python'] as const) {
+      const failure = await loader.loadGrammar(language).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(failure, `an unusable ${language} grammar stopped failing at all`).toBeDefined();
+      expect(
+        failure,
+        `a raw error escaped loadGrammar for ${language} — the SmeltError guarantee has a hole in it`,
+      ).toBeInstanceOf(errors.SmeltError);
+      expect(failure).toBeInstanceOf(errors.GrammarUnavailableError);
+      expect((failure as Error).message, 'the failure does not name the grammar path').toContain(
+        join(grammars, `tree-sitter-${language}.wasm`),
+      );
+      expect(
+        (failure as Error).cause,
+        'the original error was thrown away, not wrapped',
+      ).toBeDefined();
+    }
+  });
+
+  it('never fails a computed map over the cache sweep: an unlistable directory prunes 0', async () => {
+    // The sweep is housekeeping, and it runs after the tree has been walked, ranked
+    // and rendered. A listing that throws therefore destroys a finished map over a
+    // cache smelt only wanted to tidy — the trade this cache is forbidden to make,
+    // and one an ordinary external cleaner can trigger by removing the directory
+    // between the last write and the sweep.
+    const cacheDir = scratch('smelt-repomap-sweep-');
+    const cache = new TagsCache(cacheDir);
+    rmSync(join(cacheDir, 'tags'), { recursive: true, force: true });
+    expect(
+      cache.sweep(new Set<string>()),
+      'a cache directory that vanished under the sweep failed the whole map instead of pruning nothing',
+    ).toBe(0);
+
+    // And end to end, with the directory present but unreadable: the map still comes
+    // back, byte for byte what a healthy cache produced.
+    const root = scratch('smelt-repomap-sweep-tree-');
+    writeFileSync(join(root, 'only.ts'), 'export function kept(): number {\n  return 1;\n}\n');
+    const healthyDir = scratch('smelt-repomap-sweep-ok-');
+    const healthy = await buildRepoMap({ root, budgetBytes: BUDGET, cacheDir: healthyDir });
+
+    const lockedDir = scratch('smelt-repomap-sweep-locked-');
+    await buildRepoMap({ root, budgetBytes: BUDGET, cacheDir: lockedDir });
+    chmodSync(join(lockedDir, 'tags'), 0o333); // writable and traversable, not listable
+    try {
+      const locked = await buildRepoMap({ root, budgetBytes: BUDGET, cacheDir: lockedDir });
+      expect(locked.text, 'the map changed because its cache could not be tidied').toBe(
+        healthy.text,
+      );
+    } finally {
+      chmodSync(join(lockedDir, 'tags'), 0o755);
+    }
+  });
+
   it('binds references by bare identifier, and says so where a reader will meet it', async () => {
     // Aider's design, inherited on purpose, and judged not a bug: a reference tag is
     // a name, not a resolved symbol. Undocumented it is a trap, so both the behaviour
@@ -886,5 +985,20 @@ export const MUTATIONS: GuardMutation[] = [
     find: ' * **What the ranking can and cannot resolve.** A reference binds to a definition **by',
     replace: ' * A reference binds to a definition **by',
     why: "the resolution limit deleted from the map's own module doc — a reader of buildRepoMap meets refsIn with nothing to tell them it counts a name rather than a symbol, and the one place the limit was stated for the module's own callers is gone",
+  },
+  {
+    id: 'grammar-load-error-unwrapped',
+    file: 'plan/grammar.ts',
+    find: '    if (error instanceof SmeltError) throw error;\n    throw new GrammarUnavailableError(`${what}: ${describeFailure(error)}.`, { cause: error });',
+    replace: '    throw error;',
+    why: "the grammar loader's failures stop being wrapped — `grammarPath`'s existsSync proves presence and never readability, so an unreadable or truncated .wasm throws a raw EACCES or a V8 RangeError out of both smelt() and buildRepoMap(), straight past a consumer catching SmeltError",
+  },
+  {
+    id: 'repomap-sweep-listing-fatal',
+    file: 'repomap/cache.ts',
+    find: '    let names: string[];\n    try {\n      names = readdirSync(this.#entriesDir);\n    } catch {\n      return 0;\n    }',
+    replace:
+      "    const names = fsCall('list the tags cache directory', this.#entriesDir, () =>\n      readdirSync(this.#entriesDir),\n    );",
+    why: 'the tags-cache sweep fails the build when it cannot list its own directory — housekeeping that runs after the tree is walked, ranked and rendered then throws a fully computed map away over a cache smelt only wanted to tidy, which is exactly the slower-map-versus-no-map trade this cache is forbidden to make',
   },
 ];
