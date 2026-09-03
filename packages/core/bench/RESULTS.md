@@ -132,3 +132,31 @@ here is extrapolated, rounded up, or converted between units.
 | multi-file-grep | tier 1 | 2026-09-03 | 8d700b307c09  | —     | bytes | 6451  | 986    | 2        | budget 1500 B, lexical/v1                  |
 | stack-trace     | tier 1 | 2026-09-03 | 8d700b307c09  | —     | bytes | 452   | 344    | 1        | budget 400 B, lexical/v1                   |
 | build-log       | tier 1 | 2026-09-03 | 8d700b307c09  | —     | bytes | 16354 | 109    | 1        | budget 800 B, lexical/v1                   |
+
+## run 2026-09-03 — tier 1 — corpus 15b5543f5515
+
+| case            | tier   | date       | corpus commit | model | unit  | input | output | elisions | note                                       |
+| --------------- | ------ | ---------- | ------------- | ----- | ----- | ----- | ------ | -------- | ------------------------------------------ |
+| large-ts-file   | tier 1 | 2026-09-03 | 15b5543f5515  | —     | bytes | 31229 | 10866  | 3        | budget 4000 B, structural/v1 — OVER BUDGET |
+| tsx-component   | tier 1 | 2026-09-03 | 15b5543f5515  | —     | bytes | 1090  | 861    | 1        | budget 700 B, structural/v1 — OVER BUDGET  |
+| java-classes    | tier 1 | 2026-09-03 | 15b5543f5515  | —     | bytes | 689   | 366    | 2        | budget 400 B, structural/v1                |
+| multi-file-grep | tier 1 | 2026-09-03 | 15b5543f5515  | —     | bytes | 6451  | 986    | 2        | budget 1500 B, lexical/v1                  |
+| stack-trace     | tier 1 | 2026-09-03 | 15b5543f5515  | —     | bytes | 452   | 344    | 1        | budget 400 B, lexical/v1                   |
+| build-log       | tier 1 | 2026-09-03 | 15b5543f5515  | —     | bytes | 16354 | 109    | 1        | budget 800 B, lexical/v1                   |
+
+### Reading `large-ts-file` across the last three runs
+
+Its `input` column moved 22462 → 27889 → 31229, and its `output` 3680 → 9632 → 10866.
+None of that is the planner behaving differently. `large-ts-file`'s corpus file _is_
+`packages/core/src/plan/structural.ts`, materialized from the working tree and
+sha256-pinned — so every commit that edits the structural planner also edits the thing
+being measured, and the corpus-commit column is where that shows. Comparing two of
+these tables as a before/after of one input reads a change that did not happen.
+
+What the last two runs did change: the structural planner grew a budget rung, and it
+fires on none of these six cases. Planning each structural case twice — once at its
+declared budget, once at a budget nothing can exceed — gives byte-identical plans, so
+the two rows marked OVER BUDGET (large-ts-file 10866/4000, tsx-component 861/700) are
+the maximal-run pass alone, over budget with no profitable sub-run left to take. The
+rung's own case is a 158-byte fixture in `test/structural.test.ts`; this corpus does not
+exercise it, and a case that does is worth adding.
