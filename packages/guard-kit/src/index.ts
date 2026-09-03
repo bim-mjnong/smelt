@@ -30,3 +30,12 @@ export {
   type WalkResult,
 } from './walk.ts';
 export { assertNoNetwork, type NoNetworkRuling, type WalkCoverage } from './no-network.ts';
+export {
+  ambientNamespaceViolations,
+  AMBIENT_GLOBAL_NAMESPACES,
+  deadSourcemapViolations,
+  packPackage,
+  strictModeViolations,
+  type PackedPackage,
+  type ToolSchema,
+} from './packaging.ts';
