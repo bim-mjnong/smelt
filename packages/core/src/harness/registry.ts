@@ -120,13 +120,23 @@ function jsonHookSteps(): readonly HarnessJsonHooks[] {
 }
 
 /**
- * The two session-lifecycle hooks this preset offers, named in each harness's schema:
- * `smelt stats` when a turn ends, an opening `smelt map` when a session starts. Only
- * the harnesses whose schema carries these events wire them (`step.lifecycle`), and
- * `cli/hooks.ts` writes the entries under these exact keys — one spelling, so the
- * managed-event list below cannot fall behind what the installer writes.
+ * The session-lifecycle hooks this preset offers, named in each harness's schema:
+ * `smelt stats` when a turn ends, and — sharing one `SessionStart` event — an opening
+ * `smelt map` and a lint of the repository's own instruction files. Only the harnesses
+ * whose schema carries these events wire them (`step.lifecycle`), and `cli/hooks.ts`
+ * writes the entries under these exact keys — one spelling, so the managed-event list
+ * below cannot fall behind what the installer writes.
+ *
+ * `map` and `lint` deliberately name the **same** event. They are two independent
+ * toggles under one key, which is why `cli/hooks.ts` merges their entries into one
+ * array rather than spreading two objects (the second would silently replace the
+ * first) and why a re-run tells them apart by the command each entry runs.
  */
-export const LIFECYCLE_EVENTS = { stats: 'Stop', map: 'SessionStart' } as const;
+export const LIFECYCLE_EVENTS = {
+  stats: 'Stop',
+  map: 'SessionStart',
+  lint: 'SessionStart',
+} as const;
 
 /**
  * The events this installer manages, across every harness's spelling of them —

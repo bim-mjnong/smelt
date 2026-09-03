@@ -351,6 +351,7 @@ describe('one announcement — a rewrite says the same sentence everywhere it ca
       guard: true,
       statsOnStop: false,
       mapOnStart: false,
+      lintOnStart: false,
       enforcement: 'rewrite',
       thresholdBytes: 8192,
     });
