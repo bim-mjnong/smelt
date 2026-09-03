@@ -205,3 +205,13 @@ registry, idField)`: the key **is** the id, and the entry's id field agrees, so 
   property that could not be expressed while two modules hand-built the file, and the
   guard reads the key set out of the reader's own refusal, so a field the writer forgets
   goes red rather than becoming a setting the user believed was in force.
+- **Byte-faithful editor**: `src/text/json-edit.ts`. `editTopLevelProperty` replaces,
+  inserts or removes (`value === undefined`) **one top-level property** of a JSON object
+  in its source text, and `upsertMarkerBlock` / `stripMarkerBlock` do the same for a
+  block between two marker lines. The contract is the whole interface: change what you
+  were asked to and leave every other byte alone — indentation, key order, escapes,
+  number spellings, unknown keys. It knows nothing about harnesses or hooks;
+  `cli/hooks.ts` decides _what_ the merged `hooks` value is and hands it over. Under
+  `src/text/`, not `cli/`, because it is strings in, strings out — no argv, no stdout,
+  no CLI import — and the next byte-faithful edit (an instruction file) is its sibling,
+  not a CLI detail. `test/guards/json-edit.test.ts` pins the round trip.
