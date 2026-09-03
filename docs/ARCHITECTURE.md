@@ -871,8 +871,11 @@ const result = await smelter.smelt(toolOutput, {
 // 2. Expose the retrieval tool to the model, in your own SDK's shape.
 const { name, description, inputSchema, invoke } = smelter.tool;
 //   name === 'smelt_retrieve'; invoke({ hash }) → the exact original bytes
-//   throws UnknownHashError on an unknown hash — surface that to the model as a
-//   tool error, never as empty text
+//   inputSchema is strict-mode shaped (additionalProperties: false, every property
+//   required), so it registers as-is under OpenAI structured outputs
+//   throws UnknownHashError on an unknown hash, and StoreCorruptionError when a
+//   DirectoryElisionStore holds bytes that no longer hash to their own name —
+//   surface either to the model as a tool error, never as empty text
 
 // 3. Watch the honest signal.
 const { expansionRate, retrieveCalls, elisionsStored, allElisionsRetrieved } = smelter.stats();
