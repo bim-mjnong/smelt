@@ -27,6 +27,13 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
+    // `files` packs `dist`, never `src` — so a map whose `sources` names `../src/*.ts`
+    // is a dead end on every consumer's machine: go-to-definition lands nowhere and a
+    // stack trace resolves to a path that was never published. Inlining the sources
+    // into the maps keeps both working without packing a second copy of the tree that
+    // could drift from the one the maps point at. `test/guards/packaging.test.ts`
+    // holds the property against the packed tarball.
+    "inlineSources": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
 
