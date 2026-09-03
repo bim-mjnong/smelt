@@ -66,6 +66,12 @@ export class MemoryElisionStore implements ElisionStore {
     return content;
   }
 
+  /**
+   * True exactly when `retrieve(hash)` would return bytes. Nothing to verify: `put`
+   * hashed the content itself and no one else can reach the map, so a key here cannot
+   * name bytes that stopped matching it — unlike a directory on someone's disk, where
+   * {@link DirectoryElisionStore.has} re-hashes for this same promise.
+   */
   has(hash: string): boolean {
     return this.#blobs.has(hash);
   }

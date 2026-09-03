@@ -102,6 +102,43 @@ describe('the persistent store keeps Law 3 across restarts', () => {
     expect(errorName(() => store.put('content that will be damaged'))).toBe('StoreCorruptionError');
   });
 
+  /**
+   * `has()` is the cheap question a consumer asks *before* the expensive one, so its
+   * answer has to mean the same thing. It used to skip verification while `peek()` and
+   * `retrieve()` re-hashed: a damaged blob answered `true` and then threw on the next
+   * line, which is a lie told by the call whose whole job is to prevent that throw.
+   */
+  it('answers has() with the same verification retrieve() does, so a check cannot lie', () => {
+    const root = newRoot();
+    const store = new DirectoryElisionStore(root);
+    const hash = store.put('the bytes a consumer will check for before retrieving');
+    expect(store.has(hash)).toBe(true);
+
+    writeFileSync(join(root, 'blobs', hash), 'damaged behind the store’s back');
+
+    // Not `true` — the answer that would send a consumer straight into the throw.
+    expect(errorName(() => store.has(hash))).toBe('StoreCorruptionError');
+    expect(errorName(() => store.peek(hash))).toBe('StoreCorruptionError');
+    expect(errorName(() => store.retrieve(hash))).toBe('StoreCorruptionError');
+    // And damage stays distinct from absence here too: a hash never stored is `false`,
+    // not an error, exactly as `peek()` returns undefined rather than throwing.
+    expect(store.has('feedfacefeedface')).toBe(false);
+  });
+
+  it('does not count a check as a retrieval, damaged or not', () => {
+    const root = newRoot();
+    const store = new DirectoryElisionStore(root);
+    const kept = store.put('bytes that stay intact');
+    const damaged = store.put('bytes that will be damaged');
+    writeFileSync(join(root, 'blobs', damaged), 'damaged');
+
+    store.has(kept);
+    expect(errorName(() => store.has(damaged))).toBe('StoreCorruptionError');
+    // A check journals nothing: counting one would inflate retrieveCalls, and with it
+    // the expansion rate — the number this library exists to keep honest.
+    expect(store.stats()).toMatchObject({ retrieveCalls: 0, misses: 0, uniqueRetrieved: 0 });
+  });
+
   it('a torn journal tail costs only its own record, never the next one', () => {
     const root = newRoot();
     const store = new DirectoryElisionStore(root);
@@ -192,5 +229,12 @@ export const MUTATIONS: GuardMutation[] = [
     find: "    this.#appendLogCounting('hit', hash);",
     replace: "    // this.#appendLogCounting('hit', hash);",
     why: 'the retrieval journal never written — the expansion rate resets to a flattering zero on every restart',
+  },
+  {
+    id: 'law3-dir-store-has-skips-verify',
+    file: 'store-dir.ts',
+    find: '    return this.peek(hash) !== undefined;',
+    replace: '    return this.#readBlob(hash) !== undefined;',
+    why: 'has() back to an existence check that skips the hash — a corrupt blob answers true and then throws StoreCorruptionError on the next line, so the consumer that checked first was told a lie by the call whose job was to prevent that throw',
   },
 ];

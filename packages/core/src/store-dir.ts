@@ -78,10 +78,22 @@ export interface DirectoryElisionStoreOptions {
  * - **Writes are crash-safe.** A blob is written to `tmp/`, `fsync`ed, then `link(2)`ed
  *   into `blobs/` — an atomic, no-clobber publish. A torn write dies in `tmp/`, where
  *   nothing looks; a name in `blobs/` always refers to a fully written file.
- * - **Reads verify.** `retrieve()` and `peek()` re-hash the bytes and refuse a mismatch
- *   with {@link StoreCorruptionError} — a damaged blob is never handed back as a
- *   retrieval, and "we hold damaged bytes" is distinct from {@link UnknownHashError}'s
- *   "never existed". The guard in `test/guards/persistent-store.test.ts` watches this.
+ * - **`fsync` is only as strong as the platform makes it.** On macOS, `fsync(2)` hands
+ *   the write to the drive but does not force the drive to flush its own cache; only
+ *   `fcntl(F_FULLFSYNC)` does, and Node's `fsyncSync` does not issue it. The directory
+ *   flush after a publish is the same call, so it is `F_FULLFSYNC` there no more than
+ *   the blob's own flush is. A **power loss** on such a platform (or on any drive that
+ *   lies about its write cache) can therefore lose a blob or a journal line this code
+ *   has already `fsync`ed and reported as written. A **process** crash cannot: the
+ *   bytes are in the page cache and the publish is still atomic. Nothing is ever handed
+ *   back unverified either way, so the worst a lost blob can produce is
+ *   {@link UnknownHashError} — never wrong bytes presented as right ones. "Crash-safe"
+ *   is the claim, deliberately not "power-loss-proof".
+ * - **Reads verify.** `retrieve()`, `peek()` and `has()` re-hash the bytes and refuse a
+ *   mismatch with {@link StoreCorruptionError} — a damaged blob is never handed back as
+ *   a retrieval nor reported as present, and "we hold damaged bytes" is distinct from
+ *   {@link UnknownHashError}'s "never existed". The guard in
+ *   `test/guards/persistent-store.test.ts` watches this.
  * - **Counters survive a restart.** Every `retrieve()` appends one `fsync`ed line to
  *   `retrievals.log`, and `stats()` is a fold over it — so `expansionRate` stays
  *   meaningful across a whole session, not just one process. A crash in the middle of
@@ -202,8 +214,27 @@ export class DirectoryElisionStore implements ElisionStore {
     return content;
   }
 
+  /**
+   * Whether this hash can be **retrieved** — verified, exactly as {@link peek} and
+   * {@link retrieve} verify, because it is `peek()`.
+   *
+   * `has()` used to be the one read that skipped verification: a damaged blob answered
+   * `true` and then threw {@link StoreCorruptionError} on the very next line, so a
+   * consumer that checked before retrieving was told a lie by the cheaper call. The two
+   * answers now come from one place and cannot drift: `true` means the bytes are there
+   * and hash to their name, `false` means this store never held them, and damage is
+   * raised rather than hidden behind a boolean — the same distinction `peek()` draws
+   * between "we hold damaged bytes" and "never existed".
+   *
+   * It stays uncounted: a check is not the model asking for material back, and counting
+   * one would inflate `retrieveCalls` and with it the expansion rate, which is the one
+   * number this library exists to keep honest. So no journal line is written here, not
+   * even for the corrupt case — `retrieve()` journals that when the model asks.
+   *
+   * @throws {StoreCorruptionError} when the stored bytes do not hash to their name.
+   */
   has(hash: string): boolean {
-    return this.#readBlob(hash) !== undefined;
+    return this.peek(hash) !== undefined;
   }
 
   /**
@@ -385,6 +416,9 @@ export class DirectoryElisionStore implements ElisionStore {
  * is still atomic — only the durability of the directory entry falls back to the OS's
  * own schedule. Only that refusal is swallowed: a real I/O failure (`EIO`) propagates,
  * because "the disk could not flush" must never be reported as a successful put.
+ *
+ * Where it does work it is still a plain `fsync`, not `F_FULLFSYNC` — see the
+ * durability note on {@link DirectoryElisionStore} for what that costs on macOS.
  */
 function fsyncDirBestEffort(path: string): void {
   let fd: number;
