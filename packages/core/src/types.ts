@@ -265,6 +265,13 @@ export interface ElisionStore {
    * @throws {UnknownHashError} when the hash is unknown.
    */
   retrieve(hash: string): string;
+  /**
+   * Whether this hash can be retrieved — **not** merely whether a slot bearing it
+   * exists. `true` must mean the very next `retrieve(hash)` returns bytes, so a store
+   * that verifies content on read verifies here too and raises its corruption error
+   * rather than answering `true` for bytes it would then refuse. Uncounted: a check is
+   * not the model asking for material back.
+   */
   has(hash: string): boolean;
   /** A snapshot of the counters. See {@link RetrieveStats}. */
   stats(): RetrieveStats;

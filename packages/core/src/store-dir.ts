@@ -78,10 +78,30 @@ export interface DirectoryElisionStoreOptions {
  * - **Writes are crash-safe.** A blob is written to `tmp/`, `fsync`ed, then `link(2)`ed
  *   into `blobs/` — an atomic, no-clobber publish. A torn write dies in `tmp/`, where
  *   nothing looks; a name in `blobs/` always refers to a fully written file.
- * - **Reads verify.** `retrieve()` and `peek()` re-hash the bytes and refuse a mismatch
- *   with {@link StoreCorruptionError} — a damaged blob is never handed back as a
- *   retrieval, and "we hold damaged bytes" is distinct from {@link UnknownHashError}'s
- *   "never existed". The guard in `test/guards/persistent-store.test.ts` watches this.
+ * - **`fsync` is only as strong as the platform makes it.** Every flush here is Node's
+ *   `fsyncSync`, which is libuv's `uv_fs_fsync`, and what that reaches the hardware with
+ *   differs by platform. On Apple it is strong: libuv knows macOS's own `fsync(2)` only
+ *   hands the write to the drive, so its `__APPLE__` branch issues
+ *   `fcntl(fd, F_FULLFSYNC)` — a real drive-cache flush — before falling back to
+ *   `F_BARRIERFSYNC` and then plain `fsync(2)`. Measured here (Node 26, libuv 1.52,
+ *   internal APFS SSD): an 11-byte append costs 0.01 ms unflushed, 5.5 ms through
+ *   `fsyncSync`, and 0.10 ms through a raw `fsync(2)` against 4.8 ms through a raw
+ *   `F_FULLFSYNC` — the cost says which syscall is being made. Everywhere else libuv
+ *   calls plain `fsync(2)`, which is as durable as the drive's honesty about its own
+ *   write cache. So a **power loss** can lose a blob or a journal line this code has
+ *   already `fsync`ed and reported as written on any non-Apple platform whose drive
+ *   lies, and on Apple only where `F_FULLFSYNC` itself fails and libuv degrades
+ *   silently — some non-APFS and network mounts. A **process** crash cannot lose one
+ *   anywhere: the bytes are in the page cache and the publish is still atomic. Nothing
+ *   is ever handed back unverified either way, so the worst a lost blob can produce is
+ *   {@link UnknownHashError} — never wrong bytes presented as right ones. "Crash-safe"
+ *   is the claim, deliberately not "power-loss-proof": the durability is real, it is
+ *   just not unconditional.
+ * - **Reads verify.** `retrieve()`, `peek()` and `has()` re-hash the bytes and refuse a
+ *   mismatch with {@link StoreCorruptionError} — a damaged blob is never handed back as
+ *   a retrieval nor reported as present, and "we hold damaged bytes" is distinct from
+ *   {@link UnknownHashError}'s "never existed". The guard in
+ *   `test/guards/persistent-store.test.ts` watches this.
  * - **Counters survive a restart.** Every `retrieve()` appends one `fsync`ed line to
  *   `retrievals.log`, and `stats()` is a fold over it — so `expansionRate` stays
  *   meaningful across a whole session, not just one process. A crash in the middle of
@@ -202,8 +222,27 @@ export class DirectoryElisionStore implements ElisionStore {
     return content;
   }
 
+  /**
+   * Whether this hash can be **retrieved** — verified, exactly as {@link peek} and
+   * {@link retrieve} verify, because it is `peek()`.
+   *
+   * `has()` used to be the one read that skipped verification: a damaged blob answered
+   * `true` and then threw {@link StoreCorruptionError} on the very next line, so a
+   * consumer that checked before retrieving was told a lie by the cheaper call. The two
+   * answers now come from one place and cannot drift: `true` means the bytes are there
+   * and hash to their name, `false` means this store never held them, and damage is
+   * raised rather than hidden behind a boolean — the same distinction `peek()` draws
+   * between "we hold damaged bytes" and "never existed".
+   *
+   * It stays uncounted: a check is not the model asking for material back, and counting
+   * one would inflate `retrieveCalls` and with it the expansion rate, which is the one
+   * number this library exists to keep honest. So no journal line is written here, not
+   * even for the corrupt case — `retrieve()` journals that when the model asks.
+   *
+   * @throws {StoreCorruptionError} when the stored bytes do not hash to their name.
+   */
   has(hash: string): boolean {
-    return this.#readBlob(hash) !== undefined;
+    return this.peek(hash) !== undefined;
   }
 
   /**
@@ -385,6 +424,10 @@ export class DirectoryElisionStore implements ElisionStore {
  * is still atomic — only the durability of the directory entry falls back to the OS's
  * own schedule. Only that refusal is swallowed: a real I/O failure (`EIO`) propagates,
  * because "the disk could not flush" must never be reported as a successful put.
+ *
+ * Where it does work it is the same `fsyncSync` the blob's own flush uses, and so is
+ * exactly as strong as that — see the durability note on {@link DirectoryElisionStore}
+ * for what that means per platform.
  */
 function fsyncDirBestEffort(path: string): void {
   let fd: number;

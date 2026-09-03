@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -9,7 +9,12 @@ import { CliUsageError } from '../src/errors.ts';
 import { STRUCTURAL_LANGUAGES } from '../src/plan/structural.ts';
 import { CONFIG_FILE_NAME, findConfigFile } from '../src/cli/config.ts';
 import type { SmeltConfig } from '../src/cli/config.ts';
-import { MEASURE_STUB_FILE, RERANK_STUB_FILE, runInit } from '../src/cli/init.ts';
+import {
+  findWorkspaceRoot,
+  MEASURE_STUB_FILE,
+  RERANK_STUB_FILE,
+  runInit,
+} from '../src/cli/init.ts';
 import { EXIT, runCli } from '../src/cli/run.ts';
 import type { CliIo } from '../src/cli/run.ts';
 
@@ -175,6 +180,114 @@ describe('a fresh run', () => {
     expect(output).not.toMatch(/\d+\s*%/);
     expect(output.toLowerCase()).not.toContain('hit rate');
     expect(output.toLowerCase()).not.toContain('sav');
+  });
+
+  it('states where runs will look for the config it is about to write', async () => {
+    // Discovery walks UP, and a wizard that does not say so leaves the user to infer
+    // it from a path — the same silence that made the monorepo case a trap.
+    const { output } = await wizard(MINIMAL_ANSWERS);
+    expect(output).toContain(`sets up ${CONFIG_FILE_NAME} in ${dir}`);
+    expect(output).toContain('walking UP');
+    expect(output).not.toContain('workspace'); // there is none here, so nothing is asked
+  });
+});
+
+describe('a fresh run inside a monorepo package', () => {
+  let root: string;
+  let pkg: string;
+
+  beforeEach(() => {
+    root = dir;
+    pkg = join(root, 'packages', 'web');
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
+  });
+
+  it('says which end of config discovery it is writing to, and asks', async () => {
+    const { output } = await wizard(['1', ...MINIMAL_ANSWERS], pkg);
+    expect(output).toContain(`inside a workspace rooted at ${root}`);
+    expect(output).toContain(`would not find it`);
+    expect(output).toContain(`where should ${CONFIG_FILE_NAME} go?`);
+  });
+
+  it('writes at the workspace root when that is the answer — where runs will look', async () => {
+    const { code } = await wizard(['1', ...MINIMAL_ANSWERS], pkg);
+    expect(code).toBe(EXIT.ok);
+    expect(existsSync(join(root, CONFIG_FILE_NAME))).toBe(true);
+    expect(existsSync(join(pkg, CONFIG_FILE_NAME))).toBe(false);
+    // The point of the whole question: a run from the root now finds it.
+    expect(findConfigFile(root)).toBe(join(root, CONFIG_FILE_NAME));
+    expect(readConfig(root).defaultBudgetBytes).toBe(4000);
+  });
+
+  it('writes in the package when that is the answer, and nowhere else', async () => {
+    const { code } = await wizard(['2', ...MINIMAL_ANSWERS], pkg);
+    expect(code).toBe(EXIT.ok);
+    expect(existsSync(join(pkg, CONFIG_FILE_NAME))).toBe(true);
+    expect(existsSync(join(root, CONFIG_FILE_NAME))).toBe(false);
+  });
+
+  it('writes only into the directory the confirm listing named', async () => {
+    const { output } = await wizard(['2', ...MINIMAL_ANSWERS], pkg);
+    expect(output).toContain(`About to write, into ${pkg}`);
+    expect(existsSync(join(root, CONFIG_FILE_NAME))).toBe(false);
+    // …and the same promise from the other answer.
+    rmSync(join(pkg, CONFIG_FILE_NAME), { force: true });
+    const rooted = await wizard(['1', ...MINIMAL_ANSWERS], pkg);
+    expect(rooted.output).toContain(`About to write, into ${root}`);
+    expect(existsSync(join(pkg, CONFIG_FILE_NAME))).toBe(false);
+  });
+
+  it('reverses into the directory question, keeping the answers given since (Rule 3)', async () => {
+    // The directory is the one answer you cannot change afterwards, so it must be the
+    // one you can get back to. `back` off the front of the steps re-asks it; the budget
+    // already answered is still the default, so reversing is not restarting.
+    const { code, output } = await wizard(
+      ['2', '4000', 'back', 'back', '1', '', ...MINIMAL_ANSWERS.slice(1)],
+      pkg,
+    );
+    expect(code).toBe(EXIT.ok);
+    expect(output).not.toContain('first step'); // there IS something before it
+    expect(output.split(`where should ${CONFIG_FILE_NAME} go?`)).toHaveLength(3); // asked twice
+    expect(output).toContain(`About to write, into ${root}`);
+    expect(existsSync(join(pkg, CONFIG_FILE_NAME))).toBe(false);
+    expect(readConfig(root).defaultBudgetBytes).toBe(4000);
+  });
+
+  it('defaults to the root, and re-asks an answer it does not understand', async () => {
+    const { code, output } = await wizard(['3', '', ...MINIMAL_ANSWERS], pkg);
+    expect(code).toBe(EXIT.ok);
+    expect(output).toContain('1 for the workspace root, 2 for here.');
+    expect(existsSync(join(root, CONFIG_FILE_NAME))).toBe(true);
+  });
+
+  it('detects a npm/yarn-style workspaces field too, and ignores an unparseable manifest', async () => {
+    rmSync(join(root, 'pnpm-workspace.yaml'));
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }));
+    expect(findWorkspaceRoot(pkg)).toBe(root);
+
+    writeFileSync(join(root, 'package.json'), '{ not json');
+    expect(findWorkspaceRoot(pkg)).toBeUndefined();
+    // A plain package (no workspaces field) is not a workspace root either.
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'not-a-workspace' }));
+    expect(findWorkspaceRoot(pkg)).toBeUndefined();
+  });
+
+  it('asks nothing when the workspace root is where you already are', async () => {
+    const { output } = await wizard(MINIMAL_ANSWERS, root);
+    expect(output).not.toContain('where should');
+    expect(existsSync(join(root, CONFIG_FILE_NAME))).toBe(true);
+  });
+
+  it('is not asked at all on a re-run: the found config decides where it lives', async () => {
+    writeFileSync(
+      join(root, CONFIG_FILE_NAME),
+      `${JSON.stringify({ smeltConfig: 1, defaultBudgetBytes: 4000 }, null, 2)}\n`,
+    );
+    const { output } = await wizard(['budget', '9999', 'done', 'yes', 'yes'], pkg);
+    expect(output).not.toContain('where should');
+    expect(readConfig(root).defaultBudgetBytes).toBe(9999);
+    expect(existsSync(join(pkg, CONFIG_FILE_NAME))).toBe(false);
   });
 });
 

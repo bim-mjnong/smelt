@@ -1,7 +1,7 @@
 import { CliUsageError } from '../../errors.ts';
 import { CLI_NAME } from '../shell.ts';
 
-import { VERB_FLAGS } from './flags.ts';
+import { flagList, VERB_FLAGS } from './flags.ts';
 import type { FlagName, FlagValues, VerbFlag } from './flags.ts';
 import { hooksCommand } from './hooks.ts';
 import type { HooksInvocation } from './hooks.ts';
@@ -114,13 +114,6 @@ function label(command: AnySubcommand): string {
 /** How a command is named as the *owner* of a flag: the form you would type. */
 function ownerLabel(command: AnySubcommand): string {
   return command.name === DEFAULT_VERB ? 'a single-blob run' : `\`${CLI_NAME} ${command.name}\``;
-}
-
-/** `--a`, `--a and --b`, `--a, --b and --c` — in flag-table order, always. */
-function flagList(flags: readonly VerbFlag[]): string {
-  const spelled = VERB_FLAGS.filter((flag) => flags.includes(flag)).map((flag) => `--${flag}`);
-  if (spelled.length <= 1) return spelled.join('');
-  return `${spelled.slice(0, -1).join(', ')} and ${spelled.at(-1) ?? ''}`;
 }
 
 /**

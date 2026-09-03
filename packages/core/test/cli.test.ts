@@ -314,6 +314,29 @@ describe('--reconstruct closes the round trip from a shell', () => {
     expect(code).toBe(EXIT.usage);
     expect(stderr).toMatch(/makes no sense/);
   });
+
+  it('refuses the planning flags too, rather than accepting and ignoring them', async () => {
+    // Each of these used to be read, dropped on the floor, and the round trip ran as
+    // if it had never been typed — `--json` most visibly, since it printed the text.
+    for (const argv of [
+      ['--json'],
+      ['--focus', 'handleRequest'],
+      ['--language', 'python'],
+      ['--strategy', 'structural'],
+    ]) {
+      const { code, stdout, stderr } = await run(['--reconstruct', ...argv]);
+      expect(code, argv.join(' ')).toBe(EXIT.usage);
+      expect(stderr, argv.join(' ')).toContain(argv[0]!);
+      expect(stderr, argv.join(' ')).toMatch(/no sense with --reconstruct/);
+      expect(stdout, argv.join(' ')).toBe('');
+    }
+  });
+
+  it('names every ignored flag in one refusal, not just the first', async () => {
+    const { code, stderr } = await run(['--reconstruct', '--budget', '4000', '--json']);
+    expect(code).toBe(EXIT.usage);
+    expect(stderr).toMatch(/--budget and --json make no sense with --reconstruct/);
+  });
 });
 
 describe('the exit code never lies about the budget', () => {

@@ -234,6 +234,57 @@ describe('every verb refuses every flag it does not own — the whole cross prod
   });
 });
 
+/**
+ * The default verb's second job, `--reconstruct`, owns a *subset* of the verb's flags —
+ * which the registry cannot express, because both jobs are one verb. So the round trip
+ * refuses the rest itself, and this is the cross product of that: every flag the verb
+ * owns except `--reconstruct` must be refused when typed beside it, with the same exit
+ * code and the same shape as the ownership refusals.
+ *
+ * It used to refuse `--budget` alone and silently ignore `--json`, `--focus`,
+ * `--language` and `--strategy` — a run that printed the reconstructed text while the
+ * user believed they had asked for an envelope, which is this repository's own
+ * definition of a bug.
+ */
+describe('the round trip refuses every flag it cannot honour, rather than ignoring it', () => {
+  // Restated by hand: what `--reconstruct` shares the verb with. Derived from OWNED,
+  // which is itself hand-written — the registry must not be its own witness.
+  const beside = OWNED.smelt.filter((flag) => flag !== 'reconstruct');
+
+  it('leaves nothing the verb owns unaccounted for', () => {
+    expect([...beside].toSorted()).toEqual(['budget', 'focus', 'json', 'language', 'strategy']);
+  });
+
+  it.each(beside)('`smelt --reconstruct --%s` is refused, naming the flag', (flag) => {
+    const argv = ['--reconstruct', ...FLAG_ARGV[flag]];
+    expect(() => parseSmeltArgs(argv), argv.join(' ')).toThrow(CliUsageError);
+    let message = '';
+    try {
+      parseSmeltArgs(argv);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message, argv.join(' ')).toContain(`--${flag}`);
+    expect(message, argv.join(' ')).toContain('no sense with --reconstruct');
+  });
+
+  it.each(beside)('`smelt --reconstruct --%s` exits with the usage code', async (flag) => {
+    const { code, stderr } = await usageErrorFor(['--reconstruct', ...FLAG_ARGV[flag]]);
+    expect(code, `--reconstruct --${flag}`).toBe(EXIT.usage);
+    expect(stderr, `--reconstruct --${flag}`).toContain(`--${flag}`);
+  });
+
+  it('names every offending flag at once, and the round trip alone is accepted', () => {
+    expect(() => parseSmeltArgs(['--reconstruct', '--focus', 'x', '--json'])).toThrow(
+      /--focus and --json make no sense with --reconstruct/,
+    );
+    expect(parseSmeltArgs(['--reconstruct', 'result.json'])).toMatchObject({
+      mode: 'reconstruct',
+      file: 'result.json',
+    });
+  });
+});
+
 describe('every verb accepts every flag it does own', () => {
   const owned = (Object.keys(SHIPPED) as Verb[]).flatMap((verb) =>
     SUBCOMMANDS[verb].flags.map((flag) => [verb, flag] as const),
@@ -321,5 +372,12 @@ export const MUTATIONS: GuardMutation[] = [
     find: '      const elsewhere = owner.flags.filter((flag) => ownersOf(flag).length === 1);',
     replace: '      const elsewhere = owner.flags.filter((flag) => ownersOf(flag).length >= 1);',
     why: "the redirect clause widened from the owner's exclusively-owned flags to all of them — the refusal starts asserting that shared flags (--budget, --focus, --json) belong to one verb, contradicting the help's own `map only.` prefixes and talking a user out of an invocation that works, so the cross-product must catch a clause naming a flag with more than one owner",
+  },
+  {
+    id: 'reconstruct-ignores-the-flags-it-cannot-honour',
+    file: 'cli/subcommands/smelt.ts',
+    find: '      refuseReconstructFlags(values);\n',
+    replace: '',
+    why: 'the round trip stops refusing the flags it cannot act on — `smelt --reconstruct --json` prints the reconstructed text while the user believed they asked for an envelope, the silently-ignored flag the ownership refusals exist to make impossible',
   },
 ];

@@ -60,6 +60,22 @@ export const VERB_FLAGS: readonly VerbFlag[] = Object.keys(CLI_FLAGS).filter(
   (name): name is VerbFlag => !(GLOBAL_FLAGS as readonly string[]).includes(name),
 );
 
+/**
+ * `--a`, `--a and --b`, `--a, --b and --c` — in flag-table order, always.
+ *
+ * Every refusal that names more than one flag spells the list this way: the
+ * ownership refusal in `./registry.ts`, and the default verb's `--reconstruct`
+ * refusal in `./smelt.ts`. It lives with the table because the *order* is the
+ * table's — a refusal that listed flags in the order the user happened to type them
+ * would read differently every time, and two refusals disagreeing about how to spell
+ * the same pair is the kind of drift this file exists to remove.
+ */
+export function flagList(flags: readonly VerbFlag[]): string {
+  const spelled = VERB_FLAGS.filter((flag) => flags.includes(flag)).map((flag) => `--${flag}`);
+  if (spelled.length <= 1) return spelled.join('');
+  return `${spelled.slice(0, -1).join(', ')} and ${spelled.at(-1) ?? ''}`;
+}
+
 /** What one flag's parsed value looks like, derived from how `parseArgs` was told to read it. */
 type FlagValue<F> = F extends { readonly type: 'boolean' }
   ? boolean
