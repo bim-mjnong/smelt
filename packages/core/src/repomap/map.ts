@@ -296,7 +296,10 @@ export async function buildRepoMap(options: RepoMapOptions): Promise<RepoMap> {
       pathOnlyPaths.push(rel);
       continue;
     }
-    const text = bytes.toString('utf8');
+    // `RepoReader.read` promises `Uint8Array`, not `Buffer` (its own note says why),
+    // and `ignoreBOM` keeps this byte-for-byte what `Buffer.toString('utf8')` did: a
+    // leading U+FEFF stays in the text instead of being silently eaten.
+    const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes);
     const tags = await tagsFor(text, language, cache, cacheCounts, liveKeys, warnings, rel);
     if (tags.defs.length === 0) pathOnlyPaths.push(rel);
     if (tags.defs.length > 0 || tags.refs.length > 0) parsed.push({ path: rel, tags });

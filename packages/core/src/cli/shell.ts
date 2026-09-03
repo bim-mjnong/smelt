@@ -26,10 +26,92 @@ export const CLI_NAME = 'smelt';
  * node type by import does not help: TypeScript resolves `node:stream` — and bare
  * `stream` — only through the same globally-included `@types/node`. So the published
  * surface describes the shape smelt actually consumes, which needs no node types at
- * all, and the wizards adapt it internally with `Readable.from`.
+ * all, and {@link answerReader} is the one adapter that reads it.
  * `test/guards/packaging.test.ts` holds the shipped declarations to it.
  */
 export type AnswerStream = AsyncIterable<string | Uint8Array>;
+
+/**
+ * One wizard's answers, one line at a time, plus the release that ends the process.
+ *
+ * `release` is not housekeeping — it is the difference between a wizard that exits and
+ * one the user has to Ctrl-C. See {@link answerReader}.
+ */
+export interface AnswerReader {
+  /** The next line, without its terminator, or `undefined` once input has ended. */
+  next(): Promise<string | undefined>;
+  /** Stop reading and let go of the source, so nothing it owns keeps the loop alive. */
+  release(): Promise<void>;
+}
+
+/**
+ * Read {@link AnswerStream} as lines — and, when the wizard is done, **let go of it**.
+ *
+ * This exists because the obvious adapter is a trap. Wrapping the answer stream in
+ * `Readable.from(...)` and handing that to `readline` reads the source through *its*
+ * async iterator, and closing the readline interface or destroying the wrapper ends
+ * only the wrapper: the source is left mid-`next()`, still subscribed, still holding
+ * its handle. On the real CLI that source is `process.stdin`, so `smelt init` wrote
+ * every file, printed `Done.` and then sat there forever — a hang only visible on an
+ * open pipe or a TTY, because EOF happens to end the iteration by itself, and EOF is
+ * what every scripted test hands it.
+ *
+ * So the source's own iterator is held here and nothing else touches it. `release`
+ * calls its `return()`, which is the contract an async iterable already has for "I am
+ * finished with you": `process.stdin`'s destroys the stream and unrefs the handle, an
+ * async generator runs its `finally`, and a plain array iterator does nothing at all.
+ * Crucially `release` is called between reads, never during one — an iterator awaiting
+ * `next()` cannot be returned out of, which is the very state the `Readable.from`
+ * wrapper left the source in.
+ *
+ * Bytes are decoded as UTF-8 across chunk boundaries, so a multi-byte character split
+ * across two reads survives; `\r\n` and a final line with no terminator both behave as
+ * readline did.
+ */
+export function answerReader(input: AnswerStream): AnswerReader {
+  const iterator = input[Symbol.asyncIterator]();
+  const decoder = new TextDecoder('utf-8');
+  let pending = '';
+  let ended = false;
+
+  const takeLine = (): string | undefined => {
+    const newline = pending.indexOf('\n');
+    if (newline === -1) return undefined;
+    const line = pending.slice(0, newline);
+    pending = pending.slice(newline + 1);
+    return line.endsWith('\r') ? line.slice(0, -1) : line;
+  };
+
+  return {
+    async next(): Promise<string | undefined> {
+      for (;;) {
+        const line = takeLine();
+        if (line !== undefined) return line;
+        if (ended) {
+          if (pending === '') return undefined;
+          const last = pending;
+          pending = '';
+          return last;
+        }
+        const step = await iterator.next();
+        if (step.done === true) {
+          ended = true;
+          pending += decoder.decode(); // flush a truncated multi-byte sequence
+          continue;
+        }
+        pending +=
+          typeof step.value === 'string'
+            ? step.value
+            : decoder.decode(step.value, { stream: true });
+      }
+    },
+    async release(): Promise<void> {
+      ended = true;
+      pending = '';
+      await iterator.return?.();
+    },
+  };
+}
 
 /**
  * Exit codes, and why there are five of them.

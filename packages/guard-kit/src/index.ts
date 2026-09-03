@@ -32,10 +32,14 @@ export {
 export { assertNoNetwork, type NoNetworkRuling, type WalkCoverage } from './no-network.ts';
 export {
   ambientNamespaceViolations,
+  ambientTypeUses,
   AMBIENT_GLOBAL_NAMESPACES,
+  AMBIENT_GLOBAL_TYPES,
   deadSourcemapViolations,
   packPackage,
+  standaloneTypecheckViolations,
   strictModeViolations,
   type PackedPackage,
+  type StandaloneTypecheckOptions,
   type ToolSchema,
 } from './packaging.ts';

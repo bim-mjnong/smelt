@@ -9,8 +9,10 @@ import { MemoryElisionStore } from '@guard/store';
 import {
   AMBIENT_GLOBAL_NAMESPACES,
   ambientNamespaceViolations,
+  ambientTypeUses,
   deadSourcemapViolations,
   packPackage,
+  standaloneTypecheckViolations,
   strictModeViolations,
   type PackedPackage,
 } from '@smelt/guard-kit';
@@ -40,6 +42,26 @@ import {
  *     type by import fixes nothing: TypeScript resolves `node:stream`, and bare
  *     `stream`, through the same globally-included `@types/node`. The fix is to describe
  *     the shape structurally, which is what {@link AnswerStream} now does.
+ *
+ *     Removing the *namespace* was not the whole defect, and a name-list check could
+ *     never have said so: `ambientNamespaceViolations` matches `Namespace.`-dotted
+ *     names, so it was structurally blind to a **bare** `@types/node` global. Two
+ *     survived it — `RepoReader.read(path): Buffer` and
+ *     `assertLocalResource(input: string | URL): URL` — and each was still an error in
+ *     smelt's own declarations for exactly the consumer described above. Both are
+ *     stated structurally now (`Uint8Array`; `LocalResource`), and the check that keeps
+ *     them that way is a compiler rather than a list: `standaloneTypecheckViolations`
+ *     builds a scratch consumer around the real tarball with `strict`,
+ *     `skipLibCheck: false` and `types: []`, and reports every diagnostic TypeScript
+ *     raises inside smelt's own shipped files.
+ *
+ *     What that check does **not** cover, stated plainly rather than implied away: a
+ *     dependency's own declarations. `dist/plan/grammar.d.ts` imports `Language` from
+ *     `web-tree-sitter`, whose `.d.ts` names `EmscriptenModule` and asks for
+ *     `@types/emscripten` nowhere, so a `types: []` consumer still sees that one error
+ *     — from a file in `web-tree-sitter`'s package, not smelt's. It is not smelt's to
+ *     fix short of dropping a tree-sitter type from the public surface, and pretending
+ *     otherwise is what the first version of this guard did.
  *  2. **Maps that resolve to nothing.** `files` packs `dist`, never `src`, and every
  *     `.js.map` and `.d.ts.map` pointed at `../src/*.ts`. Go-to-definition and stack
  *     traces landed on paths that were never published. The sources are inlined now —
@@ -53,8 +75,9 @@ import {
  * **What is guarded where.** The tarball checks are the truth, but a tarball cannot be
  * mutated — so each one is paired with the source-level fact that keeps it true, and
  * that pairing is what `pnpm mutate` proves: reintroduce the ambient namespace in
- * `src`, turn `inlineSources` off in `tsconfig.json`, or drop `additionalProperties`
- * from the retrieve schema, and this file goes red.
+ * `src`, put `Buffer` back on `RepoReader.read` or `URL` back on
+ * `assertLocalResource`, turn `inlineSources` off in `tsconfig.json`, or drop
+ * `additionalProperties` from the retrieve schema, and this file goes red.
  */
 
 let packed: PackedPackage;
@@ -87,6 +110,15 @@ describe('the packed tarball is what a consumer can actually build against', () 
     expect(ambientNamespaceViolations(packed).join('\n')).toBe('');
   });
 
+  it('typechecks on its own under strict, skipLibCheck: false, types: []', () => {
+    expect(
+      standaloneTypecheckViolations(packed, {
+        tsc: join(packageRoot(), 'node_modules', '.bin', 'tsc'),
+        packageDir: packageRoot(),
+      }).join('\n'),
+    ).toBe('');
+  }, 180_000);
+
   it('ships no sourcemap that resolves to a file it did not pack', () => {
     expect(deadSourcemapViolations(packed).join('\n')).toBe('');
   });
@@ -114,6 +146,38 @@ describe('the source facts that keep the tarball buildable', () => {
     ).toBe('');
     // Non-vacuity: the scan must have found real source to scan.
     expect(allSourceFiles().length).toBeGreaterThan(20);
+  });
+
+  it('no emitted declaration uses a types-package global as a type', () => {
+    // The mutatable pairing for the tarball typecheck above.
+    // `standaloneTypecheckViolations` is the rule — it asks a compiler and therefore
+    // knows names nobody listed — but a tarball cannot be mutated, and `dist` can:
+    // put `Buffer` back on `RepoReader.read` or `URL` back on `assertLocalResource`
+    // and this goes red.
+    //
+    // It reads the *declarations*, not `src`, and that is the whole reason it is
+    // precise. `const pieces: Buffer[]` inside a function body and a non-exported
+    // `function toUrl(...): URL` are both fine — they are compiled away, and smelt's
+    // implementation is full of them. Only what TypeScript copies into a `.d.ts`
+    // reaches a consumer who has nothing to resolve the name against.
+    const dist = join(guardRoot(), 'dist');
+    const declarations = allSourceFiles(dist).filter((file) => file.endsWith('.d.ts'));
+    expect(
+      declarations.length,
+      `no declarations under ${dist} — was \`pnpm build\` run?`,
+    ).toBeGreaterThan(0);
+    const offenders: string[] = [];
+    for (const file of declarations) {
+      const used = ambientTypeUses(stripStringsAndComments(readSource(file, dist)));
+      for (const name of used) offenders.push(`dist/${file} uses \`${name}\` as a type`);
+    }
+    expect(
+      offenders.join('\n'),
+      'a types-package global in a type position reaches the shipped .d.ts, where it ' +
+        'resolves only for a consumer who happened to install and globally include ' +
+        'those types. State the shape structurally instead — `Uint8Array` for bytes, ' +
+        'an interface naming the members actually read for a URL.',
+    ).toBe('');
   });
 
   it('tsconfig.json inlines sources into the emitted JavaScript maps', () => {
@@ -177,5 +241,21 @@ export const MUTATIONS: GuardMutation[] = [
     find: '"inlineSources": true,',
     replace: '"inlineSources": false,',
     why: 'the emitted .js.map files going back to naming ../src/*.ts, a path the tarball never carries — dead maps for every consumer',
+  },
+  {
+    kind: 'artifact',
+    id: 'public-surface-bare-buffer',
+    file: 'dist/repomap/reader.d.ts',
+    find: '    read(path: string): Uint8Array;',
+    replace: '    read(path: string): Buffer;',
+    why: "`Buffer` back on an exported interface — a bare @types/node global, invisible to the namespace rule, and an error in smelt's own shipped .d.ts for every consumer building with skipLibCheck: false and no node types of their own",
+  },
+  {
+    kind: 'artifact',
+    id: 'public-surface-bare-url',
+    file: 'dist/net/policy.d.ts',
+    find: 'export declare function assertLocalResource(input: string | LocalResource): LocalResource;',
+    replace: 'export declare function assertLocalResource(input: string | LocalResource): URL;',
+    why: '`URL` back in an exported signature — the second bare global the namespace rule could not see, and two more errors in the shipped .d.ts for a consumer with no node types at their own root',
   },
 ];

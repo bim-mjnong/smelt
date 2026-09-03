@@ -39,6 +39,9 @@ import { packageRoot } from './guards/_source.ts';
 
 const binPath = join(packageRoot(), 'dist', 'cli', 'bin.js');
 
+/** How long a `holdOpen` run may keep running after its last answer before it is a hang. */
+const HOLD_OPEN_WATCHDOG_MS = 8_000;
+
 interface Finished {
   readonly code: number | null;
   readonly stdout: string;
@@ -47,10 +50,18 @@ interface Finished {
   readonly stderr: string;
 }
 
-/** Spawn the built bin; `stdin` writes with `delayMs`, then the stream ends. */
+/**
+ * Spawn the built bin.
+ *
+ * `stdin.bytes` are written after `delayMs`. The stream is then ended — **unless**
+ * `holdOpen` is set, which writes the bytes and leaves the pipe open, the way a
+ * terminal does. That distinction is not a detail: EOF is the one input shape that
+ * cannot reproduce a process holding stdin after its work is done, so a wizard test
+ * that ends the pipe proves nothing about whether the wizard exits.
+ */
 function runBin(
   args: readonly string[],
-  stdin?: { readonly bytes: Uint8Array; readonly delayMs: number },
+  stdin?: { readonly bytes: Uint8Array; readonly delayMs: number; readonly holdOpen?: boolean },
   cwd?: string,
 ): Promise<Finished> {
   return new Promise((resolvePromise, rejectPromise) => {
@@ -63,7 +74,23 @@ function runBin(
     child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
     child.on('error', rejectPromise);
+    // Nothing ends a held-open run but the process deciding to exit, so an unexplained
+    // wait is reported as the hang it is instead of as a bare vitest timeout.
+    const watchdog =
+      stdin?.holdOpen === true
+        ? setTimeout(() => {
+            child.kill('SIGKILL');
+            rejectPromise(
+              new Error(
+                `\`${['smelt', ...args].join(' ')}\` was still running ` +
+                  `${String(HOLD_OPEN_WATCHDOG_MS)}ms after its last answer, with stdin ` +
+                  `still open. It had printed:\n${Buffer.concat(stdoutChunks).toString('utf8')}`,
+              ),
+            );
+          }, HOLD_OPEN_WATCHDOG_MS)
+        : undefined;
     child.on('close', (code) => {
+      if (watchdog !== undefined) clearTimeout(watchdog);
       const stdoutBytes = Buffer.concat(stdoutChunks);
       resolvePromise({ code, stdout: stdoutBytes.toString('utf8'), stdoutBytes, stderr });
     });
@@ -71,7 +98,8 @@ function runBin(
       child.stdin.end();
     } else {
       setTimeout(() => {
-        child.stdin.end(Buffer.from(stdin.bytes));
+        if (stdin.holdOpen === true) child.stdin.write(Buffer.from(stdin.bytes));
+        else child.stdin.end(Buffer.from(stdin.bytes));
       }, stdin.delayMs);
     }
   });
@@ -196,27 +224,54 @@ describe('the built binary, as a real process', () => {
     expect(stats.stdout).toContain('uniqueRetrieved 1');
   }, 15_000);
 
-  it('runs the init wizard on a real pipe and exits when the answers run out', async () => {
-    // The process-boundary half of the wizard. `InitIo.input` is a structural
-    // `AnswerStream` — an async iterable, deliberately not `NodeJS.ReadableStream`, so
-    // the shipped `.d.ts` needs no ambient node types — and the wizard adapts it with
-    // `Readable.from`. That wrapper reads `process.stdin` through its async iterator,
-    // and a wrapper still awaiting the next chunk would hold stdin open: the wizard
-    // would write every file, print "Done." and **never exit**. No in-process test can
-    // see that, because no in-process test has an event loop to keep alive. This one
-    // spawns the real binary on a real pipe, and the `close` event is the assertion.
+  it('runs the init wizard on a pipe that stays open, and still exits', async () => {
+    // The process-boundary half of the wizard, and the shape that matters: the pipe is
+    // **not** closed after the last answer, exactly as a terminal never closes.
+    //
+    // `InitIo.input` is a structural `AnswerStream` — an async iterable, deliberately
+    // not `NodeJS.ReadableStream`, so the shipped `.d.ts` needs no ambient node types.
+    // The wizard used to adapt it with `Readable.from` + readline, which reads
+    // `process.stdin` through *its* async iterator; closing the interface and
+    // destroying the wrapper ended only the wrapper, leaving stdin subscribed and the
+    // loop alive. The wizard wrote every file, printed "Done." and never exited.
+    //
+    // Ending the pipe hides that completely: EOF finishes the iteration by itself, so
+    // an EOF-terminated run exits even when the release is missing. Only an open pipe
+    // (or a TTY) can see it, and `close` is the assertion.
     const wizardDir = join(scratch, 'init-wizard');
     mkdirSync(wizardDir, { recursive: true });
     const answers = ['4000', '1', '1', '2', '2', 'yes'].join('\n');
     const { code, stdout } = await runBin(
       ['init'],
-      { bytes: Buffer.from(`${answers}\n`, 'utf8'), delayMs: 0 },
+      { bytes: Buffer.from(`${answers}\n`, 'utf8'), delayMs: 0, holdOpen: true },
       wizardDir,
     );
     expect(code).toBe(EXIT.ok);
     expect(stdout).toContain('wrote smelt.config.json');
+    expect(stdout).toContain('Done.');
     expect(existsSync(join(wizardDir, 'smelt.config.json'))).toBe(true);
-  }, 15_000);
+  }, 20_000);
+
+  it('exits the hooks wizard on a pipe that stays open too — one adapter, two verbs', async () => {
+    // `runHooks` reads answers through the same adapter as `runInit`, so it had the
+    // same hang and needs the same process-level witness. `remove --harness kilocode`
+    // is the cheapest flow that actually reads a line: one confirm, answered `no`, so
+    // nothing is written or deleted — the assertion is purely that the process ends
+    // while its stdin is still open.
+    const hooksDir = join(scratch, 'hooks-wizard');
+    mkdirSync(join(hooksDir, '.kilocode', 'rules'), { recursive: true });
+    const rulesFile = join(hooksDir, '.kilocode', 'rules', 'smelt.md');
+    writeFileSync(rulesFile, `# smelt:hooks\nsomething smelt wrote\n`);
+
+    const { code, stdout } = await runBin(
+      ['hooks', 'remove', '--harness', 'kilocode'],
+      { bytes: Buffer.from('no\n', 'utf8'), delayMs: 0, holdOpen: true },
+      hooksDir,
+    );
+    expect(code).toBe(EXIT.ok);
+    expect(stdout).toContain('Nothing was changed.');
+    expect(existsSync(rulesFile)).toBe(true);
+  }, 20_000);
 });
 
 describe('the built package loads from CommonJS via require(esm)', () => {

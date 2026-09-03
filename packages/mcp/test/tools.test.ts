@@ -110,6 +110,12 @@ describe('tools/list', () => {
     // mode is not refused at registration. It is the core's own `RetrieveTool`
     // schema — served, never re-written here.
     expect(byName.get(RETRIEVE_TOOL_NAME)?.inputSchema['additionalProperties']).toBe(false);
+    // `smelt_stats` takes no arguments, so `required: []` is the whole truth about it
+    // and strict mode — which wants the key present — is satisfied by saying so. It
+    // used to omit the key entirely, which read as "not yet decided" and cost a strict
+    // client the one tool that needed nothing from them.
+    expect(byName.get(SMELT_STATS_TOOL_NAME)?.inputSchema['required']).toEqual([]);
+    expect(byName.get(SMELT_STATS_TOOL_NAME)?.inputSchema['additionalProperties']).toBe(false);
     // The retrieve description is the core's own, rendered around a real marker — the
     // example a model learns from can never drift from the wire format.
     expect(byName.get(RETRIEVE_TOOL_NAME)?.description).toContain('<<smelt/v1:');

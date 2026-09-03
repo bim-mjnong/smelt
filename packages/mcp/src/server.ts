@@ -353,6 +353,13 @@ function buildToolList(retrieveTool: RetrieveTool): Tool[] {
       inputSchema: {
         type: 'object',
         properties: {},
+        // `required: []` rather than no `required` at all. This tool takes no
+        // arguments, so strict structured outputs — which wants every property
+        // required and the key present — is satisfied by stating the empty list, and a
+        // client registering in strict mode gets the one tool that needed nothing from
+        // it. The other tools have genuinely optional arguments and are a different
+        // question; this one was a missing key.
+        required: [],
         additionalProperties: false,
       },
     },

@@ -1,14 +1,12 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { createInterface } from 'node:readline/promises';
-import { Readable } from 'node:stream';
 
 import { CliUsageError } from '../errors.ts';
 import { DEFAULT_STRATEGY } from '../plan/planners.ts';
 import type { Strategy } from '../plan/planners.ts';
 import { STRUCTURAL_LANGUAGES } from '../plan/structural.ts';
 
-import { CLI_NAME } from './shell.ts';
+import { answerReader, CLI_NAME } from './shell.ts';
 import type { AnswerStream } from './shell.ts';
 import {
   CONFIG_FILE_NAME,
@@ -108,25 +106,20 @@ interface PlannedWrite {
  *   the wizard finishes — both are usage-shaped, and nothing further is written.
  */
 export async function runInit(io: InitIo): Promise<number> {
-  // `Readable.from` is the adapter between the structural {@link AnswerStream} the
-  // published surface promises and the stream readline requires. Handed a Readable
-  // (the real stdin, a scripted one) it wraps it; handed a plain async iterable it
-  // makes one. Destroyed in the `finally` below, which ends iteration of whatever it
-  // was reading — without that, a wrapper still awaiting the next chunk would hold
-  // stdin open and `smelt init` would finish its work and never exit.
-  const input = Readable.from(io.input);
-  const rl = createInterface({ input });
-  const lines = rl[Symbol.asyncIterator]();
+  // `answerReader` — not `Readable.from` + readline — because the wizard must *let go*
+  // of stdin when it is done. See the note on `answerReader` for the hang that shape
+  // caused: files written, `Done.` printed, and the process never exiting.
+  const lines = answerReader(io.input);
   const ask = async (prompt: string): Promise<string> => {
     io.output(prompt);
     const next = await lines.next();
-    if (next.done === true) {
+    if (next === undefined) {
       throw new CliUsageError(
         `${CLI_NAME} init: input ended before the wizard finished. ` +
           `Files already confirmed and written stay; nothing further was written.`,
       );
     }
-    return next.value.trim();
+    return next.trim();
   };
 
   try {
@@ -135,8 +128,7 @@ export async function runInit(io: InitIo): Promise<number> {
       ? await freshRun(io, ask)
       : await editRun(io, ask, existing.path, existing.config);
   } finally {
-    rl.close();
-    input.destroy();
+    await lines.release();
   }
 }
 

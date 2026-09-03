@@ -7,6 +7,7 @@ import {
   ambientNamespaceViolations,
   deadSourcemapViolations,
   packPackage,
+  standaloneTypecheckViolations,
   type PackedPackage,
 } from '@smelt/guard-kit';
 
@@ -31,12 +32,16 @@ import { guardRoot, packageRoot, readSource } from './_source.ts';
  * came to hold two budget laws (`test/guards/ops-seam.test.ts`). The schema is the
  * core's now, and this guard watches it stay the core's.
  *
- * The other three tools are deliberately not held to strict mode. `smelt_file` and
- * `repo_map` have genuinely optional arguments (`path`/`text`, `focus`, `strategy`),
- * and strict mode has no notion of optional: making them registrable would mean
- * requiring every key and spelling absence as `null`, which changes the calls a model
- * is allowed to make. `smelt_retrieve` has one argument and it was already required,
- * so stating the rule there changes nothing about what it accepts.
+ * The other three tools are not all held to strict mode, and the line falls where the
+ * arguments do. `smelt_file` and `repo_map` have genuinely optional arguments
+ * (`path`/`text`, `focus`, `strategy`), and strict mode has no notion of optional:
+ * making them registrable would mean requiring every key and spelling absence as
+ * `null`, which changes the calls a model is allowed to make. `smelt_stats` is not in
+ * that company — it takes no arguments at all, so `required: []` is the whole truth
+ * about it, and leaving the key out was a gap rather than a decision. It states the
+ * empty list now, and the check below holds it there. `smelt_retrieve` has one
+ * argument and it was already required, so stating the rule there changes nothing
+ * about what it accepts.
  */
 
 let packed: PackedPackage;
@@ -62,6 +67,20 @@ describe('the packed tarball is what a consumer can actually build against', () 
   it('ships no declaration that names an ambient global namespace', () => {
     expect(ambientNamespaceViolations(packed).join('\n')).toBe('');
   });
+
+  it('typechecks on its own under strict, skipLibCheck: false, types: []', () => {
+    // The core's guard states the reasoning: a namespace check is blind to a bare
+    // `Buffer` or `URL`, so the rule that keeps the shipped declarations buildable is
+    // a compiler rather than a name list. Only diagnostics in this package's own files
+    // count — `@smeltjs/core` answers for its own, and a dependency's `.d.ts` is
+    // nobody here's to edit.
+    expect(
+      standaloneTypecheckViolations(packed, {
+        tsc: join(packageRoot(), 'node_modules', '.bin', 'tsc'),
+        packageDir: packageRoot(),
+      }).join('\n'),
+    ).toBe('');
+  }, 180_000);
 
   it('ships no sourcemap that resolves to a file it did not pack', () => {
     expect(deadSourcemapViolations(packed).join('\n')).toBe('');

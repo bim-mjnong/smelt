@@ -1,5 +1,15 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, posix, relative, resolve, sep } from 'node:path';
 
@@ -107,6 +117,54 @@ export function packPackage(packageDir: string): PackedPackage {
  */
 export const AMBIENT_GLOBAL_NAMESPACES: readonly string[] = ['NodeJS', 'Deno', 'Bun', 'Chai'];
 
+/**
+ * Bare globals a *types package* (or the `dom` lib) supplies — the ones a namespace
+ * check cannot see.
+ *
+ * `NodeJS.ReadableStream` announces itself with a dot. `Buffer` and `URL` do not, and
+ * both reached the published surface after the namespace rule was written:
+ * `RepoReader.read(path): Buffer` and `assertLocalResource(input: string | URL): URL`
+ * were errors in smelt's own `.d.ts` for every consumer compiling with
+ * `skipLibCheck: false` and no node types of their own, and nothing reported it.
+ *
+ * This is still a list, and a list is still only as good as its entries — which is why
+ * it is the *pairing*, not the rule. The rule is
+ * {@link standaloneTypecheckViolations}, which asks a compiler instead of a list; this
+ * exists because a tarball cannot be mutated and a source file can.
+ */
+export const AMBIENT_GLOBAL_TYPES: readonly string[] = [
+  'Buffer',
+  'URL',
+  'URLSearchParams',
+  'Blob',
+  'AbortSignal',
+  'AbortController',
+  'ReadableStream',
+  'WritableStream',
+  'Headers',
+  'Request',
+  'Response',
+];
+
+/**
+ * Every {@link AMBIENT_GLOBAL_TYPES} name `code` uses **as a type**.
+ *
+ * Type position is approximated by exclusion, because that is the distinction that
+ * matters: a value use (`Buffer.from(bytes)`, `new URL(href)`) is compiled away and
+ * never reaches a `.d.ts`, while a type use is copied into one verbatim. So a name
+ * preceded by `new`, or followed by `.` or `(`, is a value and is allowed; anything
+ * else is a type annotation and is not. Pass source with strings and comments already
+ * stripped — a doc comment must stay free to explain why the name is not used.
+ */
+export function ambientTypeUses(code: string): readonly string[] {
+  const found = new Set<string>();
+  for (const name of AMBIENT_GLOBAL_TYPES) {
+    const pattern = new RegExp(`(?<!\\bnew\\s{1,20})\\b${name}\\b(?![\\s]*[.(])`, 'g');
+    if (pattern.test(code)) found.add(name);
+  }
+  return [...found];
+}
+
 /** `/// <reference types="node" />` and friends, which *do* pull the namespace in. */
 function referencedTypePackages(source: string): readonly string[] {
   return [...source.matchAll(/\/\/\/\s*<reference\s+types=["']([^"']+)["']\s*\/>/g)].map(
@@ -144,6 +202,165 @@ export function ambientNamespaceViolations(packed: PackedPackage): readonly stri
     }
   }
   return violations;
+}
+
+/** What {@link standaloneTypecheckViolations} needs to build a consumer around the tarball. */
+export interface StandaloneTypecheckOptions {
+  /** The `tsc` binary to run. */
+  readonly tsc: string;
+  /** The source package directory the tarball came from; its `node_modules` resolves the deps. */
+  readonly packageDir: string;
+  /**
+   * `lib` for the consumer's compilation. The default is deliberately just the
+   * language: no `dom`, so a declaration leaning on `URL` or `Blob` is caught rather
+   * than accidentally satisfied by a lib a Node consumer never asks for.
+   */
+  readonly lib?: readonly string[];
+}
+
+/** One TypeScript diagnostic, as `tsc --pretty false` prints it. */
+interface Diagnostic {
+  readonly file: string;
+  readonly text: string;
+}
+
+const DIAGNOSTIC =
+  /^(?<file>[^(]+)\((?<row>\d+),(?<column>\d+)\): error (?<code>TS\d+): (?<message>.+)$/;
+
+function parseDiagnostics(output: string, cwd: string): readonly Diagnostic[] {
+  const found: Diagnostic[] = [];
+  for (const line of output.split('\n')) {
+    const match = DIAGNOSTIC.exec(line.trim());
+    if (match?.groups === undefined) continue;
+    found.push({
+      file: resolve(cwd, match.groups['file']!),
+      text: `${match.groups['code']!}: ${match.groups['message']!}`,
+    });
+  }
+  return found;
+}
+
+/**
+ * Typecheck the tarball the way a *strict* consumer does, and report every error
+ * TypeScript raises inside the package's own shipped files.
+ *
+ * This is the check the ambient-namespace rule could not be. That rule matches
+ * `Namespace.`-dotted names, so it is structurally blind to a bare global: `Buffer` on
+ * an exported interface and `URL` in an exported signature both sailed past it, and
+ * both were errors in smelt's own `.d.ts` on the machine of every consumer building
+ * with `skipLibCheck: false` and no node types of their own. A guard that only knows
+ * the names it was told cannot find the next one. A compiler can.
+ *
+ * So: the extracted tarball is symlinked into a scratch project under its published
+ * name, its declared dependencies are symlinked beside it (resolved from the real
+ * package, so the versions are the ones it ships against), and `tsc` runs over
+ * `export * from '<name>'` with `strict`, `skipLibCheck: false` and `types: []` — the
+ * configuration in which nothing is silently supplied. `export *` pulls in the whole
+ * declaration graph a consumer can reach, which is exactly the surface at issue.
+ *
+ * **Only diagnostics in the package's own files are returned.** A dependency's
+ * declarations are not smelt's to fix — `web-tree-sitter` needs `@types/emscripten`
+ * and asks for it nowhere — and folding those in would make this guard fail for a
+ * reason no change to this repository can address. That boundary is exactly the claim
+ * being made: smelt's shipped declarations typecheck on their own.
+ */
+export function standaloneTypecheckViolations(
+  packed: PackedPackage,
+  options: StandaloneTypecheckOptions,
+): readonly string[] {
+  const manifest = JSON.parse(readFileSync(join(packed.root, 'package.json'), 'utf8')) as {
+    name: string;
+    dependencies?: Record<string, string>;
+  };
+  // The consumer is built *beside* the extracted tarball, not in a scratch of its own,
+  // because TypeScript resolves symlinks before walking up for `node_modules`: a
+  // package symlinked into some other directory looks for its own dependencies from
+  // wherever it really lives. Putting `node_modules` next to the extracted `package/`
+  // is precisely the arrangement pnpm gives a real consumer.
+  const projectRoot = resolve(packed.root, '..');
+  const modules = join(projectRoot, 'node_modules');
+  const consumer = join(projectRoot, 'consumer');
+  try {
+    rmSync(modules, { recursive: true, force: true });
+    rmSync(consumer, { recursive: true, force: true });
+    mkdirSync(consumer, { recursive: true });
+    linkModule(modules, manifest.name, packed.root);
+    for (const dependency of Object.keys(manifest.dependencies ?? {})) {
+      linkModule(modules, dependency, dependencyDir(options.packageDir, dependency));
+    }
+    writeFileSync(
+      join(consumer, 'tsconfig.json'),
+      `${JSON.stringify(
+        {
+          compilerOptions: {
+            strict: true,
+            // The whole point: no declaration is skipped, and nothing sits in global
+            // scope that the consumer did not ask for.
+            skipLibCheck: false,
+            types: [],
+            module: 'nodenext',
+            moduleResolution: 'nodenext',
+            target: 'es2022',
+            lib: options.lib ?? ['es2023'],
+            noEmit: true,
+          },
+          files: ['consumer.ts'],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    writeFileSync(
+      join(consumer, 'consumer.ts'),
+      `export * from ${JSON.stringify(manifest.name)};\n`,
+    );
+
+    const result = spawnSync(options.tsc, ['-p', 'tsconfig.json', '--pretty', 'false'], {
+      cwd: consumer,
+      encoding: 'utf8',
+    });
+    const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+    const diagnostics = parseDiagnostics(output, consumer);
+    if (result.status !== 0 && diagnostics.length === 0) {
+      throw new Error(`tsc printed no diagnostic this guard can read:\n${output}`);
+    }
+    const own = resolve(packed.root);
+    return diagnostics
+      .filter((diagnostic) => diagnostic.file.startsWith(`${own}${sep}`))
+      .map(
+        (diagnostic) =>
+          `${relative(own, diagnostic.file).split(sep).join(posix.sep)} — ${diagnostic.text} ` +
+          `(a consumer building with skipLibCheck: false and types: [] fails here, inside ` +
+          `smelt's own node_modules, on a file they cannot edit; state the shape structurally)`,
+      );
+  } finally {
+    rmSync(modules, { recursive: true, force: true });
+    rmSync(consumer, { recursive: true, force: true });
+  }
+}
+
+/** Symlink one package into a scratch `node_modules`, scope directory and all. */
+function linkModule(modules: string, name: string, target: string): void {
+  const path = join(modules, ...name.split('/'));
+  mkdirSync(join(path, '..'), { recursive: true });
+  symlinkSync(target, path, 'dir');
+}
+
+/**
+ * Where the real package resolves one of its dependencies — the version it ships
+ * against, symlinks and all.
+ *
+ * Walked by hand rather than through `require.resolve`, because a package is free to
+ * hide `./package.json` behind its `exports` map (`web-tree-sitter` does), and this
+ * wants the directory, not an entrypoint.
+ */
+function dependencyDir(packageDir: string, dependency: string): string {
+  const resolver = createRequire(join(packageDir, 'package.json'));
+  for (const base of resolver.resolve.paths(dependency) ?? []) {
+    const candidate = join(base, ...dependency.split('/'));
+    if (existsSync(join(candidate, 'package.json'))) return candidate;
+  }
+  throw new Error(`cannot find the installed \`${dependency}\` from ${packageDir}`);
 }
 
 interface SourceMap {
