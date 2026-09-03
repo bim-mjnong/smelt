@@ -1,18 +1,64 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Source-walking helpers, shared by every guard in the workspace.
  *
- * These moved here wholesale from `packages/core/test/guards/_source.ts`, which is now
- * the per-package anchor: only `packageRoot()` and `repoRoot()` are genuinely
- * package-local (they are derived from the guard file's own location), so the package
- * passes its root in and everything else lives once.
+ * These moved here wholesale from `packages/core/test/guards/_source.ts`. Each package
+ * keeps that file as its anchor, but the anchor is now one call: `guardAnchor(
+ * import.meta.url)` derives the package's root from the anchor's own location and
+ * returns the helpers bound to it. Nothing in the anchor is package-local except the
+ * `import.meta.url` it passes in — the two anchors used to carry a byte-identical
+ * `packageRoot()` each, which is how "only the roots are package-local" stayed true
+ * in prose after it had stopped being true in the files.
  *
  * The two environment variables keep exactly the semantics `scripts/mutate.mjs`
  * depends on — the mutation runner sets them, and a guard that stopped honouring them
  * would run against the pristine tree and pass while its mutation went uncaught.
  */
+
+/** The helpers a package's guards read, bound to that package's root. */
+export interface GuardAnchor {
+  /** This package's real root, regardless of where the guard source is pointed. */
+  readonly packageRoot: () => string;
+  /** The repository root. */
+  readonly repoRoot: () => string;
+  /**
+   * The tree the guards are pointed at — this package's `src`, or the broken copy the
+   * mutation runner names in `SMELT_GUARD_SRC`.
+   */
+  readonly guardSrcRoot: () => string;
+  /**
+   * The tree a *file-level* guard reads its committed artefacts from — this package's
+   * root, or the scratch root the mutation runner names in `SMELT_GUARD_ROOT`.
+   */
+  readonly guardRoot: () => string;
+  /** Every `.ts` file under the guard source root, as paths relative to that root. */
+  readonly allSourceFiles: (root?: string) => readonly string[];
+  readonly readSource: (relativePath: string, root?: string) => string;
+}
+
+/**
+ * Bind the helpers to the package whose `test/guards/_source.ts` calls this — the
+ * anchor passes its own `import.meta.url`, and the package root is two directories
+ * above it, the repo root two above that (`packages/<name>/test/guards`). The bound
+ * spellings keep every call site (`guardSrcRoot()`, `readSource(file)`) reading
+ * exactly as it did when each anchor wrote them out by hand.
+ */
+export function guardAnchor(anchorUrl: string): GuardAnchor {
+  const packageRoot = (): string => resolve(dirname(fileURLToPath(anchorUrl)), '../..');
+  const repoRoot = (): string => resolve(packageRoot(), '../..');
+  const boundSrcRoot = (): string => guardSrcRoot(packageRoot());
+  return {
+    packageRoot,
+    repoRoot,
+    guardSrcRoot: boundSrcRoot,
+    guardRoot: () => guardRoot(packageRoot()),
+    allSourceFiles: (root = boundSrcRoot()) => allSourceFiles(root),
+    readSource: (relativePath, root = boundSrcRoot()) => readSource(relativePath, root),
+  };
+}
 
 /**
  * The tree the guards are pointed at. Defaults to the package's own `src`; the
