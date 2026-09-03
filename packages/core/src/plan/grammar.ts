@@ -95,7 +95,7 @@ export async function loadGrammar(language: LanguageId): Promise<Language> {
   const cached = cache.get(language);
   if (cached !== undefined) return cached;
 
-  const path = fileURLToPath(assertLocalResource(grammarPath(language)));
+  const path = fileURLToPath(assertLocalResource(grammarPath(language)).href);
 
   const ready = (runtimeReady ??= Parser.init());
   await inContract(

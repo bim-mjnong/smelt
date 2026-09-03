@@ -26,6 +26,9 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
+    // Same reason as packages/core: `files` packs `dist`, never `src`, so the maps
+    // carry their own sources or point at nothing. `test/guards/packaging.test.ts`.
+    "inlineSources": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
 

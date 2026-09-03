@@ -116,7 +116,10 @@ export class TagsCache {
       try {
         return readFileSync(path, 'utf8');
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+        // Structural, not `NodeJS.ErrnoException`: this type reaches the shipped
+        // declarations, and an ambient namespace there breaks a consumer compiling
+        // with `skipLibCheck: false`.
+        if ((error as { code?: string }).code === 'ENOENT') return undefined;
         throw error;
       }
     });

@@ -316,11 +316,11 @@ Three things that look like bugs and are not:
   tiered honestly (verified / experimental / advisory — see the harness guide above).
   Deny-with-reason by default; rewrite opt-in and always announced — in the decision
   reason where the harness has one, on stderr where it does not.
-- **The honesty machinery** — twenty guard suites (eighteen in the core, two guarding
+- **The honesty machinery** — twenty-two guard suites (nineteen in the core, three guarding
   the MCP server's stdio-local surface and the shared operations seam) that walk the
   real import graph, assert byte-exact reversibility, pin the wire format, and re-derive
   the attribution file; plus a mutation runner (`pnpm mutate`) that breaks the source on
-  purpose — 101 mutations across 20 guards, each watched going red — and fails if a guard
+  purpose — 108 mutations across 22 guards, each watched going red — and fails if a guard
   does not notice. Every guarantee in this README has a guard.
 
 ## Measured numbers

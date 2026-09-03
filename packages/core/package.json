@@ -57,7 +57,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node ../../scripts/bundle-grammars.mjs",
+    "build": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.build.json && node ../../scripts/inline-declaration-map-sources.mjs && node ../../scripts/bundle-grammars.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

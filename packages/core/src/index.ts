@@ -30,6 +30,7 @@ export {
   FORBIDDEN_NODE_MODULES,
   FORBIDDEN_PACKAGES,
 } from './net/policy.ts';
+export type { LocalResource } from './net/policy.ts';
 export { clearGrammarCache, grammarPath, loadGrammar, WASM_BY_LANGUAGE } from './plan/grammar.ts';
 export { LEXICAL_PLANNER_ID, LexicalPlanner, planLexical } from './plan/lexical.ts';
 export type { LexicalPlannerOptions } from './plan/lexical.ts';
@@ -61,7 +62,7 @@ export {
   parseSmeltArgs,
   runCli,
 } from './cli/run.ts';
-export type { CliIo, CliJsonEnvelope, SmeltInvocation } from './cli/run.ts';
+export type { AnswerStream, CliIo, CliJsonEnvelope, SmeltInvocation } from './cli/run.ts';
 export {
   ANTHROPIC_PROMPT_CACHE_FACTS,
   CACHE_BREAKER_RULES,

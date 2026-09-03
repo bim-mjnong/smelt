@@ -157,7 +157,12 @@ codebase-design glossary.
   against `net/policy.ts`; the mcp package adds a stdio-only SDK subpath allowlist).
   Each package's `test/guards/_source.ts` stays as its anchor: only `packageRoot()` and
   `repoRoot()` are package-local, and `SMELT_GUARD_SRC` / `SMELT_GUARD_ROOT` keep
-  exactly the semantics `scripts/mutate.mjs` sets them with.
+  exactly the semantics `scripts/mutate.mjs` sets them with. It also owns the
+  **packaging** machine — `packPackage`, which runs the real `npm pack` and extracts
+  it, plus the three rules that read the result: no shipped declaration names an
+  ambient global namespace, no sourcemap points outside the tarball, and a tool schema
+  satisfies strict-mode structured outputs. Those are properties of _published bytes_,
+  which no repo-level check can see.
 - **SmeltConfig**: the parsed shape of `smelt.config.json`, and the module that owns the
   schema (`src/cli/config.ts`) owns **both** directions — `parseConfig` reads,
   `renderConfig` writes, one key order. What goes into a config stays each verb's

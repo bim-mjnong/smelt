@@ -26,8 +26,17 @@ import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 export interface RepoReader {
   /** One directory's entries, in whatever order the backing store returns them. */
   list(dir: string): readonly DirEntry[];
-  /** One file's bytes. Throws what the backing store throws; nothing is swallowed. */
-  read(path: string): Buffer;
+  /**
+   * One file's bytes. Throws what the backing store throws; nothing is swallowed.
+   *
+   * `Uint8Array`, not `Buffer`, and for the same reason `AnswerStream` is not
+   * `NodeJS.ReadableStream`: `Buffer` is a global only a compilation that included
+   * `@types/node` has, so naming it here put an error into the shipped `.d.ts` for
+   * every consumer who builds with `skipLibCheck: false` and no node types of their
+   * own. A `Buffer` *is* a `Uint8Array`, so `nodeFsReader` and every reader that
+   * returns `readFileSync(path)` satisfies this unchanged.
+   */
+  read(path: string): Uint8Array;
   /**
    * What `path` is, **without following it**: a symlink reports `isSymlink`, and a
    * reader whose backing store has nothing at `path` reports `undefined`.

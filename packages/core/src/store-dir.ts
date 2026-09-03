@@ -185,7 +185,7 @@ export class DirectoryElisionStore implements ElisionStore {
       // overwrite, so a concurrent writer can never silently replace someone's bytes.
       linkSync(tmpPath, join(this.#blobsDir, hash));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if ((error as { code?: string }).code !== 'EEXIST') throw error;
       // Another writer published this hash between our existence check and our link.
       // Same bytes: idempotent put, done. Damaged or vanished bytes: corruption — the
       // store was torn or edited outside smelt. Intact different bytes: a collision.
@@ -283,7 +283,7 @@ export class DirectoryElisionStore implements ElisionStore {
     try {
       return readFileSync(join(this.#blobsDir, hash), 'utf8');
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      if ((error as { code?: string }).code === 'ENOENT') return undefined;
       throw error;
     }
   }
@@ -352,7 +352,7 @@ export class DirectoryElisionStore implements ElisionStore {
     try {
       return readFileSync(this.#logPath, 'utf8');
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
+      if ((error as { code?: string }).code === 'ENOENT') return '';
       throw error;
     }
   }
@@ -374,7 +374,7 @@ export class DirectoryElisionStore implements ElisionStore {
         linkSync(tmpPath, markerPath);
         return undefined; // claimed by us; nothing to verify
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        if ((error as { code?: string }).code !== 'EEXIST') throw error;
         return readFileSync(markerPath, 'utf8');
       } finally {
         unlinkSync(tmpPath);
@@ -391,7 +391,7 @@ export class DirectoryElisionStore implements ElisionStore {
     try {
       return readFileSync(markerPath, 'utf8');
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      if ((error as { code?: string }).code === 'ENOENT') return undefined;
       throw error;
     }
   }
@@ -439,7 +439,7 @@ function fsyncDirBestEffort(path: string): void {
   try {
     fsyncSync(fd);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
+    const code = (error as { code?: string }).code;
     // EINVAL/ENOTSUP/EPERM/EBADF: the platform refuses to fsync a directory — see the
     // doc comment. Anything else (EIO above all) is a genuine write failure.
     if (code !== 'EINVAL' && code !== 'ENOTSUP' && code !== 'EPERM' && code !== 'EBADF') {

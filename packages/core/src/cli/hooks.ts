@@ -1,7 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createInterface } from 'node:readline/promises';
 
 import { CliUsageError } from '../errors.ts';
 import { nodeCommand, portablePath, shimScriptPath, smeltBinPath } from '../harness/paths.ts';
@@ -29,7 +28,8 @@ import {
 import { DEFAULT_SUGGESTION_BUDGET_BYTES, DEFAULT_THRESHOLD_BYTES } from '../hooks/guard-core.ts';
 import type { EnforcementMode } from '../hooks/guard-core.ts';
 
-import { CLI_NAME } from './shell.ts';
+import { answerReader, CLI_NAME } from './shell.ts';
+import type { AnswerStream } from './shell.ts';
 import {
   CONFIG_FILE_NAME,
   CONFIG_VERSION,
@@ -74,7 +74,11 @@ import type { SmeltConfig, SmeltConfigHooks } from './config.ts';
 
 /** Where the wizard's bytes come from and go. Injected so `runHooks` tests in-process. */
 export interface HooksIo {
-  readonly input: NodeJS.ReadableStream;
+  /**
+   * Scripted answers in, one line at a time. Structural on purpose; see
+   * {@link AnswerStream}.
+   */
+  readonly input: AnswerStream;
   readonly output: (text: string) => void;
   /** Project directory: detection, config discovery, and every write are relative to it. */
   readonly cwd: string;
@@ -734,18 +738,18 @@ export async function runHooks(
   harnessFlag: string | undefined,
   io: HooksIo,
 ): Promise<number> {
-  const rl = createInterface({ input: io.input });
-  const lines = rl[Symbol.asyncIterator]();
+  // Same adapter, same reason, as `runInit` — see the note on `answerReader`.
+  const lines = answerReader(io.input);
   const ask = async (prompt: string): Promise<string> => {
     io.output(prompt);
     const next = await lines.next();
-    if (next.done === true) {
+    if (next === undefined) {
       throw new CliUsageError(
         `${CLI_NAME} hooks: input ended before the wizard finished. ` +
           `Files already confirmed and written stay; nothing further was written.`,
       );
     }
-    return next.value.trim();
+    return next.trim();
   };
 
   try {
@@ -753,7 +757,7 @@ export async function runHooks(
       ? await installFlow(io, ask, harnessFlag)
       : await removeFlow(io, ask, harnessFlag);
   } finally {
-    rl.close();
+    await lines.release();
   }
 }
 

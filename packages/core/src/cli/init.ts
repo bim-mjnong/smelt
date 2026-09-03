@@ -1,13 +1,13 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { createInterface } from 'node:readline/promises';
 
 import { CliUsageError } from '../errors.ts';
 import { DEFAULT_STRATEGY } from '../plan/planners.ts';
 import type { Strategy } from '../plan/planners.ts';
 import { STRUCTURAL_LANGUAGES } from '../plan/structural.ts';
 
-import { CLI_NAME } from './shell.ts';
+import { answerReader, CLI_NAME } from './shell.ts';
+import type { AnswerStream } from './shell.ts';
 import {
   CONFIG_FILE_NAME,
   CONFIG_VERSION,
@@ -54,8 +54,11 @@ export const RERANK_STUB_FILE = 'smelt.rerank.ts';
 
 /** Where the wizard's bytes come from and go. Injected so `runInit` is testable in-process. */
 export interface InitIo {
-  /** Interactive input — the real stdin in `bin.ts`, a scripted stream in tests. */
-  readonly input: NodeJS.ReadableStream;
+  /**
+   * Interactive input — the real stdin in `bin.ts`, a scripted stream in tests.
+   * Structural on purpose; see {@link AnswerStream}.
+   */
+  readonly input: AnswerStream;
   readonly output: (text: string) => void;
   /**
    * Where config discovery starts, and where a fresh run's files land — unless `cwd`
@@ -103,18 +106,20 @@ interface PlannedWrite {
  *   the wizard finishes — both are usage-shaped, and nothing further is written.
  */
 export async function runInit(io: InitIo): Promise<number> {
-  const rl = createInterface({ input: io.input });
-  const lines = rl[Symbol.asyncIterator]();
+  // `answerReader` — not `Readable.from` + readline — because the wizard must *let go*
+  // of stdin when it is done. See the note on `answerReader` for the hang that shape
+  // caused: files written, `Done.` printed, and the process never exiting.
+  const lines = answerReader(io.input);
   const ask = async (prompt: string): Promise<string> => {
     io.output(prompt);
     const next = await lines.next();
-    if (next.done === true) {
+    if (next === undefined) {
       throw new CliUsageError(
         `${CLI_NAME} init: input ended before the wizard finished. ` +
           `Files already confirmed and written stay; nothing further was written.`,
       );
     }
-    return next.value.trim();
+    return next.trim();
   };
 
   try {
@@ -123,7 +128,7 @@ export async function runInit(io: InitIo): Promise<number> {
       ? await freshRun(io, ask)
       : await editRun(io, ask, existing.path, existing.config);
   } finally {
-    rl.close();
+    await lines.release();
   }
 }
 

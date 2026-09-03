@@ -567,7 +567,7 @@ export function readAllOfStdin(): string {
     try {
       bytesRead = readSync(0, chunk, 0, chunk.length, null);
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
+      const code = (error as { code?: string }).code;
       if (code === 'EAGAIN') {
         Atomics.wait(sleeper, 0, 0, 10);
         continue;

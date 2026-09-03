@@ -77,7 +77,6 @@ export const ALLOWED_NODE_BUILTINS: readonly string[] = [
   'node:util', // parseArgs, for the CLI. Argument parsing with zero dependencies.
   'node:process', // argv, stdin/stdout/stderr and the exit code, for the CLI
   'node:os', // homedir(), for `smelt hooks install` harness detection — reads a path, opens nothing
-  'node:readline/promises', // line-by-line answers for `smelt init` — reads streams it is handed, opens nothing
   'node:tty', // isatty(0) for the CLI's TTY check — a plain syscall, no stream, no socket
 ];
 
@@ -98,23 +97,46 @@ export const ALLOWED_PACKAGES: readonly string[] = [
 export const ALLOWED_URL_SCHEMES: readonly string[] = ['file:'];
 
 /**
+ * The parsed resource {@link assertLocalResource} takes and hands back.
+ *
+ * A WHATWG `URL` satisfies it, and one is what comes back at runtime — but `URL` is
+ * *stated* structurally here, for the reason `AnswerStream` is not
+ * `NodeJS.ReadableStream` and `RepoReader.read` returns `Uint8Array`: `URL` is a
+ * global that only a compilation which pulled in `@types/node` (or the DOM lib) has,
+ * so naming it in an exported signature put two errors into the shipped `.d.ts` for
+ * every consumer building with `skipLibCheck: false` and no such types of their own.
+ * These are the two members the policy reads and the two its callers use.
+ */
+export interface LocalResource {
+  /** The scheme, with its colon — `'file:'`. */
+  readonly protocol: string;
+  /** The whole URL, as a string. `fileURLToPath` takes it directly. */
+  readonly href: string;
+}
+
+/**
  * Reject anything that is not a local file, and return the resolved `file:` URL.
  *
  * @throws {NetworkPolicyError} if the input names a remote scheme.
  */
-export function assertLocalResource(input: string | URL): URL {
+export function assertLocalResource(input: string | LocalResource): LocalResource {
   const url = toUrl(input);
   if (!ALLOWED_URL_SCHEMES.includes(url.protocol)) {
     throw new NetworkPolicyError(
-      `refusing to load "${String(input)}": scheme "${url.protocol}" is not local. ` +
+      `refusing to load "${resourceLabel(input)}": scheme "${url.protocol}" is not local. ` +
         `v1 makes zero network calls; only ${ALLOWED_URL_SCHEMES.join(', ')} is allowed.`,
     );
   }
   return url;
 }
 
-function toUrl(input: string | URL): URL {
-  if (input instanceof URL) return input;
+const resourceLabel = (input: string | LocalResource): string =>
+  typeof input === 'string' ? input : input.href;
+
+function toUrl(input: string | LocalResource): URL {
+  // Structural in, structural out: anything carrying an `href` is re-parsed from it,
+  // which covers a real `URL` and a `URL` from another realm identically.
+  if (typeof input !== 'string') return new URL(input.href);
   // A bare path is a local path. Anything with a scheme is parsed as-is so that
   // "https://evil/grammar.wasm" is caught rather than treated as a relative path.
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(input)) {

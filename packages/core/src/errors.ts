@@ -162,7 +162,7 @@ export class RepoMapIoError extends SmeltError {
 
 /** The `errno` code when Node supplied one, its message otherwise. Never invented. */
 function describeIoCause(cause: unknown): string {
-  const code = (cause as NodeJS.ErrnoException | null | undefined)?.code;
+  const code = (cause as { code?: string } | null | undefined)?.code;
   if (typeof code === 'string' && code !== '') return code;
   if (cause instanceof Error && cause.message !== '') return cause.message;
   return String(cause);
