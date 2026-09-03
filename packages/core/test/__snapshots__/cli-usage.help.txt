@@ -86,7 +86,7 @@ OPTIONS
                        typescript, tsx, javascript, rust, python, go, java, c, cpp, c_sharp, ruby, php, kotlin, swift, bash;
                        any other language is refused, never approximated.
   --ignore <entry>     map only. Repeatable. Replaces the default ignore list
-                       (.git, node_modules): a bare name matches any path segment,
+                       (.git, node_modules, dist, build, out, coverage): a bare name matches any path segment,
                        an entry containing / is a root-relative prefix.
   --cache <dir>        map only. Directory for the tags cache, keyed by content
                        hash. Only when given does the map write to disk at all.

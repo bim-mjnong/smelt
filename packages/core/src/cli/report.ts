@@ -142,7 +142,7 @@ export function formatMapReport({ map, source, budgetSource }: MapReportInput): 
   if (map.cache !== undefined) {
     lines.push(
       `cache  ${count(map.cache.hits, 'hit')}, ${count(map.cache.misses, 'miss', 'es')}, ` +
-        `${group(map.cache.discarded)} discarded`,
+        `${group(map.cache.discarded)} discarded, ${group(map.cache.pruned)} pruned`,
     );
   }
   for (const warning of map.warnings) {

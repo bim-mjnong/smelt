@@ -11,3 +11,6 @@ packages/core/bench/corpus/
 
 # the site is its own world: root verify must stay untouched by site code
 site/
+
+# guard scratch — isolated copies of `src` a guard makes and removes
+packages/core/.guard-scratch/

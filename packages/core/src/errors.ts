@@ -131,3 +131,39 @@ export class StoreCorruptionError extends SmeltError {
 export class StoreFormatError extends SmeltError {
   override readonly name = 'StoreFormatError';
 }
+
+/**
+ * A filesystem call the repo map made failed: a root that is not there, a directory
+ * that cannot be listed, a file that cannot be read, a cache entry that cannot be
+ * written.
+ *
+ * It exists because of a hole in the one promise the consumer contract makes about
+ * errors — **every error smelt throws is an `instanceof SmeltError`**.
+ * `buildRepoMap({ root: '/nonexistent' })` used to throw the raw `ENOENT` that
+ * `readdirSync` raises, so a caller doing precisely what the documentation says still
+ * had a bare `Error` escaping past its `catch`. The guarantee is worth nothing with an
+ * exception to it, so every `node:fs` call under `src/repomap/` now arrives here.
+ *
+ * The message names the path, because "ENOENT" without one is a bug report nobody can
+ * act on, and the original error is kept as `cause`: wrapping is meant to bring the
+ * failure inside the contract, never to hide what Node said.
+ */
+export class RepoMapIoError extends SmeltError {
+  override readonly name = 'RepoMapIoError';
+
+  constructor(operation: string, path: string, cause: unknown) {
+    super(
+      `smelt: could not ${operation} "${path}" while building the repo map: ` +
+        `${describeIoCause(cause)}.`,
+      { cause },
+    );
+  }
+}
+
+/** The `errno` code when Node supplied one, its message otherwise. Never invented. */
+function describeIoCause(cause: unknown): string {
+  const code = (cause as NodeJS.ErrnoException | null | undefined)?.code;
+  if (typeof code === 'string' && code !== '') return code;
+  if (cause instanceof Error && cause.message !== '') return cause.message;
+  return String(cause);
+}

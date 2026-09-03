@@ -14,6 +14,26 @@ import type { FileTags } from './tags.ts';
  * fixed damping, a fixed iteration count, nodes visited in sorted-path order, and a
  * total tie-break (rank, then path, then name, then line). No `Math.random`, no
  * `Date`, no map-iteration order leaking into the output.
+ *
+ * **The resolution limit, stated plainly: references bind by bare identifier.** A
+ * reference tag is a name and a count; there is no import graph, no scope, no
+ * declaration lookup. So `defsByName` below maps one identifier to *every* definition
+ * of it in the tree, and each reference to that identifier reaches all of them:
+ *
+ *  - Same-name symbols in different files share rank and share `refsIn`. Two `run`s
+ *    are, to this ranker, one name that several files happen to define.
+ *  - Overloads and re-exports double-count: a name defined twice attracts the whole
+ *    traffic to it twice, so it takes two lines near the top of the map.
+ *  - A common identifier (`get`, `render`, `main`) collects references that in truth
+ *    belong to something else entirely.
+ *
+ * This is Aider's design, inherited on purpose. The alternative is per-language import
+ * and scope resolution — a type checker per language — and the map is a *ranking
+ * heuristic* for what to read first, not a symbol resolver; something needing true
+ * binding (rename, call graph, dead code) needs a different tool. What matters under
+ * Law 4 is that nothing here claims otherwise: `refsIn` and `refsInFiles` are honestly
+ * the references to and the files mentioning the **name**, and each entry's receipt
+ * says so, so the numbers can be read for exactly what they measure.
  */
 
 /** The damping factor. 0.85 is the classic PageRank constant; fixed, never sampled. */
@@ -36,9 +56,13 @@ export interface RankedDefinition {
   readonly line: number;
   /** Accumulated PageRank share. `0` when no other file references this name. */
   readonly rank: number;
-  /** Total references to this name across every scanned file (its own included). */
+  /**
+   * Total references to this **name** across every scanned file (its own included).
+   * Per name, not per symbol: see the module comment — every definition of a name
+   * shares the count, because references bind by bare identifier.
+   */
   readonly refsIn: number;
-  /** Distinct files holding at least one of those references. */
+  /** Distinct files holding at least one of those references. Also per name. */
   readonly refsInFiles: number;
   /** References the defining file makes to names defined in *other* files. */
   readonly refsOut: number;
