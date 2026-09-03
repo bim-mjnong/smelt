@@ -34,6 +34,14 @@ const DESCRIPTION =
  * confident answer built on material it never saw, and the retrieve rate reads 0% —
  * which is indistinguishable from perfect pruning. Encouraging retrieval keeps the
  * signal in {@link ElisionStore.stats} honest.
+ *
+ * **The schema is strict-mode shaped on purpose.** `additionalProperties: false`, and
+ * `required` naming every property — the two rules OpenAI's structured-outputs strict
+ * mode enforces before it will register a function at all. Without them a whole class
+ * of consumer simply cannot expose this tool. It says nothing new: `hash` was always
+ * the only key `invoke` reads, and an extra key was always ignored. A schema that is
+ * strictly more precise about the same shape is not a change to the wire surface the
+ * tool name and behaviour guarantee covers.
  */
 export function createRetrieveTool(store: ElisionStore): RetrieveTool {
   return {
@@ -41,8 +49,11 @@ export function createRetrieveTool(store: ElisionStore): RetrieveTool {
     description: DESCRIPTION,
     inputSchema: {
       type: 'object',
-      properties: { hash: { type: 'string' } },
+      properties: {
+        hash: { type: 'string', description: 'The hash from a marker\'s retrieve("hash").' },
+      },
       required: ['hash'],
+      additionalProperties: false,
     },
     invoke: ({ hash }) => store.retrieve(hash),
   };

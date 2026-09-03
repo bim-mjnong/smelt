@@ -105,6 +105,11 @@ describe('tools/list', () => {
     expect(byName.get(SMELT_FILE_TOOL_NAME)?.inputSchema['required']).toEqual(['budgetBytes']);
     expect(byName.get(REPO_MAP_TOOL_NAME)?.inputSchema['required']).toEqual(['dir', 'budgetBytes']);
     expect(byName.get(RETRIEVE_TOOL_NAME)?.inputSchema['required']).toEqual(['hash']);
+    // Strict-mode shaped, end to end: the schema a client actually receives closes the
+    // object, so a consumer registering it under OpenAI structured outputs in strict
+    // mode is not refused at registration. It is the core's own `RetrieveTool`
+    // schema — served, never re-written here.
+    expect(byName.get(RETRIEVE_TOOL_NAME)?.inputSchema['additionalProperties']).toBe(false);
     // The retrieve description is the core's own, rendered around a real marker — the
     // example a model learns from can never drift from the wire format.
     expect(byName.get(RETRIEVE_TOOL_NAME)?.description).toContain('<<smelt/v1:');

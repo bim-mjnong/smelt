@@ -29,7 +29,7 @@ import {
   STRATEGIES,
   UnknownHashError,
 } from '@smeltjs/core';
-import type { Ruling, Strategy } from '@smeltjs/core';
+import type { RetrieveTool, Ruling, Strategy } from '@smeltjs/core';
 
 import { resolveMcpStore } from './store.ts';
 import type { ResolvedMcpStore } from './store.ts';
@@ -258,7 +258,7 @@ const FOCUS_SCHEMA = {
     'Matching regions survive; everything else is first to go.',
 } as const;
 
-function buildToolList(retrieveDescription: string): Tool[] {
+function buildToolList(retrieveTool: RetrieveTool): Tool[] {
   return [
     {
       name: SMELT_FILE_TOOL_NAME,
@@ -306,17 +306,18 @@ function buildToolList(retrieveDescription: string): Tool[] {
       // The core renders this description around a marker built by the real marker
       // builder, so the example a model learns from can never drift from the wire
       // format. Reused verbatim for the same reason the tool name is.
-      description: retrieveDescription,
+      description: retrieveTool.description,
+      // And so is the schema. `RetrieveTool.inputSchema` is the core's own
+      // description of `hash in, exact bytes out` — already strict-mode shaped
+      // (`additionalProperties: false`, every property required) so a
+      // structured-outputs consumer can register it. A copy here would be a second
+      // schema for one contract, and nothing would report the day they disagreed:
+      // the library caller and the model would be reading different documents about
+      // the same call. `required` is copied because the SDK's `Tool` wants a mutable
+      // array; the shape is the core's, verbatim.
       inputSchema: {
-        type: 'object',
-        properties: {
-          hash: {
-            type: 'string',
-            description: 'The hash from a marker\'s retrieve("hash").',
-          },
-        },
-        required: ['hash'],
-        additionalProperties: false,
+        ...retrieveTool.inputSchema,
+        required: [...retrieveTool.inputSchema.required],
       },
     },
     {
@@ -369,7 +370,7 @@ export function createSmeltMcpServer(options: SmeltMcpServerOptions = {}): Smelt
   const cwd = options.cwd ?? process.cwd();
   const resolved = resolveMcpStore(cwd);
   const retrieveTool = createRetrieveTool(resolved.store);
-  const tools = buildToolList(retrieveTool.description);
+  const tools = buildToolList(retrieveTool);
 
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
