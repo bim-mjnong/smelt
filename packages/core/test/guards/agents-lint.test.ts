@@ -96,6 +96,11 @@ function rulesIn(report: ReturnType<typeof lintAgents>): readonly string[] {
   return [...new Set(report.findings.map((finding) => finding.reason.rule))].toSorted();
 }
 
+/** The bytes a string costs on disk — what every figure in this report is counted in. */
+function utf8(text: string): number {
+  return Buffer.byteLength(text, 'utf8');
+}
+
 /**
  * One fixture per rule: the prose that must trip it. Restated by hand — a rule list
  * that generated its own fixtures would prove only that the generator ran.
@@ -180,15 +185,42 @@ describe('staleness is resolved against the real tree, at the reader (R3)', () =
     expect(present.opsFor('src/entry.ts')).toContain('stat');
   });
 
-  it('never accuses a URL, a package name or a glob — the false positives that kill a linter', () => {
+  it('never accuses a URL, a package name, a glob, a bare domain or a product name', () => {
+    // Every one of these is prose a real AGENTS.md contains, and every one of them is
+    // shaped like a path. The last two are the ones that made this rule libellous:
+    // `Node.js` is a bare word ending in a code extension, and `aihero.dev/…` — the
+    // guide smelt's own help text prints — is a URL with its scheme left off.
     const report = lintFixture(
       '# p\n\nSee https://example.com/docs/missing.md and `@scope/nowhere`,\n' +
-        'and every `src/**/*.ts` in the tree.\n',
+        'and every `src/**/*.ts` in the tree.\n\n' +
+        'Built with Node.js and Vue.js, run under Bun.sh.\n' +
+        'The guide is at aihero.dev/a-complete-guide-to-agents-md, and\n' +
+        'example.com/guide has more.\n',
     );
     expect(
-      report.findings.map((finding) => finding.reason.explanation).join(' '),
-      'a URL, a package name or a glob was reported as a stale path',
-    ).not.toMatch(/example\.com|@scope|\*\*/);
+      report.findings
+        .filter((finding) => finding.reason.rule === 'dead-path')
+        .map((finding) => finding.reason.explanation),
+      'a URL, a package name, a glob, a bare domain or a product name was reported as a stale path',
+    ).toEqual([]);
+  });
+
+  it('still catches the path that is actually stale, in the same prose', () => {
+    // The guard above must not pass by turning dead-path off. A backticked token with a
+    // separator is the shape this rule exists for, and it still fires beside the prose.
+    const report = lintFixture(
+      '# p\n\nBuilt with Node.js. The handler is in `src/auth/handlers.ts`.\n',
+    );
+    expect(rulesIn(report)).toContain('dead-path');
+  });
+
+  it('never reports a live file as dead because of how the link was written', () => {
+    // CommonMark angle-bracket destinations: the brackets are delimiters, not path.
+    const report = lintFixture('# p\n\nSee [the module](<src/kept.ts>) here.\n');
+    expect(
+      report.findings.filter((finding) => finding.reason.rule === 'dead-link'),
+      'a link to a file that exists was reported dead — the false accusation this rule cannot make',
+    ).toEqual([]);
   });
 
   it('a moved doc is caught as dead-link, and reported once — never also as dead-path', () => {
@@ -320,6 +352,48 @@ describe('the merged set is the sum, and a mirror is not a level (R8, R4)', () =
     expect(restated).toHaveLength(1);
     expect(restated[0]!.file).toBe('packages/core/AGENTS.md');
     expect(restated[0]!.reason.explanation).toContain('AGENTS.md');
+  });
+
+  it('says nothing about a line two SIBLINGS share — siblings never merge', () => {
+    // The explanation this rule prints asserts a merge relationship. Between `pkg/a`
+    // and `pkg/b` there is none: no agent ever loads both, so the sentence would be
+    // false, and a finding whose explanation is false is worse than no finding (Law 2).
+    const shared = 'The gate is `pnpm verify` and a change is not finished until it passes.\n';
+    const report = lintAgents({
+      root: STUB_ROOT,
+      reader: stubReader({
+        ...REAL_FILES,
+        'AGENTS.md': { kind: 'file', content: '# root\n\nA project.\n' },
+        'pkg/a/AGENTS.md': { kind: 'file', content: `# a\n\n${shared}` },
+        'pkg/b/AGENTS.md': { kind: 'file', content: `# b\n\n${shared}` },
+      }),
+    });
+    expect(
+      report.findings.filter((finding) => finding.reason.rule === 'restated-at-level'),
+      'a line shared by two siblings was reported as restated — the levels it names do not merge',
+    ).toEqual([]);
+  });
+
+  it('counts a request as its own chain, and the tree as the tree (R8)', () => {
+    const root = '# root\n\nA project.\n';
+    const a = `# a\n\n${'x'.repeat(200)}\n`;
+    const b = `# b\n\n${'y'.repeat(300)}\n`;
+    const report = lintAgents({
+      root: STUB_ROOT,
+      reader: stubReader({
+        ...REAL_FILES,
+        'AGENTS.md': { kind: 'file', content: root },
+        'pkg/a/AGENTS.md': { kind: 'file', content: a },
+        'pkg/b/AGENTS.md': { kind: 'file', content: b },
+      }),
+    });
+    expect(report.totalBytes, 'the repository-wide surface is every level').toBe(
+      utf8(root) + utf8(a) + utf8(b),
+    );
+    expect(
+      report.perRequestBytes,
+      'a per-request cost summed two siblings — a number nobody pays',
+    ).toBe(utf8(root) + utf8(b));
   });
 
   it('walks through the reader alone, and never enters an ignored directory', () => {
@@ -507,6 +581,18 @@ describe('split writes nothing without consent, and mints no finding of its own'
     expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toContain('[Style](docs/style.md)');
   });
 
+  it('refuses a directory that is not there, naming it — never an internal error', async () => {
+    await expect(
+      runAgentsSplit({
+        input: Readable.from(['yes\n']),
+        output: () => {},
+        cwd: dir,
+        dir: 'nope',
+      }),
+      'a missing directory escaped as an unhandled ENOENT — smelt blaming itself for a typo',
+    ).rejects.toThrow(/cannot read directory "nope"/);
+  });
+
   it('prints the judgment half as the guide’s own prompt, with the real sections in it', async () => {
     const output = await split(['no']);
     expect(output).toContain('"Style"');
@@ -579,6 +665,27 @@ export const MUTATIONS: GuardMutation[] = [
     find: '  return ` — ${GUIDE_TITLE}: "${quote}"`;',
     replace: "  return '';",
     why: "every explanation stops attributing the guide — smelt starts asserting somebody else's opinions about house style as its own findings, and a reader has no way to tell which half of a sentence is measured and which half is borrowed",
+  },
+  {
+    id: 'agents-dead-path-accuses-prose',
+    file: 'agents/lint.ts',
+    find: '  return fromCodeSpan && !PRODUCT_NAME.test(token) && CODE_FILE.test(token);',
+    replace: '  return CODE_FILE.test(token);',
+    why: 'the flagship rule starts statting bare dotted words in running prose again — `Node.js`, `Vue.js` and `Bun.sh` are each reported as resolving to nothing in the tree, so the one rule --strict gates CI on accuses ordinary English and every real finding beside it stops being believed',
+  },
+  {
+    id: 'agents-restated-fires-across-siblings',
+    file: 'agents/lint.ts',
+    find: '    const ancestors = ancestorDirs(level.dir);',
+    replace: '    const ancestors = [...stated.keys()].filter((dir) => dir !== level.dir);',
+    why: 'restated-at-level folds every level into one map again, so a line `pkg/a` and `pkg/b` happen to share is reported against `pkg/b` with an explanation asserting the two merge — they do not, no agent loads both, and a finding whose sentence is false is worse than no finding',
+  },
+  {
+    id: 'agents-per-request-sums-the-whole-tree',
+    file: 'agents/instructions.ts',
+    find: '    perRequestBytes: heaviestChainBytes(levels),',
+    replace: '    perRequestBytes: levels.reduce((sum, level) => sum + level.primary.bytes, 0),',
+    why: 'the per-request figure becomes the whole-tree sum, so a monorepo is told every request costs the total of every package’s instruction file — a number no request pays, printed under the heading that promises it is what an agent loads on every request',
   },
   {
     id: 'agents-split-overwrite-without-consent',

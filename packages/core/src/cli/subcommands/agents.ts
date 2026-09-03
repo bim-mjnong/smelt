@@ -90,13 +90,15 @@ export const agentsCommand: Subcommand<AgentsInvocation, ResolvedAgentsRun> = {
       body:
         `  ${CLI_NAME} agents lint audits the instruction files an agent loads on every\n` +
         `  request — every AGENTS.md, CLAUDE.md and GEMINI.md in the tree, because a\n` +
-        `  nested one merges with the root, so the honest number is the sum. It reports\n` +
-        `  bytes per level, a total, and an imperative count labelled a heuristic, then\n` +
-        `  eight advisory rules: dead-path and dead-link (path-like tokens and links\n` +
-        `  resolved against the real tree — the check nobody else makes, and the reason\n` +
-        `  to run this in CI), forcing-language, structure-dump, generated-boilerplate,\n` +
-        `  language-rule, mirror-drift and restated-at-level. Every finding carries a\n` +
-        `  stable rule id and a sentence citing the guide it applies\n` +
+        `  nested one merges with the root. A merge runs up the tree and never across\n` +
+        `  it, so it reports bytes per level, the per-request worst case (the heaviest\n` +
+        `  level plus its ancestors — what one agent actually loads) and the whole-tree\n` +
+        `  surface, plus an imperative count labelled a heuristic. Then eight advisory\n` +
+        `  rules: dead-path and dead-link (path-like tokens and links resolved against\n` +
+        `  the real tree — the check nobody else makes, and the reason to run this in\n` +
+        `  CI), forcing-language, structure-dump, generated-boilerplate, language-rule,\n` +
+        `  mirror-drift and restated-at-level. Every finding carries a stable rule id\n` +
+        `  and a sentence citing the guide it applies\n` +
         `  (aihero.dev/a-complete-guide-to-agents-md). Findings exit 0; --strict makes\n` +
         `  any finding exit 1. There is no built-in size limit: set agents.budgetBytes\n` +
         `  in ${CONFIG_FILE_NAME} and exceeding it exits 1, as every other ${CLI_NAME}\n` +

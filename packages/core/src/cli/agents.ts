@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import { GUIDE_URL } from '../agents/guide.ts';
 import { readInstructionSet } from '../agents/instructions.ts';
@@ -7,6 +7,7 @@ import type { InstructionFile } from '../agents/instructions.ts';
 import { planSplit, refactorPrompt, splitSeamNotice } from '../agents/split.ts';
 import type { SplitPlan } from '../agents/split.ts';
 import { CliUsageError } from '../errors.ts';
+import { readTree } from '../ops/inputs.ts';
 
 import { answerReader, CLI_NAME } from './shell.ts';
 import type { AnswerStream } from './shell.ts';
@@ -43,12 +44,21 @@ export interface AgentsSplitIo {
  * One `smelt agents split` run, start to finish. Returns an exit code, never calls
  * `exit` — the same testability shape as `runInit` and `runHooks`.
  *
- * @throws {CliUsageError} when there is no instruction file to split, or when input
- *   ends mid-wizard. A refusal, never a guess: splitting a file smelt had to invent
- *   would be the auto-generation the guide rules out.
+ * @throws {CliUsageError} when the directory cannot be read, when there is no
+ *   instruction file to split, or when input ends mid-wizard. A refusal, never a guess:
+ *   splitting a file smelt had to invent would be the auto-generation the guide rules
+ *   out, and a missing directory reported as an internal error would be smelt blaming
+ *   itself for a typo.
  */
 export async function runAgentsSplit(io: AgentsSplitIo): Promise<number> {
-  const root = join(io.cwd, io.dir);
+  // `resolve`, not `join`: an absolute `dir` is the user's answer, and concatenating
+  // the working directory onto it invents a path nobody named. Then the same tree
+  // ruling `agents lint` uses — a directory that is not there is a refusal naming it,
+  // not an ENOENT escaping as "unexpected internal error" with a stack trace.
+  const root = resolve(io.cwd, io.dir);
+  const tree = readTree(root, io.dir, { tree: 'agents split', file: `\`${CLI_NAME} <file>\`` });
+  if (!tree.ok) throw new CliUsageError(`${CLI_NAME}: ${tree.refusal}`);
+
   const set = readInstructionSet({ root });
   const rootLevel = set.levels.find((level) => level.dir === '');
 

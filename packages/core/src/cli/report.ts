@@ -1,4 +1,4 @@
-import { GUIDE_TITLE } from '../agents/guide.ts';
+import { GUIDE, GUIDE_TITLE } from '../agents/guide.ts';
 import { overBudgetBytes } from '../agents/lint.ts';
 import type { AgentsLintReport, AgentsMirrorReport } from '../agents/lint.ts';
 import type { RepoMap } from '../repomap/map.ts';
@@ -173,8 +173,10 @@ export interface AgentsReportInput {
  *
  * Same law as the other two, though: every number is read off the
  * {@link AgentsLintReport} the library returned. The renderer counts nothing, so it
- * cannot disagree with what was measured — and in particular the total is the sum the
- * lint computed over the levels, not a second tally over the printed rows.
+ * cannot disagree with what was measured — and in particular both totals are the ones
+ * the lint computed over the levels, not a second tally over the printed rows. The
+ * guide's cited figure is likewise read from `agents/guide.ts` rather than retyped
+ * under the guide's name.
  */
 export function formatAgentsReport(
   report: AgentsLintReport,
@@ -191,11 +193,11 @@ export function formatAgentsReport(
   }
 
   lines.push('');
-  lines.push('  what an agent loads on every request');
+  lines.push('  the instruction files in this tree');
   const labelWidth = report.levels.reduce(
     (widest, level) =>
       Math.max(widest, level.path.length, ...level.mirrors.map((m) => m.path.length)),
-    IMPERATIVES_LABEL.length,
+    Math.max(IMPERATIVES_LABEL.length, PER_REQUEST_LABEL.length, WHOLE_TREE_LABEL.length),
   );
   for (const level of report.levels) {
     lines.push(`    ${level.path.padEnd(labelWidth)}  ${group(level.bytes).padStart(9)} B`);
@@ -205,14 +207,31 @@ export function formatAgentsReport(
       );
     }
   }
-  lines.push(`    ${'total'.padEnd(labelWidth)}  ${group(report.totalBytes).padStart(9)} B`);
+  lines.push(
+    `    ${PER_REQUEST_LABEL.padEnd(labelWidth)}  ${group(report.perRequestBytes).padStart(9)} B`,
+  );
+  // Printed only when it is a different number — which is exactly when a reader could
+  // otherwise mistake the sum for a per-request cost. In a single-chain repository the
+  // two are equal and a second row would be noise claiming to be information.
+  if (report.totalBytes !== report.perRequestBytes) {
+    lines.push(
+      `    ${WHOLE_TREE_LABEL.padEnd(labelWidth)}  ${group(report.totalBytes).padStart(9)} B`,
+    );
+    lines.push('    a nested file merges with its ancestors, never with its siblings, so no');
+    lines.push('    one request loads the whole tree. Per request is the heaviest chain.');
+  }
   lines.push(
     `    ${IMPERATIVES_LABEL.padEnd(labelWidth)}  ` +
       `${group(report.imperatives.length).padStart(9)}`,
   );
-  lines.push(`    ${GUIDE_TITLE} cites ~150-200 instructions as what a frontier`);
-  lines.push('    thinking model follows consistently. Printed as a citation, compared');
-  lines.push('    to nothing: the only ceiling here is the one you set.');
+  // The figure is the guide's, so it is read from where the guide is quoted rather
+  // than retyped here: an explanation that paraphrases its source drifts from it
+  // silently, and this one is printed under the guide's own name.
+  for (const wrapped of wrap(`${GUIDE_TITLE} cites: "${GUIDE.instructionCeiling}".`, 68)) {
+    lines.push(`    ${wrapped}`);
+  }
+  lines.push('    Printed as a citation, compared to nothing: the only ceiling here is');
+  lines.push('    the one you set.');
 
   const over = overBudgetBytes(report);
   lines.push('');
@@ -222,15 +241,17 @@ export function formatAgentsReport(
   } else if (over === undefined) {
     lines.push(
       `  within budget  ${group(report.totalBytes)} B of ${group(report.budgetBytes)} B ` +
-        `(${CONFIG_FILE_NAME}: agents.budgetBytes).`,
+        `(${CONFIG_FILE_NAME}: agents.budgetBytes, against the whole tree).`,
     );
   } else {
     lines.push(
       `  OVER BUDGET  ${group(report.totalBytes)} B against your ${group(report.budgetBytes)} B ` +
         `budget — over by ${group(over)} B.`,
     );
-    lines.push(`               The budget is yours, from ${CONFIG_FILE_NAME}; exit 1 is the same`);
-    lines.push('               over-budget code every other smelt run uses.');
+    lines.push(`               The budget is yours, from ${CONFIG_FILE_NAME}, and it caps the`);
+    lines.push('               whole tree rather than one request — the stricter of the two, so');
+    lines.push('               it cannot be met by moving bytes into another package. Exit 1 is');
+    lines.push('               the same over-budget code every other smelt run uses.');
   }
 
   if (report.findings.length === 0) {
@@ -274,6 +295,12 @@ export function formatAgentsReport(
 
 /** The label the imperative count is reported under. Never "instructions": R6. */
 const IMPERATIVES_LABEL = 'imperatives (heuristic)';
+
+/** The heaviest ancestor chain — the honest answer to "what does a request cost". */
+const PER_REQUEST_LABEL = 'per request (worst case)';
+
+/** Every level summed. The repository's instruction surface, and not a request's cost. */
+const WHOLE_TREE_LABEL = 'whole tree';
 
 /** Where a finding's explanation wraps, once its six-column indent is removed. */
 const EXPLANATION_WRAP = 84;

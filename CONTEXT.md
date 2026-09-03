@@ -234,9 +234,13 @@ registry, idField)`: the key **is** the id, and the entry's id field agrees, so 
 - **Instruction set** (`smelt agents`): the `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` an
   agent loads on **every request**, as `src/agents/instructions.ts` finds them —
   through `RepoReader`, so the walk is injectable and its claims are asserted by
-  counting calls. The guide's rule is that a nested file _merges with_ the root, so the
-  honest cost is the **sum across levels**, not the size of any one file. Each
-  directory contributes one **primary** (its `AGENTS.md`, or whichever file stands
+  counting calls. The guide's rule is that a nested file _merges with_ the root — a
+  merge that runs **up** the tree and never across it, which makes two different
+  numbers: the **per-request** cost (`perRequestBytes`, the heaviest level plus its
+  ancestors — what one agent actually loads) and the **whole-tree surface**
+  (`totalBytes`, every level summed — what a team maintains). Siblings never merge, so
+  summing them and calling the result a per-request cost states a cost nobody pays.
+  Each directory contributes one **primary** (its `AGENTS.md`, or whichever file stands
   alone there) and any number of **mirrors** — the other two names beside it. A mirror
   is counted for **drift** and never for bytes: one agent loads one of them, so summing
   all three would triple a cost nobody pays, and a symlinked mirror (the arrangement

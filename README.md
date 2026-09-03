@@ -304,10 +304,14 @@ smelt agents split             # the mechanical half of the guide's refactor
 ```
 
 It lints the **merged set** — every `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` in the
-tree, because a nested one merges with the root, so the sum is the honest number — and
-reports bytes per level, a total, and an imperative count labelled a heuristic. Then
-eight advisory rules, each with a stable id and an explanation citing the guide it
-applies ([aihero.dev/a-complete-guide-to-agents-md](https://www.aihero.dev/a-complete-guide-to-agents-md)):
+tree, because a nested one merges with the root. A merge runs _up_ the tree and never
+across it, so two numbers come back and each says which question it answers: **per
+request (worst case)**, the heaviest level plus its ancestors, which is what one agent
+actually loads; and **whole tree**, every level summed, which is the repository's
+instruction surface and a cost nobody pays in one request. Plus bytes per level and an
+imperative count labelled a heuristic. Then eight advisory rules, each with a stable id
+and an explanation citing the guide it applies
+([aihero.dev/a-complete-guide-to-agents-md](https://www.aihero.dev/a-complete-guide-to-agents-md)):
 
 | Rule                    | What it notices                                                           |
 | ----------------------- | ------------------------------------------------------------------------- |
@@ -318,17 +322,22 @@ applies ([aihero.dev/a-complete-guide-to-agents-md](https://www.aihero.dev/a-com
 | `generated-boilerplate` | init-script fingerprints (**the softest rule, and its own text says so**) |
 | `language-rule`         | a const/let, interface-vs-type or quote-style rule loaded every request   |
 | `mirror-drift`          | a `CLAUDE.md`/`GEMINI.md` that has diverged from its `AGENTS.md`          |
-| `restated-at-level`     | the same line written at two levels of the merged set                     |
+| `restated-at-level`     | the same line written at a level and at one of its ancestors              |
 
 `dead-path` and `dead-link` are the point. Everyone else is linting Markdown; the
 thing that has rotted is the repository the Markdown describes, and a renamed
 `src/auth/handlers.ts` is not an invalid file — it is a lie the agent believes on
-every request.
+every request. A path with a separator is checked wherever it appears; a bare dotted
+word is checked only inside backticks, because `Node.js` and `aihero.dev/…` are shaped
+exactly like paths and one confident false accusation costs more trust than a dozen
+real findings earn.
 
 **No built-in size limit.** The guide's cited "~150-200 instructions" is printed as a
 citation and compared to nothing. Set `{"agents": {"budgetBytes": 2000}}` in
 `smelt.config.json` and exceeding **your** number exits 1, exactly as every other smelt
-budget does. Findings alone exit 0 unless you pass `--strict`.
+budget does — measured against the whole tree, the stricter of the two figures, so it
+cannot be met by moving bytes into another package. Findings alone exit 0 unless you
+pass `--strict`.
 
 **There is no `smelt agents init`, and there will not be one.** The guide says in as
 many words never to auto-generate an AGENTS.md, and smelt will not build the thing its
@@ -399,7 +408,7 @@ Three things that look like bugs and are not:
   the MCP server's stdio-local surface and the shared operations seam) that walk the
   real import graph, assert byte-exact reversibility, pin the wire format, and re-derive
   the attribution file; plus a mutation runner (`pnpm mutate`) that breaks the source on
-  purpose — 121 mutations across 25 guards, each watched going red — and fails if a guard
+  purpose — 124 mutations across 25 guards, each watched going red — and fails if a guard
   does not notice. Every guarantee in this README has a guard.
 
 ## Measured numbers

@@ -3,7 +3,7 @@ import type { RepoReader } from '../repomap/reader.ts';
 import type { ElisionReason } from '../types.ts';
 
 import { citing, GUIDE } from './guide.ts';
-import { readInstructionSet, resolvesInTree } from './instructions.ts';
+import { ancestorDirs, readInstructionSet, resolvesInTree } from './instructions.ts';
 import type { InstructionFile, InstructionSet } from './instructions.ts';
 
 /**
@@ -13,10 +13,13 @@ import type { InstructionFile, InstructionSet } from './instructions.ts';
  * is the one blob every request pays for whether or not it is relevant. So the lint is
  * the same three moves smelt makes everywhere else, aimed at a file nobody measures:
  *
- *  1. **Measure, never threshold** (ruling R2). Bytes per level and in total, plus an
- *     imperative count that says out loud it is a heuristic. The only number that can
- *     fail a run is `agents.budgetBytes` in `smelt.config.json` — *the user's own*.
- *     There is no built-in budget, for exactly the reason `--budget` has none.
+ *  1. **Measure, never threshold** (ruling R2). Bytes per level, the most any single
+ *     request loads, and the repository-wide surface — three numbers, each labelled
+ *     with the question it answers, because a monorepo makes the last two differ and
+ *     printing one under the other's heading is a lie about a cost. Plus an imperative
+ *     count that says out loud it is a heuristic. The only number that can fail a run
+ *     is `agents.budgetBytes` in `smelt.config.json` — *the user's own*. There is no
+ *     built-in budget, for exactly the reason `--budget` has none.
  *  2. **Explain every finding** (Law 2, in the {@link ElisionReason} discipline). A
  *     finding is a stable `rule` id plus a sentence, and the sentence ends in a phrase
  *     from the guide it is applying, attributed — see `./guide.ts`.
@@ -30,10 +33,14 @@ import type { InstructionFile, InstructionSet } from './instructions.ts';
  * for CI, because a check that cannot be enforced is a check nobody runs, and a check
  * that is enforced by default is smelt deciding somebody's house style for them.
  *
- * The heuristics here are heuristics, and each is labelled as one where it surfaces.
- * A rule that fires on a file the guide would call minimal is not automatically a bug
- * in the file — it may be a bug in the rule, or in the guide, and the answer is worth
- * writing down either way (ruling R9; see this repository's own `AGENTS.md`).
+ * The heuristics here are heuristics, and the report says so where it matters: the
+ * imperative count carries "(heuristic)" in its own label and in every receipt,
+ * `generated-boilerplate` calls itself the softest rule in its own explanation, and the
+ * closing line of every run states that findings are advisory and exit 0 unless
+ * `--strict` was asked for. A rule that fires on a file the guide would call minimal is
+ * not automatically a bug in the file — it may be a bug in the rule, or in the guide,
+ * and the answer is worth writing down either way (ruling R9; see this repository's own
+ * `AGENTS.md`).
  */
 
 /* ------------------------------------------------------------------------------------
@@ -54,7 +61,7 @@ export const GENERATED_BOILERPLATE_RULE = 'generated-boilerplate';
 export const LANGUAGE_RULE_RULE = 'language-rule';
 /** A mirror (CLAUDE.md / GEMINI.md) that has diverged from its AGENTS.md. */
 export const MIRROR_DRIFT_RULE = 'mirror-drift';
-/** The same instruction present at two levels of the merged set. */
+/** The same instruction present at a level and at one of its ancestors. */
 export const RESTATED_AT_LEVEL_RULE = 'restated-at-level';
 
 /**
@@ -130,8 +137,20 @@ export interface AgentsLintReport {
   readonly root: string;
   /** Root level first. Empty when the tree holds no instruction file at all. */
   readonly levels: readonly AgentsLevelReport[];
-  /** The sum of every level's primary: what an agent loads on every request. */
+  /**
+   * The repository-wide instruction surface: every level's primary, summed.
+   *
+   * **Not a per-request cost** — see {@link perRequestBytes}, and the note in
+   * `./instructions.ts` on why the two differ in any monorepo. This is the number the
+   * user's `agents.budgetBytes` is compared against, deliberately: a ceiling on the
+   * whole surface is one that cannot be met by moving bytes into a second package.
+   */
   readonly totalBytes: number;
+  /**
+   * What the most expensive single request loads: the heaviest level plus its
+   * ancestors. Siblings never merge, so they are never summed into this.
+   */
+  readonly perRequestBytes: number;
   /** Present only when `smelt.config.json` set one. There is no default (R2). */
   readonly budgetBytes?: number;
   /**
@@ -213,6 +232,7 @@ export function lintAgents(options: AgentsLintOptions): AgentsLintReport {
       })),
     })),
     totalBytes: set.totalBytes,
+    perRequestBytes: set.perRequestBytes,
     ...(options.budgetBytes === undefined ? {} : { budgetBytes: options.budgetBytes }),
     imperatives,
     findings: findings.toSorted(byRuleThenPlace),
@@ -385,6 +405,16 @@ function countImperatives(file: InstructionFile, lines: readonly ScannedLine[]):
 /** `[text](target)`, with the target captured. */
 const MARKDOWN_LINK = /\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 
+/**
+ * CommonMark lets a link destination be wrapped in angle brackets — `[x](<a b.md>)`,
+ * the only way to write one containing a space. The brackets are delimiters, not part
+ * of the path, and statting `<src/kept.ts>` never resolves: the rule would report a
+ * live file as dead, which is the exact failure this rule exists to avoid making.
+ */
+function stripAngles(target: string): string {
+  return target.startsWith('<') && target.endsWith('>') ? target.slice(1, -1) : target;
+}
+
 function findDeadLinks(
   file: InstructionFile,
   lines: readonly ScannedLine[],
@@ -395,9 +425,10 @@ function findDeadLinks(
   for (const line of lines) {
     if (line.fenced) continue;
     for (const match of line.text.matchAll(MARKDOWN_LINK)) {
-      const target = stripFragment(match[1]!);
+      const target = stripFragment(stripAngles(match[1]!));
       if (target === '' || isExternal(target)) continue;
       const resolved = resolveAgainst(file.dir, target);
+      if (resolved === undefined) continue;
       if (resolvesInTree(root, reader, resolved)) continue;
       out.push({
         file: file.path,
@@ -423,6 +454,27 @@ function findDeadLinks(
 const SLASHED = /^\.{0,2}\/?[\w.+-]+(?:\/[\w.+-]+)*\/?$/;
 /** A bare file name whose extension says "this is a file in this repo". */
 const CODE_FILE = /^[\w.-]+\.(?:[cm]?[jt]sx?|json|md|ya?ml|toml|py|rs|go|rb|java|sh|sql|css|html)$/;
+/**
+ * A host name: what `example.com/guide` is, and what a repository path never is.
+ *
+ * A scheme-less URL is the one thing that is shaped exactly like a relative path —
+ * dotted word, slash, more words — and the guide this very tool cites is written
+ * `aihero.dev/a-complete-guide-to-agents-md` in smelt's own help text. Only the
+ * segment before the first slash is tested, so `scripts/build.sh` is untouched: `sh`
+ * is a TLD *and* an extension, and which one it is depends entirely on where the dot
+ * sits relative to the separator.
+ */
+const DOMAIN_HOST =
+  /^[\w-]+(?:\.[\w-]+)*\.(?:com|org|net|io|dev|ai|app|co|me|sh|so|to|xyz|gg|cloud|page|info|blog)$/i;
+/**
+ * `Node.js`, `Vue.js`, `Bun.sh`, `Three.js` — a product, not a file in this tree.
+ *
+ * Narrow on purpose: one capitalised word, then one of the five suffixes products are
+ * actually named with. It costs a bare mention of a PascalCase `Button.js`, which is
+ * a real filename — but that is a finding not made, and this is a false accusation not
+ * made, and on the flagship rule those two are not worth the same.
+ */
+const PRODUCT_NAME = /^[A-Z][A-Za-z]*\.(?:js|sh|ai|dev|io)$/;
 
 function findDeadPaths(
   file: InstructionFile,
@@ -442,6 +494,10 @@ function findDeadPaths(
       if (seen.has(key)) continue;
       seen.add(key);
       const resolved = resolveAgainst(file.dir, token);
+      // A token that climbed out of the tree with `..` is not a path this lint can
+      // rule on: it names something outside the repository, and both "dead" and
+      // "alive" would be guesses about a directory nobody handed us.
+      if (resolved === undefined) continue;
       if (resolvesInTree(root, reader, resolved)) continue;
       out.push({
         file: file.path,
@@ -472,29 +528,48 @@ function findDeadPaths(
  *  - `pnpm run build`, `and/or` — anything with whitespace, and anything whose
  *    segments carry no extension and no separator worth trusting.
  *  - `v1.2/v2` style version prose, caught by requiring a real segment shape.
+ *  - `example.com/guide`, `aihero.dev/…` — a URL somebody wrote without its scheme.
+ *  - `Node.js`, `Vue.js`, `Bun.sh` — products whose names end in an extension.
+ *
+ * The last two are why a token *without* a separator is a candidate only when it came
+ * out of a code span. In running prose a dotted bare word is far more often a product
+ * than a file, and this rule's whole value is that a reader believes it: one confident
+ * sentence accusing `Node.js` of having left the tree costs more trust than a dozen
+ * real findings earn. In backticks the author has said "this is a thing in my
+ * repository", and the rule takes them at their word.
  */
 function pathCandidates(text: string): readonly string[] {
   const tokens: string[] = [];
-  const add = (raw: string): void => {
+  const add = (raw: string, fromCodeSpan: boolean): void => {
     const token = raw.replace(/[),.:;]+$/, '').trim();
-    if (token === '' || !isPathLike(token)) return;
+    if (token === '' || !isPathLike(token, fromCodeSpan)) return;
     tokens.push(token);
   };
   const withoutCode = text.replace(/`([^`]+)`/g, (_whole, inner: string) => {
-    add(inner);
+    add(inner, true);
     return ' ';
   });
-  for (const word of withoutCode.split(/\s+/)) add(word);
+  for (const word of withoutCode.split(/\s+/)) add(word, false);
   return tokens;
 }
 
-function isPathLike(token: string): boolean {
+/**
+ * Is `token` a path into this tree?
+ *
+ * `fromCodeSpan` is the author's own signal, and it decides the one ambiguous case: a
+ * dotted word with no separator. See {@link pathCandidates}.
+ */
+function isPathLike(token: string, fromCodeSpan: boolean): boolean {
   if (isExternal(token)) return false;
   if (token.startsWith('@')) return false;
   if (/[*?[\]{}<>|"'`\\]/.test(token)) return false;
   if (token.startsWith('#')) return false;
   if (!SLASHED.test(token)) return false;
-  return token.includes('/') || CODE_FILE.test(token);
+  if (token.includes('/')) {
+    // `example.com/guide` — a URL with its scheme left off, not a directory.
+    return !DOMAIN_HOST.test(token.split('/')[0] ?? '');
+  }
+  return fromCodeSpan && !PRODUCT_NAME.test(token) && CODE_FILE.test(token);
 }
 
 /** True for anything that is not a path into this tree. */
@@ -511,15 +586,22 @@ function stripFragment(target: string): string {
  * A token in a nested instruction file is relative to *that* file's directory, which
  * is the whole reason a nested file can hold a link the root one cannot. `../` is
  * resolved rather than refused, so a nested file may point back up the tree.
+ *
+ * `undefined` when the token climbs past the repository root. It used to clamp there —
+ * `stack.pop()` on an empty stack is a no-op — which silently turned `../sibling/x.ts`
+ * into `sibling/x.ts` and then answered a question about the wrong file, in whichever
+ * direction happened to be wrong. Outside the tree, this lint has nothing to say.
  */
-function resolveAgainst(dir: string, token: string): string {
+function resolveAgainst(dir: string, token: string): string | undefined {
   const base = dir === '' ? [] : dir.split('/');
   const parts = token.replace(/\/+$/, '').split('/');
   const stack = [...base];
   for (const part of parts) {
     if (part === '' || part === '.') continue;
-    if (part === '..') stack.pop();
-    else stack.push(part);
+    if (part === '..') {
+      if (stack.length === 0) return undefined;
+      stack.pop();
+    } else stack.push(part);
   }
   return stack.join('/');
 }
@@ -562,8 +644,16 @@ function findForcingLanguage(
  * structure-dump
  * ---------------------------------------------------------------------------------- */
 
-/** The box-drawing characters every generated tree listing is made of. */
-const TREE_DRAWING = /[├└│─]/;
+/**
+ * The characters a generated tree listing is drawn with.
+ *
+ * Both charsets: `tree` draws box-drawing by default and `|--` / `` `-- `` under
+ * `--charset=ascii`, and the ASCII form is what lands in a file written on a machine
+ * whose terminal was not UTF-8. Missing it made the whole rule silent on a fenced
+ * ASCII tree — and because fenced lines skip `dead-path` too, that block produced no
+ * finding of any kind.
+ */
+const TREE_DRAWING = /[├└│─]|^\s*(?:\|--|`--|\|\s{3}|\+--)/;
 /** How many path-ish lines in a row read as a dump rather than as an example. */
 const DUMP_RUN = 3;
 
@@ -600,7 +690,10 @@ function findStructureDumps(file: InstructionFile, lines: readonly ScannedLine[]
       continue;
     }
     const bare = bareText(line.text);
-    const isPathLine = bare !== '' && isPathLike(bare.replace(/`/g, '').split(/\s+/)[0] ?? '');
+    // A line whose whole content is one token is a path line, not prose — so the
+    // code-span rule `dead-path` needs against running text has nothing to guard here.
+    const isPathLine =
+      bare !== '' && isPathLike(bare.replace(/`/g, '').split(/\s+/)[0] ?? '', true);
     if (isPathLine && bare.split(/\s+/).length <= 2) {
       if (run === 0) runStart = line.number;
       run += 1;
@@ -759,39 +852,51 @@ function findMirrorDrift(
 const RESTATEMENT_MIN_CHARS = 40;
 
 /**
- * The same instruction present at two levels of the merged set.
+ * The same instruction present at a level **and at one of its ancestors**.
  *
  * The guide's rule is that a nested file *merges with* the root, so a line written in
  * both is a line the agent is handed twice — paid for twice, and the second copy
- * carrying the risk that only one of them is ever updated. Reported on the deeper
- * file, because that is the copy the root already covers.
+ * carrying the risk that only one of them is ever updated. Reported on the deeper file,
+ * because that is the copy the ancestor already covers.
+ *
+ * **Only ancestors.** A merge runs up the tree, never across it: an agent working in
+ * `pkg/a` loads the root file and `pkg/a`'s, and never `pkg/b`'s. So a line two
+ * siblings happen to share is not a line anybody is handed twice, and reporting it as
+ * one would print an explanation about a merge that does not happen — a finding whose
+ * sentence is false, which is worse than no finding at all (Law 2).
  */
 function findRestatedAcrossLevels(set: InstructionSet): AgentsFinding[] {
-  const firstSeen = new Map<string, { readonly path: string }>();
+  /** dir → the lines that level states, each with the file that states them. */
+  const stated = new Map<string, Map<string, string>>();
   const out: AgentsFinding[] = [];
 
+  // Levels arrive root-first (`readInstructionSet` sorts by depth), so every ancestor
+  // of a level has already been recorded by the time the level is read.
   for (const level of set.levels) {
     const file = level.primary;
-    const local = new Set<string>();
+    const local = new Map<string, string>();
+    stated.set(level.dir, local);
+    const ancestors = ancestorDirs(level.dir);
+
     scanLines(file.text).forEach((line) => {
       if (line.fenced) return;
       const normalized = bareText(line.text).toLowerCase().replace(/\s+/g, ' ');
       if (normalized.length < RESTATEMENT_MIN_CHARS) return;
       if (local.has(normalized)) return;
-      local.add(normalized);
-      const earlier = firstSeen.get(normalized);
-      if (earlier === undefined) {
-        firstSeen.set(normalized, { path: file.path });
-        return;
-      }
+      local.set(normalized, file.path);
+      const earlier = ancestors
+        .map((dir) => stated.get(dir)?.get(normalized))
+        .find((path) => path !== undefined);
+      if (earlier === undefined) return;
       out.push({
         file: file.path,
         line: line.number,
         reason: {
           rule: RESTATED_AT_LEVEL_RULE,
           explanation:
-            `repeats a line already in \`${earlier.path}\` — the levels merge, so the ` +
-            `agent is handed this twice and only one copy will be kept up to date` +
+            `repeats a line already in \`${earlier}\`, which is above it — the levels ` +
+            `merge, so the agent is handed this twice and only one copy will be kept ` +
+            `up to date` +
             citing(GUIDE.nestedMerge),
         },
       });

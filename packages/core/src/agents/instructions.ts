@@ -10,10 +10,21 @@ import type { RepoReader } from '../repomap/reader.ts';
  *
  * **Why the merged set, and not just the root file** (ruling R8): the guide's own rule
  * is that a nested `AGENTS.md` *merges with* the root one rather than replacing it, so
- * the number that answers "what does this repo cost me on every request" is the
- * **sum across levels**, not the size of any one file. A lint that reported only the
- * root file would be reporting a fraction and calling it the total, which is this
- * repository's Law 4 pointed at its own output.
+ * a lint that reported only the root file would be reporting a fraction and calling it
+ * the total, which is this repository's Law 4 pointed at its own output.
+ *
+ * **But a merge runs up the tree, not across it.** Two numbers come out of that, and
+ * they are different numbers in any monorepo, so both are reported and each is labelled
+ * with the question it answers:
+ *
+ *  - {@link InstructionSet.perRequestBytes} — the most any *one* request loads: a level
+ *    plus its **ancestors**. An agent working in `pkg/a` loads the root file and
+ *    `pkg/a`'s; it never loads `pkg/b`'s, because siblings do not merge. This is the
+ *    per-request cost, and it is the number the guide's argument is about.
+ *  - {@link InstructionSet.totalBytes} — every level's primary summed: the whole
+ *    repository's instruction surface. Useful as the size of what a team maintains,
+ *    and **not** a per-request cost. Calling it one would be the same over-count this
+ *    module refuses for mirrors one paragraph down.
  *
  * **Why a mirror is not a level.** Claude Code reads `CLAUDE.md`, Gemini reads
  * `GEMINI.md`, Codex and the rest read `AGENTS.md`. One agent loads *one* of them, so
@@ -78,8 +89,22 @@ export interface InstructionSet {
   readonly root: string;
   /** Root level first, then nested levels in walk order. */
   readonly levels: readonly InstructionLevel[];
-  /** The sum of every level's primary — what an agent loads on every request. */
+  /**
+   * The repository-wide instruction surface: every level's primary, summed.
+   *
+   * **Not a per-request cost.** Sibling levels never merge, so no single request ever
+   * loads all of these — see {@link perRequestBytes} for the number that answers that
+   * question.
+   */
   readonly totalBytes: number;
+  /**
+   * What the most expensive single request loads: the heaviest level plus every level
+   * above it, since a nested file merges with its **ancestors** and with nothing else.
+   *
+   * Equal to {@link totalBytes} in a repository with one chain of levels, and strictly
+   * smaller as soon as two siblings both carry an instruction file.
+   */
+  readonly perRequestBytes: number;
 }
 
 /** How deep the walk goes. Instruction files near the root are the ones agents read. */
@@ -129,9 +154,9 @@ export function readInstructionSet(options: {
       // accommodated here: `nodeFsReader` lstats, so a link is `isSymlink` and *not*
       // `isFile`; a resolving reader answers about the target, so it is both.
       if (!stat.isFile && !stat.isSymlink) continue;
-      let text: string;
+      let raw: Uint8Array;
       try {
-        text = new TextDecoder('utf-8').decode(reader.read(join(options.root, relative)));
+        raw = reader.read(join(options.root, relative));
       } catch {
         // A broken symlink, or a file that vanished between the stat and the read.
         // Nothing is loaded on every request, so there is nothing to report.
@@ -141,8 +166,15 @@ export function readInstructionSet(options: {
         path: relative,
         name,
         dir,
-        text,
-        bytes: Buffer.byteLength(text, 'utf8'),
+        text: new TextDecoder('utf-8').decode(raw),
+        // The bytes on disk, straight off the read — never `Buffer.byteLength(text)`.
+        // Decoding and re-encoding is not the identity: a UTF-8 BOM is dropped on the
+        // way in (19 bytes read, 16 reported) and a byte that is not valid UTF-8 comes
+        // back as a three-byte U+FFFD. Both skew the one number this verb exists to
+        // state, in opposite directions, against a figure the harness measures on the
+        // file itself. `stat.size` is not the answer either: on a symlinked mirror
+        // `lstat` sizes the *link*, and following it is the point.
+        bytes: raw.byteLength,
         symlink: stat.isSymlink,
       });
     }
@@ -172,7 +204,43 @@ export function readInstructionSet(options: {
     root: options.root,
     levels,
     totalBytes: levels.reduce((sum, level) => sum + level.primary.bytes, 0),
+    perRequestBytes: heaviestChainBytes(levels),
   };
+}
+
+/**
+ * The heaviest ancestor chain: the most any single request can load.
+ *
+ * A request made in `pkg/a` merges the root level with `pkg/a`'s, and stops. `pkg/b` is
+ * a sibling, and no agent loads a sibling — so the maximum over chains is the honest
+ * per-request figure, and the sum over levels is not one.
+ */
+function heaviestChainBytes(levels: readonly InstructionLevel[]): number {
+  const bytesByDir = new Map(levels.map((level) => [level.dir, level.primary.bytes]));
+  let heaviest = 0;
+  for (const level of levels) {
+    const chain = ancestorDirs(level.dir).reduce(
+      (sum, dir) => sum + (bytesByDir.get(dir) ?? 0),
+      level.primary.bytes,
+    );
+    heaviest = Math.max(heaviest, chain);
+  }
+  return heaviest;
+}
+
+/**
+ * The directories a level merges *with*, root first and nearest last — and never the
+ * level itself.
+ *
+ * The whole distinction `restated-at-level` and {@link InstructionSet.perRequestBytes}
+ * both turn on: `pkg/a` merges with `''` and `pkg`, and with nothing else in the tree.
+ */
+export function ancestorDirs(dir: string): readonly string[] {
+  if (dir === '') return [];
+  const segments = dir.split('/');
+  const out: string[] = [''];
+  for (let cut = 1; cut < segments.length; cut += 1) out.push(segments.slice(0, cut).join('/'));
+  return out;
 }
 
 /** `''` is depth 0; `a/b` is depth 2. */

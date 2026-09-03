@@ -330,7 +330,7 @@ Everything below is typechecked, linted, and covered. `pnpm verify` is the gate.
 | `packages/core/test/guards/config-writer.test.ts`       | The config file's two directions, and the one built-in strategy. `parseConfig(renderConfig(c))` equals `c` field for field for every shape a config can take, and the totality leg reads the key set out of the **reader's own refusal** — a key the reader learns and the writer forgets goes red without anyone remembering this file. `DEFAULT_STRATEGY` is pinned to the registry, to what a smelter given no strategy actually uses, and to the CLI's `builtin` provenance, with a scan refusing a second copy of the default anywhere in `src`. |
 | `packages/mcp/test/guards/no-network.test.ts`           | The MCP server's stdio-local surface: the SDK's HTTP/SSE transports never enter the package's import graph.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `packages/core/test/guards/_source.ts`                  | The package's guard anchor: one `guardAnchor(import.meta.url)` call into `packages/guard-kit`, which owns the helpers (`guardSrcRoot()`, `guardRoot()`, the string/comment stripper that stops `net/policy.ts` reporting its own word list), the `GuardMutation` shape, and `assertKeyedById` — the registry-key-is-the-id invariant applied to `LANGUAGE_PROFILES`, `HARNESS_PROFILES` and `SUBCOMMANDS`.                                                                                                                                            |
-| `scripts/mutate.mjs`                                    | **The meta-guard, as a thin runner.** Discovers the guard files — in every workspace package with a `test/guards/` directory — and applies each one's own `MUTATIONS` export — 121 mutations across 25 guards, each of which must go red. A survivor is reported as a hole in the guard, not the mutation; the counts in this row are verified, not typed — the runner fails when they drift from what the guard files hold.                                                                                                                          |
+| `scripts/mutate.mjs`                                    | **The meta-guard, as a thin runner.** Discovers the guard files — in every workspace package with a `test/guards/` directory — and applies each one's own `MUTATIONS` export — 124 mutations across 25 guards, each of which must go red. A survivor is reported as a hole in the guard, not the mutation; the counts in this row are verified, not typed — the runner fails when they drift from what the guard files hold.                                                                                                                          |
 | `scripts/bundle-grammars.mjs`                           | Copies the grammars `WASM_BY_LANGUAGE` names into the package, so they ship. Reads the built map rather than keeping a second list.                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `scripts/generate-third-party.mjs`                      | Generates `THIRD-PARTY.md`. The grammar ↔ provenance mapping is a partition: an unattributed grammar throws.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `scripts/check-fresh-clone.sh`                          | Installs and verifies from `git archive` output — tracked files only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -903,24 +903,32 @@ Its phrasing is quoted once, in `src/agents/guide.ts`, and every explanation end
 an attributed fragment of it, so a reader can always tell smelt's measurement from the
 guide's opinion.
 
-**It lints the merged set.** The guide's rule is that a nested instruction file _merges
-with_ the root one, so the honest number is the sum across levels, not the size of any
-one file. `src/agents/instructions.ts` walks the tree through `RepoReader` — the repo
-map's seam, so every claim about the walk is asserted by counting calls against a stub
-— and arranges what it finds by level. At each level the **primary** is the file that
-level costs (`AGENTS.md`, or whichever mirror stands alone); a `CLAUDE.md` or
+**It lints the merged set, and reports two numbers rather than one.** The guide's rule
+is that a nested instruction file _merges with_ the root one — but a merge runs **up**
+the tree and never across it, and a monorepo makes that difference visible. An agent
+working in `pkg/a` loads the root file and `pkg/a`'s; it never loads `pkg/b`'s. So
+`src/agents/instructions.ts` computes both, and each is printed under the question it
+answers: `perRequestBytes`, the heaviest ancestor chain, which is the per-request cost
+the guide's whole argument is about; and `totalBytes`, every level summed, which is the
+repository's instruction surface. Summing siblings and calling the result a per-request
+cost would be the same over-count this module already refuses for mirrors, and it would
+be the one number the whole verb exists to state. The walk goes through `RepoReader` —
+the repo map's seam, so every claim about the walk is asserted by counting calls against
+a stub — and arranges what it finds by level. At each level the **primary** is the file
+that level costs (`AGENTS.md`, or whichever mirror stands alone); a `CLAUDE.md` or
 `GEMINI.md` beside one is a **mirror**, counted for drift and never for bytes, because
 one agent loads one of them and summing all three would triple a cost nobody pays.
 
 **Three rulings shape it, and each one is a rule this codebase already lives under:**
 
-- **Measure, never threshold.** Bytes per level, a total, and an imperative count
-  reported as `imperatives (heuristic)` — labelled, because "Run `pnpm verify`" counts
-  and "The gate is `pnpm verify`" does not, and both are one instruction. The guide's
-  cited "~150-200 instructions" is printed as a citation and compared to nothing. The
-  only number that can fail a run is `agents.budgetBytes` in `smelt.config.json`, which
-  is the user's; exceeding it exits 1, the same over-budget code a `smelt` run uses.
-  There is no default, for the reason `--budget` has none.
+- **Measure, never threshold.** Bytes per level, the per-request worst case, the
+  whole-tree surface, and an imperative count reported as `imperatives (heuristic)` —
+  labelled, because "Run `pnpm verify`" counts and "The gate is `pnpm verify`" does not,
+  and both are one instruction. The guide's cited "~150-200 instructions" is printed as
+  a citation and compared to nothing, read from `guide.ts` rather than retyped in the
+  renderer. The only number that can fail a run is `agents.budgetBytes` in
+  `smelt.config.json`, which is the user's; exceeding it exits 1, the same over-budget
+  code a `smelt` run uses. There is no default, for the reason `--budget` has none.
 - **Explain every finding.** A finding is an `ElisionReason` — a stable `rule` id and a
   sentence — exactly like an elision. Eight rules: `dead-path`, `dead-link`,
   `forcing-language`, `structure-dump`, `generated-boilerplate` (the softest, and its
@@ -932,7 +940,12 @@ one agent loads one of them and summing all three would triple a cost nobody pay
   the repository the Markdown describes. A renamed `src/auth/handlers.ts` does not make
   the file invalid — it makes it a lie the agent believes on every request. Resolution
   goes through the same reader as the walk, so a guard can prove the difference between
-  a dead token and a live one is made by a `stat` and not by a string.
+  a dead token and a live one is made by a `stat` and not by a string. The filters are
+  half the rule: a scheme-less domain (`aihero.dev/…` — the guide smelt itself cites)
+  and a product name (`Node.js`, `Bun.sh`) are shaped exactly like paths, so a token
+  with no separator is a candidate only inside backticks, where the author has said
+  "this is a thing in my repository". A false accusation on the flagship rule costs more
+  than the finding it replaces is worth.
 
 **`smelt agents split` states a seam rather than straddling it.** The guide's refactor
 has a mechanical half — find the `##` sections, name their files, move the bytes, fix
