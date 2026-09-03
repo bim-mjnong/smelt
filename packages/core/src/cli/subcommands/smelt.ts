@@ -13,8 +13,8 @@ import { formatReport } from '../report.ts';
 import { CLI_NAME, EXIT } from '../shell.ts';
 import type { CliIo } from '../shell.ts';
 
-import { parseBudget } from './flags.ts';
-import type { FlagValues } from './flags.ts';
+import { flagList, parseBudget, VERB_FLAGS } from './flags.ts';
+import type { FlagValues, VerbFlag } from './flags.ts';
 import type { ConfigSource, Subcommand } from './subcommand.ts';
 
 /**
@@ -131,12 +131,7 @@ export const smeltCommand: Subcommand<SmeltInvocation, ResolvedSmeltCommand> = {
     const file = positionals[0];
 
     if (values.reconstruct === true) {
-      if (values.budget !== undefined) {
-        throw new CliUsageError(
-          `${CLI_NAME}: --budget makes no sense with --reconstruct. Reconstruction puts ` +
-            `every byte back; there is nothing to fit.`,
-        );
-      }
+      refuseReconstructFlags(values);
       return {
         mode: 'reconstruct',
         ...(file === undefined ? {} : { file }),
@@ -175,6 +170,57 @@ export const smeltCommand: Subcommand<SmeltInvocation, ResolvedSmeltCommand> = {
     return runSmelt(resolved.run, io);
   },
 };
+
+/**
+ * Every flag this verb owns that `--reconstruct` cannot honour, with the reason each
+ * one makes no sense — the second job's flag ownership, which the registry cannot
+ * express because both jobs are the same verb.
+ *
+ * `refuseForeignFlags` refuses a flag no verb owns *here*; it cannot refuse `--focus`
+ * on a single-blob run, because a single-blob run is exactly where `--focus` belongs.
+ * So the ones the round trip ignores are named here instead, and named exhaustively:
+ * every flag on `smeltCommand.flags` except `--reconstruct` itself has an entry, which
+ * `test/guards/subcommand-registry.test.ts` crosses. A flag added to this verb and
+ * forgotten here would be silently ignored by half of the verb's runs — the failure
+ * this table exists to make impossible.
+ *
+ * Key order is the flag table's order, so a refusal lists flags the way every other
+ * refusal does.
+ */
+const RECONSTRUCT_REFUSALS = {
+  budget: `Reconstruction puts every byte back; there is nothing to fit.`,
+  focus:
+    `Focus decides what survives a cut, and the cut has already been made — ` +
+    `the envelope names every elision it took.`,
+  language:
+    `Nothing is detected or parsed on the way back: the envelope carries the ` +
+    `bytes and the ranges the cut recorded.`,
+  strategy: `No planner runs on the way back — the elisions come from the envelope.`,
+  json:
+    `--reconstruct reads a --json envelope and prints the original text; ` +
+    `there is no second envelope to write.`,
+} as const satisfies Partial<Record<VerbFlag, string>>;
+
+/**
+ * Refuse every flag `--reconstruct` would otherwise ignore, in one message shaped like
+ * the ownership refusals: the flags named, then why not here. A {@link CliUsageError},
+ * so it exits 2 exactly as every other refusal does.
+ *
+ * @throws {CliUsageError} naming each offending flag and what the round trip does instead.
+ */
+function refuseReconstructFlags(values: FlagValues): void {
+  const reasons: Partial<Record<VerbFlag, string>> = RECONSTRUCT_REFUSALS;
+  const offending = VERB_FLAGS.filter(
+    (flag) => reasons[flag] !== undefined && values[flag] !== undefined,
+  );
+  if (offending.length === 0) return;
+
+  const verb = offending.length === 1 ? 'makes' : 'make';
+  const why = offending.map((flag) => reasons[flag] ?? '').join(' ');
+  throw new CliUsageError(
+    `${CLI_NAME}: ${flagList(offending)} ${verb} no sense with --reconstruct. ${why}`,
+  );
+}
 
 /**
  * Merge one `'smelt'`-mode invocation with the loaded config (or `undefined` when no
