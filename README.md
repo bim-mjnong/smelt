@@ -72,7 +72,9 @@ in 7,297 B → out 985 B   (-86.5%, 3 elisions)
 
 - `--strategy structural` parses the file and collapses whole sibling declarations,
   keeping every signature and doc comment. `--strategy lexical` (the default) uses focus
-  windows — right for logs, traces, and anything that is not code.
+  windows — right for logs, traces, and anything that is not code. `--strategy auto`
+  picks between them on the language and labels what it ran, for a stream that is
+  sometimes code and sometimes a build log.
 - `--json` prints a versioned envelope; `--reconstruct` reads it back and prints the
   original, byte for byte. Reversibility you can run from a shell.
 - `smelt map <dir> --budget 4000` prints a ranked symbol map of a whole repository —
@@ -110,7 +112,7 @@ const result = await smelter.smelt(toolOutput, {
   path: 'src/server.ts', // language detection
   focus: ['handleRequest'], // what you were actually looking for
   budgetBytes: 4_000,
-  strategy: 'structural', // parse-tree collapse; 'lexical' for non-code
+  strategy: 'structural', // parse-tree collapse; 'lexical' for non-code, 'auto' to pick
 });
 
 result.text; // send this
@@ -284,6 +286,9 @@ Three things that look like bugs and are not:
   smelt invented would be smelt deciding how much of your context to throw away.
 - **An unsupported language under `strategy: 'structural'` is refused, never
   approximated.** No silent downgrade to line windows wearing a `structural/v1` label.
+  `strategy: 'auto'` is the way to ask for the choice to be made for you, and its
+  results say which planner ran — a selector, not a fallback: a grammar that fails to
+  load still raises, under `auto` exactly as under `structural`.
 - **There is no expansion-rate warning threshold.** smelt measures the rate; policy is
   yours. The one computed fact is `stats().allElisionsRetrieved` — true when every blob
   smelt hid was asked for again, i.e. the elision saved nothing and cost a round trip.
@@ -316,11 +321,11 @@ Three things that look like bugs and are not:
   tiered honestly (verified / experimental / advisory — see the harness guide above).
   Deny-with-reason by default; rewrite opt-in and always announced — in the decision
   reason where the harness has one, on stderr where it does not.
-- **The honesty machinery** — twenty-two guard suites (nineteen in the core, three guarding
+- **The honesty machinery** — twenty-three guard suites (twenty in the core, three guarding
   the MCP server's stdio-local surface and the shared operations seam) that walk the
   real import graph, assert byte-exact reversibility, pin the wire format, and re-derive
   the attribution file; plus a mutation runner (`pnpm mutate`) that breaks the source on
-  purpose — 108 mutations across 22 guards, each watched going red — and fails if a guard
+  purpose — 111 mutations across 23 guards, each watched going red — and fails if a guard
   does not notice. Every guarantee in this README has a guard.
 
 ## Measured numbers

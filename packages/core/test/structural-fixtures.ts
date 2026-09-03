@@ -948,3 +948,40 @@ export const FIXTURE_BY_LANGUAGE: Readonly<Record<StructuralLanguage, Structural
     pureCollapse: /^collapsed \d+ sibling functions$/,
   },
 };
+
+/**
+ * THE BUDGET-RUNG CASE — 158 bytes, and the review's exact reproduction.
+ *
+ * `alpha_gate` is the focus, so it is kept. Everything below it is one maximal run of
+ * four siblings — a `VERSION = 1` statement and three classes — and pricing that run
+ * whole is what the first pass refuses: a mixed-kind explanation ("1 statement, 3
+ * classes") earns a 106-byte marker against a 105-byte cut, one byte the wrong side of
+ * profitable. The three classes *alone* are 92 bytes against an 82-byte marker: a real
+ * saving of 10 bytes the planner used to leave on the table while returning over
+ * budget having elided nothing at all.
+ *
+ * The numbers are load-bearing, which is why they are asserted rather than described —
+ * see `test/structural.test.ts` and `test/guards/structural.test.ts`. Change a byte of
+ * this fixture and the arithmetic that makes it interesting is gone.
+ */
+export const BUDGET_RUNG_PY = `def alpha_gate(flag):
+    return 1 if flag else -1
+
+VERSION = 1
+
+class BetaHandler:
+    pass
+
+class GammaHandler:
+    value = 0
+
+class DeltaHandler:
+    pass
+`;
+
+/** The budget the review ran {@link BUDGET_RUNG_PY} under: too small for the input. */
+export const BUDGET_RUNG_BUDGET = 120;
+
+/** The cut the budget rung must find, and the marker it must be priced against. */
+export const BUDGET_RUNG_CUT_BYTES = 92;
+export const BUDGET_RUNG_MARKER_BYTES = 82;

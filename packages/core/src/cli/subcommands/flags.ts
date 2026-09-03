@@ -3,7 +3,7 @@ import { CliUsageError } from '../../errors.ts';
 import { HARNESS_IDS } from '../../harness/registry.ts';
 import { budgetFault, budgetMalformed } from '../../ops/inputs.ts';
 import type { BudgetFault } from '../../ops/inputs.ts';
-import { STRATEGIES } from '../../plan/planners.ts';
+import { STRATEGIES, DEFAULT_STRATEGY } from '../../plan/planners.ts';
 import { STRUCTURAL_LANGUAGES } from '../../plan/structural.ts';
 import { DEFAULT_REPO_IGNORE } from '../../repomap/map.ts';
 import { CLI_NAME } from '../shell.ts';
@@ -161,10 +161,12 @@ export const FLAG_HELP: Readonly<Record<FlagName, FlagHelp>> = {
   strategy: {
     label: '--strategy <id>',
     body: () => [
-      `${STRATEGIES.join(' or ')}. Defaults to lexical, unless`,
+      `${STRATEGIES.join(', ')}. Defaults to ${DEFAULT_STRATEGY}, unless`,
       'smelt.config.json says otherwise. structural parses',
       `${STRUCTURAL_LANGUAGES.join(', ')};`,
-      'any other language is refused, never approximated.',
+      'any other language is refused, never approximated. auto picks',
+      'structural for those languages and lexical for the rest, and',
+      'the report names whichever one actually ran.',
     ],
   },
   ignore: {

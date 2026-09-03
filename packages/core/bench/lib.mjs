@@ -36,6 +36,17 @@ export const RESULTS_HEADER = [
 export const FORBIDDEN_RESULT_PHRASES = ['up to', 'cache hit rate'];
 
 /**
+ * The strategies a bench case may name.
+ *
+ * Hand-typed, and the one list in the repo that is: this module is deliberately free
+ * of `dist/` and `src/` imports so it stays testable without a build, which means it
+ * cannot read `PLANNERS`. Hand-typed is not the same as unwitnessed — `test/bench.test.ts`
+ * compares this array against `STRATEGIES` and goes red the moment the registry gains
+ * or loses a member, which is how `auto` was found missing here in the first place.
+ */
+export const BENCH_STRATEGIES = ['lexical', 'structural', 'auto'];
+
+/**
  * Validates the parsed `cases.json`. `fileExists` is injected so this stays pure.
  * Returns the list of problems — an empty array is a pass.
  */
@@ -66,8 +77,10 @@ export function validateCases(manifest, fileExists) {
     if (!Number.isInteger(benchCase.budgetBytes) || benchCase.budgetBytes <= 0) {
       problems.push(`${id}: budgetBytes must be a positive integer`);
     }
-    if (benchCase.strategy !== 'lexical' && benchCase.strategy !== 'structural') {
-      problems.push(`${id}: strategy must be 'lexical' or 'structural'`);
+    if (!BENCH_STRATEGIES.includes(benchCase.strategy)) {
+      problems.push(
+        `${id}: strategy must be one of ${BENCH_STRATEGIES.map((name) => `'${name}'`).join(', ')}`,
+      );
     }
     if (typeof benchCase.provenance !== 'string' || benchCase.provenance.length === 0) {
       problems.push(`${id}: no provenance — a corpus entry must say where it came from`);

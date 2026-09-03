@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { retrieveStats } from '../src/stats.ts';
+import { STRATEGIES } from '../src/plan/planners.ts';
 
 /**
  * The measurement harness's own tests — the pure half.
@@ -49,6 +50,7 @@ interface BenchLib {
     maxRounds: number;
   }): string;
   CORPUS_REF_FORMAT: string;
+  BENCH_STRATEGIES: readonly string[];
   corpusRefMismatch(input: {
     refFile: string;
     from: string;
@@ -158,6 +160,15 @@ describe('the corpus and its manifest', () => {
     expect(problems.join('\n')).toContain('budgetBytes');
     expect(problems.join('\n')).toContain('strategy');
     expect(problems.join('\n')).toContain('provenance');
+  });
+
+  it('the strategies a bench case may name are exactly the shipped ones', () => {
+    // bench/lib.mjs cannot import PLANNERS — it is deliberately free of src/ and
+    // dist/ imports so it stays testable without a build — so its strategy list is
+    // hand-typed. This is the witness that keeps the hand-typed copy honest: a
+    // strategy the registry ships and the bench manifest would reject is a manifest
+    // face silently outside the registry's set.
+    expect([...lib.BENCH_STRATEGIES].toSorted()).toEqual([...STRATEGIES].toSorted());
   });
 });
 

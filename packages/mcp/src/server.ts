@@ -294,7 +294,9 @@ function buildToolList(retrieveTool: RetrieveTool): Tool[] {
               '"structural" parses the file and collapses whole sibling declarations ' +
               '(refused, never approximated, for languages without a bundled grammar); ' +
               '"lexical" uses focus windows — right for logs, traces, and anything that ' +
-              'is not code. Defaults to the smelt.config.json strategy, else "lexical".',
+              'is not code; "auto" picks structural for a language smelt has a grammar ' +
+              'for and lexical for everything else, and the report names whichever one ' +
+              'ran. Defaults to the smelt.config.json strategy, else "lexical".',
           },
         },
         required: ['budgetBytes'],
