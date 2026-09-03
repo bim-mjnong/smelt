@@ -17,6 +17,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { tagsCacheKey, TAGS_CACHE_FORMAT } from '@guard/repomap/cache';
 import {
   buildRepoMap,
+  DEFAULT_REPO_IGNORE,
   REPO_MAP_CACHE_CORRUPT_RULE,
   REPO_MAP_FOCUS_RULE,
   REPO_MAP_ID,
@@ -25,11 +26,12 @@ import {
   REPO_MAP_UNREFERENCED_RULE,
 } from '@guard/repomap/map';
 import { EXIT, runCli } from '@guard/cli/run';
-import { SmeltError } from '@guard/errors';
+import { RepoMapIoError, SmeltError } from '@guard/errors';
 import { extractTags } from '@guard/repomap/tags';
 import { nodeFsReader } from '@guard/repomap/reader';
 
 import { STUB_ROOT, stubReader } from '../repo-reader-stub.ts';
+import { readSource } from './_source.ts';
 import type { GuardMutation } from './_mutations.ts';
 
 /**
@@ -66,9 +68,26 @@ import type { GuardMutation } from './_mutations.ts';
  *     counted at the reader: a resolving reader's link is statted once and never
  *     read, an ignored path is never statted at all, and a `cacheDir` changes the
  *     call log by nothing.
+ *  9. **The default ignore list holds the build outputs.** On a built TypeScript
+ *     repo, `dist/x.js` and `dist/x.d.ts` sit beside `src/x.ts`, so a default that
+ *     skipped only `.git` and `node_modules` ranked and rendered every symbol three
+ *     times. A caller-supplied list still *replaces* the default wholesale — a
+ *     default nobody can turn off is not a default.
+ * 10. **Every failure is a `SmeltError`.** The consumer contract makes exactly one
+ *     promise about errors, and the repo map is the module most able to break it: it
+ *     walks a whole tree. A missing root, an unreadable file, an unusable cache
+ *     directory — each arrives wrapped, naming the path, never as a raw Node errno.
+ * 11. **The tags cache is bounded.** The key is a content hash, so an edit orphans an
+ *     entry rather than replacing it; unswept, every pre-edit version of every file
+ *     lives forever. Each build sweeps what it did not use — and a miss may only make
+ *     the next map slower, never different.
+ * 12. **The ranking's resolution limit is written down.** References bind by bare
+ *     identifier, so same-name symbols share rank. That is Aider's design and not a
+ *     bug — but undocumented it is a trap, so the behaviour and the sentences
+ *     describing it are both pinned here.
  *
- * Mutations for 2, 1, 4, 5, 7 and 8 live in the MUTATIONS export at the bottom of
- * this file; `pnpm mutate` proves each one turns this file red.
+ * Mutations for 2, 1, 4, 5, 7, 8, 9, 10, 11 and 12 live in the MUTATIONS export at
+ * the bottom of this file; `pnpm mutate` proves each one turns this file red.
  */
 
 const fixtureRoot = fileURLToPath(new URL('../fixtures/repomap-repo', import.meta.url));
@@ -593,13 +612,177 @@ describe('the repo map keeps its claims', () => {
     });
     expect(cold.calls).toEqual(EXPECTED_CALLS);
     expect(warm.calls).toEqual(EXPECTED_CALLS);
-    expect(coldMap.cache).toEqual({ hits: 0, misses: 2, discarded: 0 });
-    expect(warmMap.cache).toEqual({ hits: 2, misses: 0, discarded: 0 });
+    expect(coldMap.cache).toEqual({ hits: 0, misses: 2, discarded: 0, pruned: 0 });
+    expect(warmMap.cache).toEqual({ hits: 2, misses: 0, discarded: 0, pruned: 0 });
     expect(warmMap.text).toBe(uncached.text);
 
     // And the seam itself carries no way to write: three read-only methods, and a
     // fourth one appearing here is a Law 1 conversation, not a merge.
     expect(Object.keys(nodeFsReader()).toSorted()).toEqual(['list', 'read', 'stat']);
+  });
+
+  it('ignores build output by default, so a built repo is not mapped three times over', async () => {
+    // The defect this pins: `dist/` was not on the default list, so on any built
+    // TypeScript repo the default map carried src/x.ts, dist/x.js AND dist/x.d.ts —
+    // every symbol three times, the copies referencing each other, two-thirds of the
+    // map its own compiler output.
+    const root = scratch('smelt-repomap-built-');
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(
+      join(root, 'src', 'thing.ts'),
+      'export function builtSymbol(): number {\n  return 1;\n}\n',
+    );
+    const skipped = ['.git', 'node_modules', 'dist', 'build', 'out', 'coverage'];
+    for (const dir of skipped) {
+      mkdirSync(join(root, dir), { recursive: true });
+      writeFileSync(
+        join(root, dir, 'thing.js'),
+        'export function builtSymbol() {\n  return 1;\n}\n',
+      );
+    }
+    for (const dir of skipped) {
+      expect(DEFAULT_REPO_IGNORE, `${dir} fell off the default ignore list`).toContain(dir);
+    }
+
+    const map = await buildRepoMap({ root, budgetBytes: BUDGET });
+    expect(map.filesScanned, 'a build-output directory was walked by default').toBe(1);
+    expect(
+      map.entries.filter((entry) => entry.name === 'builtSymbol'),
+      'the same symbol was ranked once per build-output copy of its file',
+    ).toHaveLength(1);
+    expect(map.entries[0]!.path).toBe('src/thing.ts');
+
+    // And the documented contract survives: a caller's list REPLACES the default, it
+    // is not merged with it — otherwise there is no way to say "map my dist, I meant
+    // it", and a default that cannot be turned off is not a default.
+    const replaced = await buildRepoMap({ root, budgetBytes: BUDGET, ignore: ['coverage'] });
+    expect(
+      replaced.filesScanned,
+      'a caller-supplied ignore list was merged with the default instead of replacing it',
+    ).toBe(1 + skipped.length - 1);
+  });
+
+  it('wraps every filesystem failure in a SmeltError naming the path — no raw errno escapes', async () => {
+    // The contract's one promise about errors is that catching SmeltError is enough.
+    // buildRepoMap({root: '/nonexistent'}) used to throw the bare ENOENT readdirSync
+    // raises, so a caller doing exactly what the docs say still had an escape.
+    const missingRoot = join(scratch('smelt-repomap-missing-'), 'no-such-tree');
+    const missing = await buildRepoMap({ root: missingRoot, budgetBytes: BUDGET }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(missing, 'a missing root stopped failing at all').toBeDefined();
+    expect(
+      missing,
+      'a raw Node error escaped buildRepoMap — the SmeltError guarantee has a hole in it',
+    ).toBeInstanceOf(SmeltError);
+    expect(missing).toBeInstanceOf(RepoMapIoError);
+    expect((missing as Error).message, 'the failure does not name the path').toContain(missingRoot);
+    expect((missing as Error).message).toContain('ENOENT');
+    expect(
+      (missing as Error).cause,
+      'the original error was thrown away, not wrapped',
+    ).toBeDefined();
+
+    // A file that lists but will not read: same promise, through the reader seam.
+    const reader = stubReader({
+      'only.ts': { kind: 'file', content: 'export function fine(): number {\n  return 1;\n}\n' },
+      'locked.ts': { kind: 'unreadable', reason: 'EACCES' },
+    });
+    await expect(
+      buildRepoMap({ root: STUB_ROOT, budgetBytes: BUDGET, reader }),
+    ).rejects.toBeInstanceOf(SmeltError);
+
+    // And a cache directory that cannot be made, because a file is already there.
+    const occupied = join(scratch('smelt-repomap-cachefile-'), 'not-a-dir');
+    writeFileSync(occupied, 'this is a file, not a cache directory\n');
+    const cacheFailure = await buildRepoMap({
+      root: fixtureRoot,
+      budgetBytes: BUDGET,
+      cacheDir: occupied,
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(cacheFailure, 'an unusable cache directory stopped failing at all').toBeDefined();
+    expect(cacheFailure, 'a raw Node error escaped the tags cache').toBeInstanceOf(SmeltError);
+    expect((cacheFailure as Error).message).toContain(occupied);
+  });
+
+  it('bounds the tags cache: a superseded entry is swept, never left to accumulate', async () => {
+    const root = scratch('smelt-repomap-bounded-');
+    const cacheDir = scratch('smelt-repomap-bounded-cache-');
+    const file = join(root, 'only.ts');
+    const onDisk = (): readonly string[] =>
+      readdirSync(join(cacheDir, 'tags')).filter((name) => name.endsWith('.json'));
+
+    let last = '';
+    for (let edit = 0; edit < 4; edit += 1) {
+      writeFileSync(file, `export function edit${String(edit)}(): number {\n  return 1;\n}\n`);
+      const map = await buildRepoMap({ root, budgetBytes: BUDGET, cacheDir });
+      expect(
+        map.entries.map((entry) => entry.name),
+        'the edited file was answered with stale cached tags',
+      ).toEqual([`edit${String(edit)}`]);
+      expect(
+        onDisk(),
+        'the cache kept the pre-edit entry — keyed by content hash and never evicted, it grows without bound across a session',
+      ).toHaveLength(1);
+      expect(map.cache!.pruned, 'the sweep count is not the number of entries removed').toBe(
+        edit === 0 ? 0 : 1,
+      );
+      last = map.text;
+    }
+
+    // The rule any bound here must meet: a miss may cost a re-parse and nothing else.
+    // Throw the whole cache away and the map is byte-identical, merely colder.
+    rmSync(cacheDir, { recursive: true, force: true });
+    const cold = await buildRepoMap({ root, budgetBytes: BUDGET, cacheDir });
+    expect(cold.cache).toEqual({ hits: 0, misses: 1, discarded: 0, pruned: 0 });
+    expect(cold.text, 'an emptied cache changed the map instead of only slowing it').toBe(last);
+  });
+
+  it('binds references by bare identifier, and says so where a reader will meet it', async () => {
+    // Aider's design, inherited on purpose, and judged not a bug: a reference tag is
+    // a name, not a resolved symbol. Undocumented it is a trap, so both the behaviour
+    // and the sentences describing it are pinned.
+    const root = scratch('smelt-repomap-names-');
+    writeFileSync(join(root, 'alpha.ts'), 'export function shared(): number {\n  return 1;\n}\n');
+    writeFileSync(join(root, 'beta.ts'), 'export function shared(): number {\n  return 2;\n}\n');
+    writeFileSync(
+      join(root, 'caller.ts'),
+      "import { shared } from './alpha.ts';\n\nexport function callIt(): number {\n  return shared();\n}\n",
+    );
+
+    const map = await buildRepoMap({ root, budgetBytes: BUDGET });
+    const both = map.entries.filter((entry) => entry.name === 'shared');
+    expect(both.map((entry) => entry.path).toSorted()).toEqual(['alpha.ts', 'beta.ts']);
+    expect(both[0]!.refsIn, 'the guard is vacuous unless something references it').toBeGreaterThan(
+      0,
+    );
+    // beta.ts is imported by nothing, and ranks exactly as alpha.ts does: the counts
+    // are per NAME, and the receipts must never claim more resolution than that.
+    expect(both[0]!.refsIn).toBe(both[1]!.refsIn);
+    expect(both[0]!.refsInFiles).toBe(both[1]!.refsInFiles);
+    expect(both[0]!.rank).toBe(both[1]!.rank);
+
+    // Pinned where a reader will actually meet it: the module that emits the map and
+    // the module that computes the rank each carry the statement, under a heading a
+    // skimmer can see. Checking the heading and not only the phrase is deliberate —
+    // "bare identifier" also appears in a field comment, so a phrase check alone
+    // survives the deletion of the paragraph that explains it.
+    const stated: readonly (readonly [string, string])[] = [
+      ['repomap/map.ts', '**What the ranking can and cannot resolve.**'],
+      ['repomap/rank.ts', '**The resolution limit, stated plainly:'],
+    ];
+    for (const [file, heading] of stated) {
+      const source = readSource(file);
+      expect(
+        source,
+        `${file} no longer states the ranking's resolution limit — same-name symbols still share rank, and now nothing tells a reader so`,
+      ).toContain(heading);
+      expect(source).toContain('bare identifier');
+    }
   });
 });
 
@@ -668,5 +851,40 @@ export const MUTATIONS: GuardMutation[] = [
     find: '      if (stat.isSymlink) continue;',
     replace: '      // symlink refusal removed',
     why: 'the walk stops refusing symlinks and leans on the accident that an lstat of a link is neither file nor directory — a reader whose stat resolves the link is then followed straight out of the root, and the call log shows the map reading a path it was never handed',
+  },
+  {
+    id: 'repomap-default-ignores-build-output-dropped',
+    file: 'repomap/map.ts',
+    find: "  'node_modules',\n  'dist',\n  'build',\n  'out',\n  'coverage',\n",
+    replace: "  'node_modules',\n",
+    why: 'the build-output directories dropped from the default ignore list — on any built TypeScript repo the default map then ranks src/x.ts, dist/x.js and dist/x.d.ts as three separate symbols apiece, and two-thirds of what a caller paid for is the compiler output of the other third',
+  },
+  {
+    id: 'repomap-fs-error-unwrapped',
+    file: 'repomap/io.ts',
+    find: '    if (error instanceof SmeltError) throw error;\n    throw new RepoMapIoError(operation, path, error);',
+    replace: '    throw error;',
+    why: "the repo map's filesystem failures stop being wrapped — a missing root throws the raw Node ENOENT again, straight past a consumer catching SmeltError, and the contract's one promise about errors has an exception nobody is told about",
+  },
+  {
+    id: 'repomap-cache-unbounded',
+    file: 'repomap/map.ts',
+    find: '  if (cache !== undefined) cacheCounts.pruned = cache.sweep(liveKeys);',
+    replace: '  // sweep removed',
+    why: 'the tags cache stops being swept — entries are keyed by content hash, so every pre-edit version of every file stays on disk forever and a long session grows a cache nothing will ever read again',
+  },
+  {
+    id: 'repomap-ranking-limit-undocumented',
+    file: 'repomap/rank.ts',
+    find: ' * **The resolution limit, stated plainly: references bind by bare identifier.** A',
+    replace: ' * A',
+    why: "the ranking's resolution limit deleted from the module that implements it — same-name symbols across files still share rank and overloads still double-count, but nothing tells a reader that the numbers are per name rather than per symbol",
+  },
+  {
+    id: 'repomap-ranking-limit-undocumented-in-map',
+    file: 'repomap/map.ts',
+    find: ' * **What the ranking can and cannot resolve.** A reference binds to a definition **by',
+    replace: ' * A reference binds to a definition **by',
+    why: "the resolution limit deleted from the map's own module doc — a reader of buildRepoMap meets refsIn with nothing to tell them it counts a name rather than a symbol, and the one place the limit was stated for the module's own callers is gone",
   },
 ];

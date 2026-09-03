@@ -5,6 +5,7 @@ import { SmeltError } from '../errors.ts';
 import type { LanguageId } from '../types.ts';
 
 import { TagsCache, tagsCacheKey } from './cache.ts';
+import { fsCall } from './io.ts';
 import { rankDefinitions } from './rank.ts';
 import type { FileTagsEntry, RankedDefinition } from './rank.ts';
 import { nodeFsReader } from './reader.ts';
@@ -35,8 +36,30 @@ import type { FileTags } from './tags.ts';
  *    path, name, and line. Two runs over the same tree are byte-identical.
  *  - **The budget is bytes**, same contract as the planners, and it is respected by
  *    construction: symbols are added in rank order until the next line would not fit.
- *  - **The cache lives only in a directory the caller explicitly hands in**, and a
- *    corrupt entry is discarded loudly — a warning in the result — never trusted.
+ *  - **The cache lives only in a directory the caller explicitly hands in**, a corrupt
+ *    entry is discarded loudly — a warning in the result — never trusted, and it is
+ *    bounded: each build sweeps the entries it did not use, so the superseded
+ *    pre-edit version of every file does not accumulate forever. See `cache.ts`.
+ *  - **Every failure is a `SmeltError`**: the consumer contract's one promise about
+ *    errors holds here too, so a missing root or an unreadable file arrives as
+ *    {@link RepoMapIoError} naming the path, not as a raw Node `ENOENT`. Every
+ *    filesystem call in this module goes through `fsCall` in `io.ts`.
+ *
+ * **What the ranking can and cannot resolve.** A reference binds to a definition **by
+ * bare identifier** — the tags carry names, not resolved symbols — so every definition
+ * of a name receives every reference to that name, wherever either lives. Two files
+ * that both define `run` share one another's inbound references and therefore rank
+ * alike; two overloads of one name each count the whole traffic to it, so a name is
+ * counted once per definition of it; an identifier that happens to collide with an
+ * unrelated one somewhere else in the tree lends it rank. This is Aider's design, not
+ * a defect introduced here: resolving properly means per-language import and scope
+ * resolution — a type checker per language — and the map is a *ranking heuristic* for
+ * deciding what a human or a model should look at first, never a symbol resolver.
+ * What it must not do is *claim* a resolution it did not perform, and it does not: the
+ * receipt on each entry says what was actually measured — `refsIn` is the number of
+ * references to that **name** across the scanned tree — so a reader who knows this
+ * paragraph can read the numbers for exactly what they are. Anything that needs true
+ * binding (rename, call graph, dead-code detection) needs a different tool.
  *
  * **Deliberately NOT a `Planner`.** `buildRepoMap` returns a {@link RepoMap},
  * not an `ElisionPlan`: nothing here is elided, nothing is stored under a hash, and
@@ -74,11 +97,35 @@ export const REPO_MAP_PATH_ONLY_RULE = 'path-only';
 export const REPO_MAP_CACHE_CORRUPT_RULE = 'cache-entry-corrupt';
 
 /**
- * The ignore list used when the caller supplies none. Deliberately tiny: `.git` is
- * object storage, `node_modules` is other people's code. A caller with opinions passes
- * its own list, which *replaces* this one.
+ * The ignore list used when the caller supplies none.
+ *
+ * Two kinds of directory are on it, for one reason: **including them makes the map
+ * wrong, not merely large.** `.git` is object storage and `node_modules` is other
+ * people's code — neither is the repository's own source. The rest are build outputs,
+ * and they are the sharper case: a built TypeScript repo carries `dist/foo.js` and
+ * `dist/foo.d.ts` beside `src/foo.ts`, so *every* symbol was ranked and rendered three
+ * times, the duplicates referenced each other, and the default map of the commonest
+ * repo shape in this ecosystem was a third source and two-thirds its own compiler
+ * output. The names here (`dist`, `build`, `out`, `coverage`) are the conventional
+ * output directories of the toolchains this map is most often pointed at; a repo that
+ * builds somewhere else passes its own list.
+ *
+ * Deliberately still tiny, and deliberately **not** a `.gitignore` parser: an ignore
+ * list smelt cannot state in one sentence is one nobody can predict.
+ *
+ * A caller with opinions passes its own list, which *replaces* this one — it is not
+ * merged with it. Replacement is the documented contract because a merge means there
+ * is no way to say "map my `dist`, I meant it", and a default you cannot turn off is
+ * not a default.
  */
-export const DEFAULT_REPO_IGNORE: readonly string[] = ['.git', 'node_modules'];
+export const DEFAULT_REPO_IGNORE: readonly string[] = [
+  '.git',
+  'node_modules',
+  'dist',
+  'build',
+  'out',
+  'coverage',
+];
 
 /** Why an entry is in the map — same two-register shape as {@link ElisionReason}. */
 export interface RepoMapReason {
@@ -161,6 +208,12 @@ export interface RepoMapCacheCounts {
   readonly misses: number;
   /** Corrupt entries deleted and re-extracted; each one also left a warning. */
   readonly discarded: number;
+  /**
+   * Entries this build swept because it did not use them — the bound on the cache,
+   * made visible. A non-zero count on a repeat build over an unchanged tree means the
+   * cache directory is shared with another tree, which costs re-parses.
+   */
+  readonly pruned: number;
 }
 
 export interface RepoMap {
@@ -194,6 +247,10 @@ export interface RepoMap {
  * `test/guards/repo-map.test.ts`, not assumed.
  *
  * @throws {SmeltError} when `budgetBytes` is not a positive integer.
+ * @throws {RepoMapIoError} when a filesystem call fails — a root that is not there, a
+ *   directory that will not list, a file that will not read. Never a raw Node error:
+ *   the contract says every error smelt throws is a `SmeltError`, and a repo map that
+ *   let `ENOENT` past would be the exception that made the promise worthless.
  * @throws {GrammarUnavailableError} when a supported language's grammar cannot load —
  *   never a silent skip that would make the map quietly incomplete.
  */
@@ -208,8 +265,16 @@ export async function buildRepoMap(options: RepoMapOptions): Promise<RepoMap> {
   }
   const ignore = options.ignore ?? DEFAULT_REPO_IGNORE;
   const reader = options.reader ?? nodeFsReader();
-  const cache = options.cacheDir === undefined ? undefined : new TagsCache(options.cacheDir);
-  const cacheCounts = { hits: 0, misses: 0, discarded: 0 };
+  const cacheDir = options.cacheDir;
+  const cache =
+    cacheDir === undefined
+      ? undefined
+      : fsCall('open the tags cache directory', cacheDir, () => new TagsCache(cacheDir));
+  const cacheCounts = { hits: 0, misses: 0, discarded: 0, pruned: 0 };
+  // The keys this build used. Everything else under the cache directory is a
+  // superseded entry — the pre-edit version of a file, or another tree's tags — and
+  // is swept once the walk is done. See the bound in `cache.ts`.
+  const liveKeys = new Set<string>();
   const warnings: RepoMapWarning[] = [];
 
   const files = scanFiles(reader, root, ignore);
@@ -218,7 +283,8 @@ export async function buildRepoMap(options: RepoMapOptions): Promise<RepoMap> {
   const pathOnlyPaths: string[] = [];
 
   for (const rel of files) {
-    const bytes = reader.read(join(root, ...rel.split('/')));
+    const path = join(root, ...rel.split('/'));
+    const bytes = fsCall('read the file', path, () => reader.read(path));
     if (bytes.includes(0)) {
       binarySkipped += 1;
       continue;
@@ -229,10 +295,12 @@ export async function buildRepoMap(options: RepoMapOptions): Promise<RepoMap> {
       continue;
     }
     const text = bytes.toString('utf8');
-    const tags = await tagsFor(text, language, cache, cacheCounts, warnings, rel);
+    const tags = await tagsFor(text, language, cache, cacheCounts, liveKeys, warnings, rel);
     if (tags.defs.length === 0) pathOnlyPaths.push(rel);
     if (tags.defs.length > 0 || tags.refs.length > 0) parsed.push({ path: rel, tags });
   }
+
+  if (cache !== undefined) cacheCounts.pruned = cache.sweep(liveKeys);
 
   const ranked = rankDefinitions(parsed);
   const focus = (options.focus ?? []).filter((term) => term.length > 0);
@@ -294,13 +362,17 @@ async function tagsFor(
   text: string,
   language: LanguageId,
   cache: TagsCache | undefined,
-  counts: { hits: number; misses: number; discarded: number },
+  counts: { hits: number; misses: number; discarded: number; pruned: number },
+  liveKeys: Set<string>,
   warnings: RepoMapWarning[],
   rel: string,
 ): Promise<FileTags> {
   if (cache === undefined) return extractTags(text, language);
 
   const key = tagsCacheKey(language, text);
+  // Recorded before the lookup, not after: this key is what the tree holds now, so it
+  // survives the sweep whether it was a hit, a miss, or a discard-and-rewrite.
+  liveKeys.add(key);
   const found = cache.read(key);
   if (found === 'corrupt') {
     counts.discarded += 1;
@@ -338,14 +410,12 @@ async function tagsFor(
 function scanFiles(reader: RepoReader, root: string, ignore: readonly string[]): readonly string[] {
   const found: string[] = [];
   const walk = (dir: string, relDir: string): void => {
-    for (const entry of reader
-      .list(dir)
-      .map((listed) => listed.name)
-      .toSorted()) {
+    const listed = fsCall('list the directory', dir, () => reader.list(dir));
+    for (const entry of listed.map((item) => item.name).toSorted()) {
       const rel = relDir === '' ? entry : `${relDir}/${entry}`;
       if (isIgnored(rel, ignore)) continue;
       const full = join(dir, entry);
-      const stat = reader.stat(full);
+      const stat = fsCall('stat', full, () => reader.stat(full));
       if (stat === undefined) continue; // the reader has nothing there
       if (stat.isSymlink) continue;
       if (stat.isDirectory) walk(full, rel);

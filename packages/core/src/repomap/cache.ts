@@ -1,8 +1,16 @@
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 
 import { contentHash } from '../hash.ts';
+import { fsCall } from './io.ts';
 import type { DefinitionTag, FileTags, ReferenceTag } from './tags.ts';
 import type { LanguageId } from '../types.ts';
 
@@ -24,6 +32,28 @@ import type { LanguageId } from '../types.ts';
  * source, and the caller's result carries a warning naming the file. Trusting a
  * damaged cache would silently drop symbols from the map, which is this project's
  * signature failure mode.
+ *
+ * **It is bounded, and the bound is a sweep.** The key is a content hash, so an edit
+ * does not replace an entry — it mints a new one and orphans the old, which is
+ * invisible and permanent: every pre-edit version of every file the caller ever mapped
+ * stays on disk for as long as the directory does. A long session therefore grew this
+ * cache without limit while never reading most of it. So {@link TagsCache.sweep}
+ * deletes every entry the build it just finished did not use, leaving exactly the tags
+ * of the tree as it now stands. The policy is stated as a bound anyone can check: **an
+ * entry survives a build only if that build used it**, so the cache is at most one
+ * entry per mappable file in the tree.
+ *
+ * Why that is safe, and the rule any other policy would also have to meet: **a miss
+ * can only make a map slower, never wrong.** A missing entry is re-extracted from the
+ * file's own bytes, and a present entry is only ever served for the exact content that
+ * hashed to its key — so sweeping too much costs a re-parse and sweeping too little
+ * costs disk, and neither can change a single symbol in the emitted map.
+ *
+ * The cost is paid by a caller who points *one* cache directory at *several* trees:
+ * each build sweeps the others' entries, and every build then re-parses. That is a
+ * slower map, not a wrong one, and it is measured rather than hidden — the sweep's
+ * count rides back in `RepoMap.cache.pruned` and is printed in `smelt map`'s report.
+ * One cache directory per tree is the shape this is tuned for.
  */
 
 /** The format name every cache entry carries. */
@@ -44,13 +74,23 @@ export function tagsCacheKey(language: LanguageId, content: string): string {
 /** What `read()` reports about one lookup. */
 export type TagsCacheLookup = FileTags | 'corrupt' | undefined;
 
+/**
+ * An entry file's name, and the key inside it. Only a name of exactly this shape is
+ * ever swept: a temp file from a write in flight (`<key>.json.tmp-<pid>`) does not
+ * match, so a sweep cannot delete the file another process is at that moment renaming
+ * into place.
+ */
+const ENTRY_FILE = /^([0-9a-f]+)\.json$/;
+
 export class TagsCache {
   readonly #entriesDir: string;
 
   /** `dir` is the directory the caller handed in; entries live under `<dir>/tags/`. */
   constructor(dir: string) {
     this.#entriesDir = join(dir, 'tags');
-    mkdirSync(this.#entriesDir, { recursive: true });
+    fsCall('create the tags cache directory', this.#entriesDir, () => {
+      mkdirSync(this.#entriesDir, { recursive: true });
+    });
   }
 
   /**
@@ -59,13 +99,16 @@ export class TagsCache {
    * the corruption is reported exactly once and never re-read.
    */
   read(key: string): TagsCacheLookup {
-    let raw: string;
-    try {
-      raw = readFileSync(this.#entryPath(key), 'utf8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-      throw error;
-    }
+    const path = this.#entryPath(key);
+    const raw = fsCall('read the cache entry', path, (): string | undefined => {
+      try {
+        return readFileSync(path, 'utf8');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+        throw error;
+      }
+    });
+    if (raw === undefined) return undefined;
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -97,8 +140,42 @@ export class TagsCache {
     })}\n`;
     const target = this.#entryPath(key);
     const temp = `${target}.tmp-${String(process.pid)}`;
-    writeFileSync(temp, body, 'utf8');
-    renameSync(temp, target);
+    fsCall('write the cache entry', target, () => {
+      writeFileSync(temp, body, 'utf8');
+      renameSync(temp, target);
+    });
+  }
+
+  /**
+   * Delete every entry that is not in `live` — the bound on this cache, described in
+   * full in the module comment above. `live` is the set of keys the build that just
+   * finished actually used, so what survives is exactly the tags of the tree as it
+   * now stands, and the superseded pre-edit entries a content-hash key would otherwise
+   * accumulate forever are gone.
+   *
+   * Returns how many entries were removed, so the caller can report a measured number
+   * rather than a claim. Deleting one entry is best effort: a file that will not
+   * unlink is left where it is, because failing a whole map over a cache file smelt
+   * only wanted to tidy would trade a slower map for no map at all.
+   */
+  sweep(live: ReadonlySet<string>): number {
+    const names = fsCall('list the tags cache directory', this.#entriesDir, () =>
+      readdirSync(this.#entriesDir),
+    );
+    let pruned = 0;
+    for (const name of names.toSorted()) {
+      const key = ENTRY_FILE.exec(name)?.[1];
+      if (key === undefined || live.has(key)) continue;
+      try {
+        unlinkSync(join(this.#entriesDir, name));
+        pruned += 1;
+      } catch {
+        // Already gone, or undeletable. Either way it is one stale entry that will be
+        // offered for sweeping again on the next build; nothing reads it meanwhile,
+        // because nothing will ever look up a key no file hashes to.
+      }
+    }
+    return pruned;
   }
 
   #entryPath(key: string): string {

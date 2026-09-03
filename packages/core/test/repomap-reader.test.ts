@@ -178,7 +178,7 @@ describe('the repo map over a stub reader', () => {
       }),
     });
     expect(before.entries.map((entry) => entry.name)).toEqual(['firstName']);
-    expect(before.cache).toEqual({ hits: 0, misses: 1, discarded: 0 });
+    expect(before.cache).toEqual({ hits: 0, misses: 1, discarded: 0, pruned: 0 });
 
     const after = await buildRepoMap({
       root: STUB_ROOT,
@@ -192,7 +192,9 @@ describe('the repo map over a stub reader', () => {
       after.entries.map((entry) => entry.name),
       'the edited file was answered with the stale entry',
     ).toEqual(['secondName']);
-    expect(after.cache).toEqual({ hits: 0, misses: 1, discarded: 0 });
+    // A miss, and the superseded entry swept: the pre-edit key is no longer the key
+    // of anything in the tree, so nothing will ever look it up again.
+    expect(after.cache).toEqual({ hits: 0, misses: 1, discarded: 0, pruned: 1 });
 
     // And the unchanged content still hits: a miss on an edit, not a miss on everything.
     const again = await buildRepoMap({
@@ -203,7 +205,7 @@ describe('the repo map over a stub reader', () => {
         'only.ts': FILE('export function secondName(): number {\n  return 2;\n}\n'),
       }),
     });
-    expect(again.cache).toEqual({ hits: 1, misses: 0, discarded: 0 });
+    expect(again.cache).toEqual({ hits: 1, misses: 0, discarded: 0, pruned: 0 });
   });
 
   it('defaults to node:fs, and that default has no writer on it', () => {
