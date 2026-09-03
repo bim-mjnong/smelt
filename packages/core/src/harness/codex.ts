@@ -63,6 +63,7 @@ ${SNIPPET_END_HASH}
 export const codex: ShimmedHarnessProfile = {
   id: 'codex',
   name: 'Codex CLI',
+  shortName: 'Codex',
   tier: 'verified',
   detect: ['.codex'],
   detectHome: ['.codex'],

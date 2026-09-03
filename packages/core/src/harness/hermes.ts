@@ -55,6 +55,7 @@ ${SNIPPET_END_HASH}
 export const hermes: ShimmedHarnessProfile = {
   id: 'hermes',
   name: 'Hermes Agent',
+  shortName: 'Hermes',
   tier: 'experimental',
   detect: ['.hermes', '.hermes.md'],
   detectHome: ['.hermes'],

@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { assertKeyedById } from '@smelt/guard-kit';
@@ -6,12 +9,15 @@ import { assertKeyedById } from '@smelt/guard-kit';
 // of `src` and watch them go red. See scripts/mutate.mjs.
 import { cliUsage } from '@guard/cli/args';
 import { planInstall } from '@guard/cli/hooks';
-import { hasShim, shimAdapterOf } from '@guard/harness/profile';
+import { harnessLabel, hasShim, shimAdapterOf } from '@guard/harness/profile';
 import {
   GUARD_ONLY_FILES,
+  harnessesByTier,
   HARNESS_PROFILES,
   HARNESSES,
   JSON_HOOK_FILES,
+  lifecycleHarnesses,
+  wiresLifecycle,
 } from '@guard/harness/registry';
 import { DEFAULT_GUARD_SETTINGS } from '@guard/hooks/guard-core';
 import {
@@ -25,6 +31,7 @@ import {
 import { FIXTURE_BY_HARNESS, harnessPayloads, valueAt } from '../hooks-fixtures.ts';
 
 import type { GuardMutation } from './_mutations.ts';
+import { repoRoot } from './_source.ts';
 
 /**
  * HARNESS TOTALITY GUARD — a harness cannot be claimed without tests, and the one
@@ -43,12 +50,22 @@ import type { GuardMutation } from './_mutations.ts';
  *
  *   1. it is rendered where a user would look for it — the `--harness` list in the
  *      help text (derived from this registry, which is why the registry may not
- *      import `cli/`) and the tier paragraph above it;
+ *      import `cli/`) and the tier paragraph above it, **under its own tier and no
+ *      other**: presence somewhere was the old check, and it let a harness promoted
+ *      from experimental to verified stay listed under the tier it had left;
  *   2. if it ships a shim, it has an entry in `FIXTURE_BY_HARNESS` and a recorded
  *      payload file citing the matrix row it came from — `test/hooks-shims.test.ts`
  *      then *is* its schema test, because that suite loops over this same registry;
  *   3. its declared install steps are consistent with what it ships: a harness that
  *      wires a JSON hook command must have a shim script for that command to run.
+ *
+ * The grouping needs a witness the registry does not write. Every rendered tier list —
+ * the help paragraph, the wizard, the site table — now folds over `harnessesByTier()`,
+ * so a mis-tiered profile moves all of them at once and they keep agreeing with each
+ * other while all of them are wrong. `README.md`'s table is the outside voice: read
+ * from the real repository (never a mutant copy), written by hand, and asserted equal
+ * to the registry's grouping. `pnpm mutate` mis-tiers a harness and watches it go red
+ * there.
  *
  * And the announcement a rewrite makes exists exactly once: three shims and the
  * *generated* opencode plugin — JavaScript this installer writes as text, where a
@@ -62,6 +79,144 @@ import type { GuardMutation } from './_mutations.ts';
 
 const stat = (path: string): { size: number; isFile: boolean } | undefined =>
   path === '/repo/big.ts' ? { size: 20_000, isFile: true } : undefined;
+
+/**
+ * The tier grouping the registry states: tier → the names prose spells it with.
+ * Every rendered grouping below is compared against this one.
+ */
+function registryGrouping(): ReadonlyMap<string, readonly string[]> {
+  return new Map(
+    harnessesByTier().map((group) => [group.tier, group.harnesses.map(harnessLabel)] as const),
+  );
+}
+
+/**
+ * The tier clauses of the HOOKS paragraph — `verified (Claude Code, Codex)`,
+ * `experimental (… — schemas from the capability matrix, not yet smoke-tested)` — as
+ * tier → the names inside its parentheses, with the caveat after the em dash dropped.
+ *
+ * The paragraph is hand-wrapped, so it is flattened first; the sentence itself is
+ * unique in the help text.
+ */
+function helpGrouping(): ReadonlyMap<string, readonly string[]> {
+  const flat = cliUsage().replace(/\s+/gu, ' ');
+  const sentence = /Harnesses are tiered honestly: (?<clauses>.+?)\. Same discipline/u.exec(flat);
+  expect(
+    sentence?.groups?.['clauses'],
+    'the HOOKS section no longer carries a "Harnesses are tiered honestly: …" sentence — ' +
+      'the tier grouping has stopped being rendered where --help shows it',
+  ).toBeDefined();
+  const clauses = new Map<string, readonly string[]>();
+  for (const clause of sentence!.groups!['clauses']!.matchAll(
+    /(?<tier>\w+) \((?<names>[^)]*)\)/gu,
+  )) {
+    const names = clause.groups!['names']!.split(' — ')[0]!;
+    clauses.set(clause.groups!['tier']!, names.split(', '));
+  }
+  return clauses;
+}
+
+/**
+ * The README's tier table, as tier → the harnesses its second column lists.
+ *
+ * The README is read from the real repository, never from a mutant copy — which is
+ * the point of checking it here. Every *rendered* grouping is derived from
+ * `HarnessProfile.tier`, so a mutation that mis-tiers a harness moves the registry and
+ * the help text together and nothing they say to each other can notice. The README is
+ * the independent witness: a document a human wrote, which a mis-tiered registry now
+ * contradicts.
+ */
+function readmeGrouping(): ReadonlyMap<string, readonly string[]> {
+  const readme = readFileSync(join(repoRoot(), 'README.md'), 'utf8');
+  const rows = new Map<string, readonly string[]>();
+  for (const line of readme.split('\n')) {
+    const cells = line.split('|').map((cell) => cell.trim());
+    if (cells.length !== 5 || cells[0] !== '') continue; // `| a | b | c |` → ['', a, b, c, '']
+    const tier = cells[1]!;
+    if (!registryGrouping().has(tier)) continue;
+    rows.set(tier, cells[2]!.split(', '));
+  }
+  return rows;
+}
+
+describe('the tier grouping is derived, and every rendering of it agrees', () => {
+  it('the help text groups each harness under its own tier clause and no other', () => {
+    const registry = registryGrouping();
+    const help = helpGrouping();
+    expect(
+      [...help.keys()],
+      'the tiers named in the HOOKS paragraph are not the tiers the registry claims',
+    ).toEqual([...registry.keys()]);
+    for (const [tier, names] of registry) {
+      expect(
+        help.get(tier),
+        `the "${tier}" clause of the HOOKS paragraph does not list exactly the ` +
+          `harnesses the registry puts at that tier`,
+      ).toEqual(names);
+    }
+    // The property the old check missed: presence *somewhere* was all it asked, so a
+    // promoted harness stayed listed under the tier it had left.
+    for (const profile of HARNESSES) {
+      for (const [tier, names] of help) {
+        expect(
+          names.includes(harnessLabel(profile)),
+          `${harnessLabel(profile)} is a ${profile.tier} harness but appears in the ` +
+            `"${tier}" clause of the help text`,
+        ).toBe(tier === profile.tier);
+      }
+    }
+  });
+
+  it("the README's tier table lists exactly what the registry tiers say", () => {
+    const registry = registryGrouping();
+    const readme = readmeGrouping();
+    expect(
+      [...readme.keys()],
+      'README.md no longer carries a tier table with a row per tier — it is the one ' +
+        'rendering of this grouping that is not derived from the registry, and so the ' +
+        'only one that can contradict it',
+    ).toEqual([...registry.keys()]);
+    for (const [tier, names] of registry) {
+      expect(
+        readme.get(tier),
+        `README.md lists "${readme.get(tier)?.join(', ') ?? ''}" at the ${tier} tier, ` +
+          `but the registry puts ${names.join(', ')} there. One of the two is wrong, ` +
+          `and a reader of the README cannot tell which.`,
+      ).toEqual(names);
+    }
+  });
+
+  it('the lifecycle sentences name a capability, not the tier that correlates with it', () => {
+    // `smelt stats` on Stop and `smelt map` on SessionStart are wired exactly where a
+    // harness's JSON hook step declares `lifecycle`. The wizard used to call these
+    // "verified-tier harnesses", which is true only while the two sets coincide — and
+    // they do coincide, so asking about the real registry cannot tell the two rules
+    // apart. These are the counterexamples: real profiles whose tier and capability
+    // have been made to disagree, one in each direction.
+    const byLifecycle = lifecycleHarnesses().map((profile) => profile.id);
+    expect(
+      byLifecycle.length,
+      'no harness declares a lifecycle hook step — the stats/map toggles would wire nothing',
+    ).toBeGreaterThanOrEqual(2);
+    for (const profile of HARNESSES) {
+      expect(byLifecycle.includes(profile.id)).toBe(wiresLifecycle(profile));
+    }
+
+    const promoted = { ...HARNESS_PROFILES['cursor'], tier: 'verified' as const };
+    expect(
+      wiresLifecycle(promoted),
+      `${promoted.name} wires only the guard — its schema carries no Stop or ` +
+        `SessionStart event — so promoting its tier must not make the wizard promise ` +
+        `stats and a map it will never wire`,
+    ).toBe(false);
+    const demoted = { ...HARNESS_PROFILES['claude-code'], tier: 'advisory' as const };
+    expect(
+      wiresLifecycle(demoted),
+      `${demoted.name}'s schema carries the session events whatever smelt is willing ` +
+        `to claim about it — the toggles follow the capability, not the label`,
+    ).toBe(true);
+  });
+});
 
 describe('harness totality — every claimed harness is rendered, tested, and internally consistent', () => {
   it('claims at least the ten shipped harnesses, or the guard is vacuous', () => {
@@ -84,15 +239,13 @@ describe('harness totality — every claimed harness is rendered, tested, and in
         `${profile.id}: claimed by the registry but absent from the --harness list — ` +
           `the list is derived; a harness missing from it means the derivation broke`,
       ).toContain(profile.id);
-      // The HOOKS paragraph is prose, and prose calls them by their short names
-      // ("Codex", not "Codex CLI"), so the check is on the name's first word: a
-      // harness nobody mentions there ships with no tier a reader of --help can see.
-      const shortName = profile.name.split(' ')[0]!;
+      // Which tier clause it lands in is the grouping check above; this only says the
+      // HOOKS paragraph names it at all, in the spelling prose uses for it.
       expect(
         usage,
-        `${profile.name}: claimed by the registry but named nowhere in the HOOKS ` +
-          `section, so nobody reading --help learns the tier it ships at`,
-      ).toContain(shortName);
+        `${harnessLabel(profile)}: claimed by the registry but named nowhere in the ` +
+          `HOOKS section, so nobody reading --help learns the tier it ships at`,
+      ).toContain(harnessLabel(profile));
     }
   });
 
@@ -217,6 +370,27 @@ describe('one announcement — a rewrite says the same sentence everywhere it ca
  * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
  */
 export const MUTATIONS: GuardMutation[] = [
+  {
+    id: 'harness-mis-tiered',
+    file: 'harness/cursor.ts',
+    find: "  tier: 'experimental',",
+    replace: "  tier: 'verified',",
+    why: 'a harness promoted a tier in the registry alone — every rendered grouping folds over `HarnessProfile.tier`, so the help paragraph, the wizard and the site table all move with it and keep agreeing; only README.md, written by hand and read from the real repo, still says where Cursor actually ships',
+  },
+  {
+    id: 'harness-tier-clause-hand-typed',
+    file: 'cli/subcommands/hooks.ts',
+    find: "verified (${tierNames('verified')})",
+    replace: 'verified (Claude Code, Codex, Cursor)',
+    why: 'the tier clause typed back into the help body — the exact defect this card removes: the names read plausibly, one harness is now listed under two tiers at once, and before the grouping check nothing looked at which clause a name sat in',
+  },
+  {
+    id: 'harness-lifecycle-read-off-the-tier',
+    file: 'harness/registry.ts',
+    find: "  return profile.install.some((step) => step.kind === 'json-hooks' && step.lifecycle);",
+    replace: "  return profile.tier === 'verified' && profile.install.length > 0;",
+    why: "the stats/map sentences reading the tier instead of the capability — true only while the two sets coincide, which is what made the old wording ('verified-tier harnesses') look correct; the first verified harness without session events, or experimental one with them, wires the opposite of what it says",
+  },
   {
     id: 'harness-registry-key-disagrees-with-id',
     file: 'harness/registry.ts',
