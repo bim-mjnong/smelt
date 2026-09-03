@@ -262,7 +262,19 @@ export interface ElisionStore {
   peek(hash: string): string | undefined;
   /**
    * The stored content, *counted* as a retrieval. This is what the model's tool calls.
+   *
    * @throws {UnknownHashError} when the hash is unknown.
+   * @throws {StoreCorruptionError} — {@link DirectoryElisionStore} only — when the
+   *   bytes on disk no longer hash to their own name. Distinct from
+   *   `UnknownHashError` on purpose: "we hold damaged bytes" and "it never existed"
+   *   are different answers, and a caller that conflates them will report the wrong
+   *   one to its user.
+   *
+   * A {@link DirectoryElisionStore} whose journal cannot be written (a read-only
+   * store directory, a full disk) still returns the bytes — verified bytes are never
+   * withheld over a bookkeeping failure — and surfaces the lost count as a
+   * `process.emitWarning` named `SmeltCounterWriteFailure` instead of throwing. Its
+   * stats go quiet from that point; the retrieval itself succeeded.
    */
   retrieve(hash: string): string;
   /**
@@ -287,13 +299,27 @@ export interface RetrieveTool {
   readonly name: string;
   /** Prose the consumer can put straight into a tool description. */
   readonly description: string;
-  /** JSON-Schema-shaped parameter description, for consumers that want one. */
+  /**
+   * JSON-Schema-shaped parameter description, for consumers that want one.
+   *
+   * Strict-mode shaped: `additionalProperties: false` and a `required` naming every
+   * property, so a consumer registering this under OpenAI's structured-outputs strict
+   * mode is not refused at registration. See {@link createRetrieveTool}.
+   */
   readonly inputSchema: {
     readonly type: 'object';
-    readonly properties: { readonly hash: { readonly type: 'string' } };
+    readonly properties: {
+      readonly hash: { readonly type: 'string'; readonly description: string };
+    };
     readonly required: readonly ['hash'];
+    readonly additionalProperties: false;
   };
-  /** @throws {UnknownHashError} when the hash is unknown. */
+  /**
+   * @throws {UnknownHashError} when the hash is unknown.
+   * @throws {StoreCorruptionError} when the backing store holds damaged bytes for
+   *   that hash — see {@link ElisionStore.retrieve}, whose contract this forwards
+   *   verbatim. Surface either to the model as a tool error, never as empty text.
+   */
   invoke(input: { readonly hash: string }): string;
 }
 
