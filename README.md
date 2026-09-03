@@ -404,12 +404,6 @@ Three things that look like bugs and are not:
   by guard: the runner writes that file and refuses to run when it is stale, so the
   number is measured wherever it is read and stated nowhere else. Every guarantee in
   this README has a guard.
-- **The honesty machinery** — twenty-four guard suites (twenty-one in the core, three guarding
-  the MCP server's stdio-local surface and the shared operations seam) that walk the
-  real import graph, assert byte-exact reversibility, pin the wire format, and re-derive
-  the attribution file; plus a mutation runner (`pnpm mutate`) that breaks the source on
-  purpose — 124 mutations across 25 guards, each watched going red — and fails if a guard
-  does not notice. Every guarantee in this README has a guard.
 
 ## Measured numbers
 

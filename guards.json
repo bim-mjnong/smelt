@@ -1,7 +1,11 @@
 {
-  "guards": 26,
-  "mutations": 121,
+  "guards": 27,
+  "mutations": 131,
   "byGuard": [
+    {
+      "guard": "packages/core/test/guards/agents-lint.test.ts",
+      "count": 10
+    },
     {
       "guard": "packages/core/test/guards/auto-strategy.test.ts",
       "count": 2
