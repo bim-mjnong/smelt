@@ -14,7 +14,9 @@
  * the copy via `SMELT_GUARD_SRC`, and asserts the guard goes **red**. A
  * mutation the guard survives is reported as a failure of the *guard*, not of the
  * mutation — and the run ends with the real tally, counted from the guard files
- * themselves, never typed into prose (a drift check below holds the docs to that).
+ * themselves and written to `guards.json` at the repository root, never typed into
+ * prose (the freshness check below holds the committed copy to that, and every
+ * document that wants the number reads it from there).
  *
  * It also runs every guard against the pristine tree first, because a guard that fails
  * on clean source proves nothing when it fails on broken source.
@@ -23,11 +25,18 @@
  *
  *   - `kind: 'src'` (the default) breaks a file under the owning package's `src`, and
  *     the guard is pointed at the broken copy via `SMELT_GUARD_SRC`.
- *   - `kind: 'artifact'` breaks a *committed artefact* under the owning package — a
- *     generated file, for instance — in a scratch root the guard reads via
- *     `SMELT_GUARD_ROOT`. Nothing in the working tree is touched either way, which
- *     matters: a mutation runner that edits tracked files and crashes leaves the repo
- *     broken, and the whole point is that a failure here is safe.
+ *   - `kind: 'artifact'` breaks a *committed artefact* — a generated file, for
+ *     instance — resolved against the owning package first and the repository root
+ *     second, in a scratch root the guard reads via `SMELT_GUARD_ROOT`. Nothing in the
+ *     working tree is touched either way, which matters: a mutation runner that edits
+ *     tracked files and crashes leaves the repo broken, and the whole point is that a
+ *     failure here is safe.
+ *
+ * Flags, all of which exit before any mutation runs:
+ *
+ *   - `--print-guards` writes the `guards.json` this run counted to stdout (what the
+ *     freshness guard compares the committed file against).
+ *   - `--write-guards` writes it to the repository root — `pnpm generate:guards`.
  *
  * Convention, for anyone adding a guard:
  *
@@ -268,29 +277,70 @@ const MUTATIONS_BY_GUARD = GUARDS.map((guard) => {
 const totalMutations = MUTATIONS_BY_GUARD.reduce((sum, entry) => sum + entry.mutations.length, 0);
 
 /**
- * Prose drift check: a mutation/guard count is rendered by this runner or verified
- * against it, never free-floating. Any "N mutations across M guards" phrase in the
- * docs must state the numbers this run just counted — otherwise the docs are claiming
- * a number nobody measured, which is this repository's own Law 4 pointed at itself.
+ * Prose drift check, retired: the tally is an artefact now.
+ *
+ * `guards.json` at the repository root holds what this run just counted — the number
+ * of guards, the number of mutations, and the per-guard breakdown — and every document
+ * that wants the number reads it there (the site imports it through its build-time
+ * generator; README.md and docs/ARCHITECTURE.md state the mechanism and point at the
+ * file). The number used to live in four pieces of prose, and reconciling it after a
+ * guard gained a mutation took five commits in one day; one of the four was worded past
+ * the regex that was supposed to catch exactly that.
+ *
+ * So: the runner refuses when the committed file disagrees with the guard files, the
+ * way `THIRD-PARTY.md`'s guard refuses a stale notices file. `--write-guards` writes
+ * it (`pnpm generate:guards`), `--print-guards` prints it for a guard to compare
+ * against, and both exit before a single mutation runs.
  */
-function assertProseCountsCurrent() {
-  const PROSE = ['docs/ARCHITECTURE.md', 'CONTRIBUTING.md', 'README.md', 'scripts/mutate.mjs'];
-  const PATTERN = /(\d+)\s+mutations\s+across\s+(?:the\s+)?(\d+)\s+guards/gi;
-  for (const relative of PROSE) {
-    const text = readFileSync(join(repoRoot, relative), 'utf8');
-    for (const match of text.matchAll(PATTERN)) {
-      if (Number(match[1]) !== totalMutations || Number(match[2]) !== GUARDS.length) {
-        die(
-          `${relative} says "${match[0]}" but the guard files hold ` +
-            `${String(totalMutations)} mutations across ${String(GUARDS.length)} guards. ` +
-            `Update the prose, or drop the number and state the mechanism instead.`,
-        );
-      }
-    }
-  }
+const GUARDS_MANIFEST = 'guards.json';
+
+/** What this run counted, as the committed artefact spells it. */
+function guardsManifest() {
+  return {
+    guards: GUARDS.length,
+    mutations: totalMutations,
+    byGuard: MUTATIONS_BY_GUARD.map(({ guard, mutations }) => ({
+      guard: `packages/${guard.pkg.name}/${guard.file}`,
+      count: mutations.length,
+    })),
+  };
 }
 
-assertProseCountsCurrent();
+/** The artefact's exact bytes — one renderer, so writer and comparer cannot differ. */
+function renderGuardsManifest() {
+  return JSON.stringify(guardsManifest(), null, 2) + '\n';
+}
+
+function assertGuardsManifestCurrent() {
+  const path = join(repoRoot, GUARDS_MANIFEST);
+  const rendered = renderGuardsManifest();
+  const committed = existsSync(path) ? readFileSync(path, 'utf8') : undefined;
+  if (committed === rendered) return;
+  const counted = `${String(totalMutations)} mutations across ${String(GUARDS.length)} guards`;
+  die(
+    committed === undefined
+      ? `${GUARDS_MANIFEST} is missing. The guard files hold ${counted}. Run ` +
+          `\`pnpm generate:guards\` and commit the result.`
+      : `${GUARDS_MANIFEST} is stale — it disagrees with the guard files, which hold ` +
+          `${counted}. It is generated, never edited by hand: run \`pnpm generate:guards\` ` +
+          `and commit the result.`,
+  );
+}
+
+if (process.argv.includes('--print-guards')) {
+  process.stdout.write(renderGuardsManifest());
+  process.exit(0);
+}
+if (process.argv.includes('--write-guards')) {
+  writeFileSync(join(repoRoot, GUARDS_MANIFEST), renderGuardsManifest());
+  console.log(
+    `mutate: ${String(totalMutations)} mutations across ${String(GUARDS.length)} guards → ` +
+      `${GUARDS_MANIFEST}`,
+  );
+  process.exit(0);
+}
+
+assertGuardsManifestCurrent();
 
 function runGuard(guard, guardSrc, guardRoot = guard.pkg.dir) {
   return spawnSync('./node_modules/.bin/vitest', ['run', guard.file, '--reporter=dot'], {
@@ -347,9 +397,23 @@ for (const { guard, mutations } of MUTATIONS_BY_GUARD) {
     } else {
       // Only the artefact is copied. The guard still reads the real manifest, the real
       // grammars and the real generator — the *committed* copy is the thing being staled.
+      //
+      // An artefact is resolved against the owning package first and the repository
+      // root second: `guards.json` is the tally across *every* package's guards, so it
+      // belongs to none of them, while `package.json` exists at both levels and the
+      // package's is the one a package guard means. Either way the guard reads it
+      // through `guardRoot()` at the same relative path, so nothing else changes.
+      const packaged = join(guard.pkg.dir, mutation.file);
+      const source = existsSync(packaged) ? packaged : join(repoRoot, mutation.file);
+      if (!existsSync(source)) {
+        die(
+          `${mutation.id}: artefact "${mutation.file}" exists neither under ` +
+            `packages/${guard.pkg.name}/ nor at the repository root`,
+        );
+      }
       const mutantRoot = join(scratch, 'root');
       mkdirSync(mutantRoot, { recursive: true });
-      cpSync(join(guard.pkg.dir, mutation.file), join(mutantRoot, mutation.file));
+      cpSync(source, join(mutantRoot, mutation.file));
       guardRoot = mutantRoot;
       target = join(mutantRoot, mutation.file);
     }

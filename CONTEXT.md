@@ -30,6 +30,13 @@ codebase-design glossary.
   `smelt stats`) from pure shell, not only through the `smelt_retrieve` tool.
 - **Guard**: a test that pins a law or guarantee, proven non-vacuous by mutations.
 - **Mutation**: a deliberate minimal break that its guard must catch (`pnpm mutate`).
+- **Guard tally**: `guards.json` at the repository root — how many guards, how many
+  mutations, guard by guard. Written by the runner (`pnpm generate:guards`), refused by
+  it when stale, and read by everything that wants the number. It exists because the
+  number was prose in four documents, one of them worded past the drift regex meant to
+  catch exactly that, and reconciling it took five commits in a day. Law 4 turned on the
+  repository's own numbers: state no figure that has not been measured, including this
+  one.
 - **The four laws**: zero network · every elision explainable · every elision reversible
   (and counted) · no unmeasured numbers. Reasoning in `docs/ARCHITECTURE.md`.
 

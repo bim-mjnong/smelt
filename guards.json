@@ -1,0 +1,110 @@
+{
+  "guards": 26,
+  "mutations": 119,
+  "byGuard": [
+    {
+      "guard": "packages/core/test/guards/auto-strategy.test.ts",
+      "count": 2
+    },
+    {
+      "guard": "packages/core/test/guards/bench-results.test.ts",
+      "count": 5
+    },
+    {
+      "guard": "packages/core/test/guards/cache-hygiene.test.ts",
+      "count": 2
+    },
+    {
+      "guard": "packages/core/test/guards/config-writer.test.ts",
+      "count": 2
+    },
+    {
+      "guard": "packages/core/test/guards/expansion-counter.test.ts",
+      "count": 7
+    },
+    {
+      "guard": "packages/core/test/guards/guards-manifest.test.ts",
+      "count": 1
+    },
+    {
+      "guard": "packages/core/test/guards/harness-registry.test.ts",
+      "count": 8
+    },
+    {
+      "guard": "packages/core/test/guards/hooks-preset.test.ts",
+      "count": 2
+    },
+    {
+      "guard": "packages/core/test/guards/init-wizard.test.ts",
+      "count": 2
+    },
+    {
+      "guard": "packages/core/test/guards/json-edit.test.ts",
+      "count": 2
+    },
+    {
+      "guard": "packages/core/test/guards/marker-format.test.ts",
+      "count": 2
+    },
+    {
+      "guard": "packages/core/test/guards/no-network.test.ts",
+      "count": 6
+    },
+    {
+      "guard": "packages/core/test/guards/ops-seam.test.ts",
+      "count": 6
+    },
+    {
+      "guard": "packages/core/test/guards/packaging.test.ts",
+      "count": 5
+    },
+    {
+      "guard": "packages/core/test/guards/persistent-store.test.ts",
+      "count": 3
+    },
+    {
+      "guard": "packages/core/test/guards/planner-registry.test.ts",
+      "count": 1
+    },
+    {
+      "guard": "packages/core/test/guards/repo-map.test.ts",
+      "count": 15
+    },
+    {
+      "guard": "packages/core/test/guards/reversibility.test.ts",
+      "count": 2
+    },
+    {
+      "guard": "packages/core/test/guards/site-facts.test.ts",
+      "count": 1
+    },
+    {
+      "guard": "packages/core/test/guards/structural-totality.test.ts",
+      "count": 1
+    },
+    {
+      "guard": "packages/core/test/guards/structural.test.ts",
+      "count": 28
+    },
+    {
+      "guard": "packages/core/test/guards/subcommand-registry.test.ts",
+      "count": 5
+    },
+    {
+      "guard": "packages/core/test/guards/third-party.test.ts",
+      "count": 1
+    },
+    {
+      "guard": "packages/mcp/test/guards/no-network.test.ts",
+      "count": 4
+    },
+    {
+      "guard": "packages/mcp/test/guards/ops-seam.test.ts",
+      "count": 4
+    },
+    {
+      "guard": "packages/mcp/test/guards/packaging.test.ts",
+      "count": 2
+    }
+  ]
+}
