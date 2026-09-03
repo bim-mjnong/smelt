@@ -1,3 +1,4 @@
+import facts from '@/generated/facts.json';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { Reveal } from '@/components/ui/Reveal';
 import { GITHUB } from '@/components/Nav';
@@ -26,7 +27,7 @@ const ENTRIES = [
   {
     name: 'Tree-sitter',
     href: 'https://tree-sitter.github.io/',
-    body: 'The parsers under all of it. Fifteen grammars ship inside the tarball, attribution generated and guard-checked.',
+    body: `The parsers under all of it. ${String(facts.grammars.length)} grammars ship inside the tarball, attribution generated and guard-checked.`,
   },
 ] as const;
 
@@ -92,7 +93,7 @@ export function Footer() {
             Cut hard. Explain everything. Keep the ore.
           </p>
           <p className="mt-4 font-mono text-[12px] text-slag">
-            @smeltjs/core v0.2.0 · @smeltjs/mcp v0.1.0 · Apache-2.0
+            @smeltjs/core v{facts.versions.core} · @smeltjs/mcp v{facts.versions.mcp} · Apache-2.0
           </p>
         </div>
         <nav

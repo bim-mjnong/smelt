@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import facts from '@/generated/facts.json';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { Reveal } from '@/components/ui/Reveal';
 
@@ -102,9 +103,9 @@ export function HowItWorks() {
             ))}
           </div>
           <p className="mt-4 max-w-[72ch] text-[13px] leading-[1.6] text-slag">
-            Each law has a guard that can fail, and each guard has mutations proving it does:
-            twenty-three guard suites, 111 mutations across them, run by{' '}
-            <code className="font-mono">pnpm mutate</code> — a deliberate break the guard must
+            Each law has a guard that can fail, and each guard has mutations proving it does:{' '}
+            {facts.guards.guards} guard suites, {facts.guards.mutations} mutations across them, run
+            by <code className="font-mono">pnpm mutate</code> — a deliberate break the guard must
             catch, or the run fails.
           </p>
         </Reveal>

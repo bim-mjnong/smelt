@@ -1,3 +1,5 @@
+import facts from '@/generated/facts.json';
+
 const GITHUB = 'https://github.com/smeltjs/smelt';
 const NPM = 'https://www.npmjs.com/package/@smeltjs/core';
 
@@ -13,7 +15,7 @@ export function Nav() {
           <span className="text-[15px] font-semibold tracking-tight text-ash">smelt</span>
         </a>
         <span className="hidden font-mono text-[12px] text-iron-light sm:inline">
-          @smeltjs/core v0.2.0
+          @smeltjs/core v{facts.versions.core}
         </span>
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
           <a

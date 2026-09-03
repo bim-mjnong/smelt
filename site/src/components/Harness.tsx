@@ -1,3 +1,4 @@
+import facts from '@/generated/facts.json';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { CopyButton } from '@/components/ui/CopyButton';
 import { Reveal } from '@/components/ui/Reveal';
@@ -78,24 +79,13 @@ s.allElisionsRetrieved;
   },
 ] as const;
 
-const TIERS = [
-  {
-    tier: 'verified',
-    harnesses: 'Claude Code, Codex',
-    meaning: 'hook schema verified against primary docs and pinned by recorded fixtures',
-  },
-  {
-    tier: 'experimental',
-    harnesses: 'Gemini, Grok, Hermes, Cursor, opencode, Cline',
-    meaning:
-      'schema mapped from the capability matrix, not yet smoke-tested against the real binary',
-  },
-  {
-    tier: 'advisory',
-    harnesses: 'KiloCode, Aider',
-    meaning: 'no usable hook API — instructions only, and nothing enforces them',
-  },
-] as const;
+/**
+ * The tier table, generated: rows are `harnessesByTier()` over `HARNESS_PROFILES`, with
+ * each tier's one line of honesty from `TIER_HONESTY` — see `scripts/facts-data.mjs`.
+ * It used to be typed here, which meant a harness promoted from experimental to
+ * verified kept its old row until somebody remembered this file existed.
+ */
+const TIERS = facts.tiers;
 
 const MCP_CMD = 'claude mcp add smelt -- npx @smeltjs/mcp';
 
@@ -186,8 +176,10 @@ export function Harness() {
                     <td className="py-3 pr-6 align-top font-mono text-[13px] text-ash">
                       {row.tier}
                     </td>
-                    <td className="py-3 pr-6 align-top text-slag">{row.harnesses}</td>
-                    <td className="py-3 align-top leading-[1.6] text-slag">{row.meaning}</td>
+                    <td className="py-3 pr-6 align-top text-slag">
+                      {row.harnesses.map((harness) => harness.label).join(', ')}
+                    </td>
+                    <td className="py-3 align-top leading-[1.6] text-slag">{row.honesty}</td>
                   </tr>
                 ))}
               </tbody>
