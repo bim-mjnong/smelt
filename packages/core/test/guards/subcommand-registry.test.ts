@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { assertKeyedById } from '@smelt/guard-kit';
+
 // Guards import through @guard so the mutation runner can aim them at a broken copy
 // of src. See scripts/mutate.mjs.
 import { cliUsage, parseSmeltArgs } from '@guard/cli/args';
@@ -89,6 +91,12 @@ describe('the SUBCOMMANDS registry serves every shipped verb', () => {
   it('carries exactly the shipped verbs — no more, no fewer', () => {
     expect(Object.keys(SUBCOMMANDS).toSorted()).toEqual(SHIPPED_VERBS);
     expect(SUBCOMMAND_LIST.map((command) => command.name).toSorted()).toEqual(SHIPPED_VERBS);
+  });
+
+  it('keys every command by its own name — `subcommandFor` looks up by key, the help reads the field', () => {
+    // The two assertions above check each spelling against the shipped list, not
+    // against each other: two keys swapped over two commands would pass both.
+    assertKeyedById(SUBCOMMANDS, 'name');
   });
 
   it('gives every verb the four members the seam is made of', () => {

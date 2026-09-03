@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
+import { assertKeyedById } from '@smelt/guard-kit';
+
 // Through @guard, so the mutation runner can point these at a deliberately broken copy
 // of `src` and watch them go red. See scripts/mutate.mjs.
 import { cliUsage } from '@guard/cli/args';
 import { planInstall } from '@guard/cli/hooks';
 import { hasShim, shimAdapterOf } from '@guard/harness/profile';
-import { GUARD_ONLY_FILES, HARNESSES, JSON_HOOK_FILES } from '@guard/harness/registry';
+import {
+  GUARD_ONLY_FILES,
+  HARNESS_PROFILES,
+  HARNESSES,
+  JSON_HOOK_FILES,
+} from '@guard/harness/registry';
 import { DEFAULT_GUARD_SETTINGS } from '@guard/hooks/guard-core';
 import {
   renderShimDecision,
@@ -59,6 +66,14 @@ const stat = (path: string): { size: number; isFile: boolean } | undefined =>
 describe('harness totality — every claimed harness is rendered, tested, and internally consistent', () => {
   it('claims at least the ten shipped harnesses, or the guard is vacuous', () => {
     expect(HARNESSES.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('keys every profile by its own id — `harnessById` finds by field, the wizard reads by key', () => {
+    // The one disagreement nothing else here would see: `HARNESSES` and `HARNESS_IDS`
+    // are `Object.values` and a map over `profile.id`, so a renamed key leaves every
+    // rendered list intact while `HARNESS_PROFILES[id]` starts naming a different
+    // profile — or none.
+    assertKeyedById(HARNESS_PROFILES, 'id');
   });
 
   it('every claimed harness reaches the help text — the id list and the tier paragraph', () => {
@@ -202,6 +217,13 @@ describe('one announcement — a rewrite says the same sentence everywhere it ca
  * of `src` and asserts this file goes red — see `test/guards/_mutations.ts`.
  */
 export const MUTATIONS: GuardMutation[] = [
+  {
+    id: 'harness-registry-key-disagrees-with-id',
+    file: 'harness/registry.ts',
+    find: '  codex,\n  gemini,',
+    replace: "  'codex-cli': codex,\n  gemini,",
+    why: "a registry key renamed while the profile keeps its id — `HARNESSES`, `HARNESS_IDS`, the help list and `harnessById('codex')` all still work because they read the field, while `HARNESS_PROFILES['codex']` is now undefined; two spellings of one id that nothing typed against each other, so only the keyed-id invariant can see it",
+  },
   {
     id: 'harness-dropped-from-registry',
     file: 'harness/registry.ts',
