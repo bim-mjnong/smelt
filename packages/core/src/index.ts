@@ -125,6 +125,15 @@ export {
 export type { InitIo } from './cli/init.ts';
 export { retrieveStats } from './stats.ts';
 export type { RawRetrieveCounters } from './stats.ts';
+
+/**
+ * The SetupRecipe: the one true way to put smelt on a machine, as data. Public for the
+ * same reason the harness views are — something outside this package renders it (the
+ * site's fact generator), and the docs and skill are pinned to it rather than retyping
+ * it. See `src/setup/recipe.ts`.
+ */
+export { SETUP_RECIPE, SETUP_STEPS } from './setup/recipe.ts';
+export type { SetupRecipe, SetupStep } from './setup/recipe.ts';
 export {
   LANGUAGE_PROFILES,
   profileFor,

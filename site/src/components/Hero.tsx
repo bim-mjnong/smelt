@@ -1,18 +1,24 @@
+import facts from '@/generated/facts.json';
 import { Tabs } from '@/components/ui/Tabs';
 import { CopyButton } from '@/components/ui/CopyButton';
 import { Frame, FrameBar } from '@/components/ui/Frame';
 import { GITHUB } from '@/components/Nav';
 
+/**
+ * The install lines. npm's two are recipe facts read off facts.json (the library
+ * install, and the one-shot with the recipe's own budget in the example); the pnpm
+ * and bun lines are the same library fact in each manager's spelling.
+ */
 const INSTALLS = [
-  { id: 'npm', label: 'npm', cmd: 'npm install @smeltjs/core' },
+  { id: 'npm', label: 'npm', cmd: facts.recipe.installLibrary },
   { id: 'pnpm', label: 'pnpm', cmd: 'pnpm add @smeltjs/core' },
   { id: 'bun', label: 'bun', cmd: 'bun add @smeltjs/core' },
   {
     id: 'npx',
     label: 'npx',
-    cmd: 'npx @smeltjs/core src/server.ts --budget 4000 --focus handleRequest',
+    cmd: `${facts.recipe.oneShot} src/server.ts --budget ${facts.recipe.recommendedBudgetBytes} --focus handleRequest`,
   },
-] as const;
+];
 
 function InstallLine({ cmd }: { cmd: string }) {
   return (

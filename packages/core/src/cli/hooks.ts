@@ -36,6 +36,7 @@ import {
   upsertMarkerBlock,
 } from '../text/json-edit.ts';
 
+import { SETUP_RECIPE } from '../setup/recipe.ts';
 import { answerReader, CLI_NAME } from './shell.ts';
 import type { AnswerStream } from './shell.ts';
 import {
@@ -468,7 +469,7 @@ export function planInstall(cwd: string, choices: HooksChoices): InstallPlan {
 }
 
 /** Where the installed config points the persistent store, relative to the config file. */
-export const DEFAULT_STORE_DIR = '.smelt/store';
+export const DEFAULT_STORE_DIR = SETUP_RECIPE.store.defaultDir;
 
 /**
  * Existing config re-rendered with the hooks block, other fields carried verbatim —

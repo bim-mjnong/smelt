@@ -1,6 +1,6 @@
 {
-  "guards": 27,
-  "mutations": 131,
+  "guards": 28,
+  "mutations": 134,
   "byGuard": [
     {
       "guard": "packages/core/test/guards/agents-lint.test.ts",
@@ -77,6 +77,10 @@
     {
       "guard": "packages/core/test/guards/reversibility.test.ts",
       "count": 2
+    },
+    {
+      "guard": "packages/core/test/guards/setup-recipe.test.ts",
+      "count": 3
     },
     {
       "guard": "packages/core/test/guards/site-facts.test.ts",

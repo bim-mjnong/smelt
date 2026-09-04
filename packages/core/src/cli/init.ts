@@ -5,6 +5,7 @@ import { CliUsageError } from '../errors.ts';
 import { DEFAULT_STRATEGY, STRATEGIES } from '../plan/planners.ts';
 import type { Strategy } from '../plan/planners.ts';
 import { STRUCTURAL_LANGUAGES } from '../plan/structural.ts';
+import { SETUP_RECIPE } from '../setup/recipe.ts';
 
 import { answerReader, CLI_NAME } from './shell.ts';
 import type { AnswerStream } from './shell.ts';
@@ -397,7 +398,8 @@ async function stepStore(io: InitIo, ask: Asker, choices: WizardChoices): Promis
       return 'ok';
     }
     if (pick === '2') {
-      const previous = choices.store.kind === 'directory' ? choices.store.path : '.smelt/store';
+      const previous =
+        choices.store.kind === 'directory' ? choices.store.path : SETUP_RECIPE.store.defaultDir;
       const path = await ask(`store directory, relative to ${CONFIG_FILE_NAME} [${previous}]> `);
       if (path === 'back') continue; // back to the store choice, not out of the step
       choices.store = { kind: 'directory', path: path === '' ? previous : path };

@@ -136,7 +136,7 @@ import { DirectoryElisionStore } from '@smeltjs/core';
 
 const smelter = createSmelter({
   defaultBudgetBytes: 8_000,
-  store: new DirectoryElisionStore('.smelt-store'), // content-addressed, crash-safe, no eviction
+  store: new DirectoryElisionStore('.smelt/store'), // content-addressed, crash-safe, no eviction
 });
 // A smelt_retrieve in a later turn — or a later process — still gets its bytes back.
 // Retrieval counters survive restarts, so expansionRate stays meaningful across a session.
