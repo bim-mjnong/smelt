@@ -35,7 +35,13 @@ describe('the setup recipe is owned once', () => {
   });
 
   it('names the steps in order, each command carried by a named fact', () => {
-    expect(SETUP_STEPS.map((step) => step.id)).toEqual(['install', 'init', 'hooks', 'mcp']);
+    expect(SETUP_STEPS.map((step) => step.id)).toEqual([
+      'install',
+      'init',
+      'hooks',
+      'mcp',
+      'verify',
+    ]);
     for (const step of SETUP_STEPS) {
       expect(step.command, `step ${step.id} carries no command`).toBeTruthy();
     }

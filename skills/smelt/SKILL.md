@@ -46,6 +46,7 @@ that pairing is the design, not an obstacle.
 - `smelt init` — write smelt.config.json
 - `smelt hooks install` — wire the hooks preset
 - `claude mcp add smelt -- npx @smeltjs/mcp` — register the MCP server
+- `smelt <file> --budget 4000 --focus <focus>` — prove the round trip on a real file
 
 ## Installing, updating, repairing
 

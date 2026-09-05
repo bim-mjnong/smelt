@@ -61,19 +61,26 @@ export const MCP_RUN_ARGS: readonly string[] = SETUP_RECIPE.mcp.run.split(' ');
 
 /** One step of the recipe, in the order a new machine walks it. */
 export interface SetupStep {
-  readonly id: 'install' | 'init' | 'hooks' | 'mcp';
+  readonly id: 'install' | 'init' | 'hooks' | 'mcp' | 'verify';
   readonly title: string;
   readonly command: string;
 }
 
 /**
- * The recipe's steps, in order. The install and MCP commands are named facts above;
- * the init and hooks steps name the verbs that walk them interactively — the wizard
- * each is, not a fact the recipe owns.
+ * The recipe's steps, in order, ending in the verification that makes "set up" a
+ * claim with evidence. The install and MCP commands are named facts above; the init,
+ * hooks and verify steps name the verbs and the canonical invocation — the wizard
+ * each is, not a fact the recipe owns, except the budget the verify step carries,
+ * which is the recipe's.
  */
 export const SETUP_STEPS: readonly SetupStep[] = [
   { id: 'install', title: 'install the CLI', command: SETUP_RECIPE.install.globalInstall },
   { id: 'init', title: 'write smelt.config.json', command: 'smelt init' },
   { id: 'hooks', title: 'wire the hooks preset', command: 'smelt hooks install' },
   { id: 'mcp', title: 'register the MCP server', command: SETUP_RECIPE.mcp.register },
+  {
+    id: 'verify',
+    title: 'prove the round trip on a real file',
+    command: `smelt <file> --budget ${SETUP_RECIPE.recommendedBudgetBytes} --focus <focus>`,
+  },
 ];
