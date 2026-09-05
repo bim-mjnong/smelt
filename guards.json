@@ -1,6 +1,6 @@
 {
-  "guards": 31,
-  "mutations": 143,
+  "guards": 32,
+  "mutations": 145,
   "byGuard": [
     {
       "guard": "packages/core/test/guards/agents-lint.test.ts",
@@ -96,6 +96,10 @@
     },
     {
       "guard": "packages/core/test/guards/site-facts.test.ts",
+      "count": 2
+    },
+    {
+      "guard": "packages/core/test/guards/skill-pack.test.ts",
       "count": 2
     },
     {
