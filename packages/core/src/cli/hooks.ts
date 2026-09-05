@@ -1,6 +1,6 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 import { CliUsageError } from '../errors.ts';
 import { nodeCommand, portablePath, shimScriptPath, smeltBinPath } from '../harness/paths.ts';
@@ -38,7 +38,16 @@ import {
 } from '../text/json-edit.ts';
 
 import { SETUP_RECIPE } from '../setup/recipe.ts';
-import { answerReader, CLI_NAME } from './shell.ts';
+import {
+  confirmLoop,
+  confirmYesNo,
+  listPlannedFiles,
+  walkSteps,
+  wizardAsk,
+  writePlannedFile,
+} from './wizard.ts';
+import type { Ask } from './wizard.ts';
+import { CLI_NAME } from './shell.ts';
 import type { AnswerStream } from './shell.ts';
 import {
   CONFIG_FILE_NAME,
@@ -642,37 +651,31 @@ export function planRemove(
  * The wizard
  * ---------------------------------------------------------------------------------- */
 
-type Asker = (prompt: string) => Promise<string>;
+type Asker = Ask;
 
 /**
  * `smelt hooks <install|remove>`, start to finish. The same testability pattern as
- * `runInit`: a pure function over an input/output pair, exit code returned.
+ * `runInit`: a pure function over an input/output pair, exit code returned. The ask
+ * adapter, the step machine and the confirms are the wizard kit's (`cli/wizard.ts`) —
+ * this file holds what is hooks' own: the steps, the plan, the per-file consent.
  */
 export async function runHooks(
   action: 'install' | 'remove',
   harnessFlag: string | undefined,
   io: HooksIo,
 ): Promise<number> {
-  // Same adapter, same reason, as `runInit` — see the note on `answerReader`.
-  const lines = answerReader(io.input);
-  const ask = async (prompt: string): Promise<string> => {
-    io.output(prompt);
-    const next = await lines.next();
-    if (next === undefined) {
-      throw new CliUsageError(
-        `${CLI_NAME} hooks: input ended before the wizard finished. ` +
-          `Files already confirmed and written stay; nothing further was written.`,
-      );
-    }
-    return next.trim();
-  };
-
+  const wizard = wizardAsk(
+    io.input,
+    io.output,
+    `${CLI_NAME} hooks: input ended before the wizard finished. ` +
+      `Files already confirmed and written stay; nothing further was written.`,
+  );
   try {
     return action === 'install'
-      ? await installFlow(io, ask, harnessFlag)
-      : await removeFlow(io, ask, harnessFlag);
+      ? await installFlow(io, wizard.ask, harnessFlag)
+      : await removeFlow(io, wizard.ask, harnessFlag);
   } finally {
-    await lines.release();
+    await wizard.release();
   }
 }
 
@@ -773,24 +776,16 @@ async function installFlow(
     async (io_, ask_) => stepThreshold(io_, ask_, choices),
   ];
 
-  let index = 0;
+  const machine = steps.map((step) => (a: Ask) => step(io, a));
   for (;;) {
-    while (index < steps.length) {
-      const outcome = await steps[index]!(io, ask);
-      if (outcome === 'back') {
-        if (index === 0) io.output(`This is the first step — there is nothing before it.\n`);
-        else index -= 1;
-      } else {
-        index += 1;
-      }
-    }
+    await walkSteps(machine, ask, io.output);
     if (choices.harnesses.length === 0) {
       io.output(`No harness selected. Nothing to do; nothing was written.\n`);
       return 0;
     }
     const verdict = await confirmAndInstall(io, ask, choices);
     if (verdict !== 'back') return 0;
-    index = steps.length - 1;
+    await walkSteps(machine, ask, io.output, machine.length - 1);
   }
 }
 
@@ -1028,22 +1023,18 @@ async function confirmAndInstall(
 ): Promise<'done' | 'back'> {
   const plan = planInstall(io.cwd, choices);
 
-  io.output(
-    `\nAbout to write, into ${io.cwd}:\n` +
-      plan.files.map((file) => `  ${file.name.padEnd(32)} (${fileLabel(file)})\n`).join('') +
-      plan.skipped.map((skip) => `  ${skip.name.padEnd(32)} (SKIPPED: ${skip.why})\n`).join('') +
-      `Nothing has been written yet.\n`,
-  );
+  io.output(`\nAbout to write, into ${io.cwd}:\n`);
+  listPlannedFiles(io.output, plan.files, plan.skipped, fileLabel);
+  io.output(`Nothing has been written yet.\n`);
 
-  for (;;) {
-    const answer = await ask(`confirm (yes / no / back)> `);
-    if (answer === 'back') return 'back';
-    if (answer === 'no') {
-      io.output(`Nothing was written.\n`);
-      return 'done';
-    }
-    if (answer === 'yes') break;
-    io.output(`yes to write, no to leave everything untouched, back to change a setting.\n`);
+  const confirmed = await confirmLoop(
+    ask,
+    'yes to write, no to leave everything untouched, back to change a setting.',
+  );
+  if (confirmed === 'back') return 'back';
+  if (confirmed === 'no') {
+    io.output(`Nothing was written.\n`);
+    return 'done';
   }
 
   for (const file of plan.files) {
@@ -1060,9 +1051,7 @@ async function confirmAndInstall(
         continue;
       }
     }
-    mkdirSync(dirname(file.path), { recursive: true });
-    writeFileSync(file.path, file.content);
-    if (file.mode !== undefined) chmodSync(file.path, file.mode);
+    writePlannedFile(file);
     io.output(`  wrote ${file.name}\n`);
   }
 
@@ -1101,14 +1090,9 @@ async function removeFlow(
       `edit or remove it there.\nNothing has been changed yet.\n`,
   );
 
-  for (;;) {
-    const answer = await ask(`confirm (yes / no)> `);
-    if (answer === 'no') {
-      io.output(`Nothing was changed.\n`);
-      return 0;
-    }
-    if (answer === 'yes') break;
-    io.output(`yes to proceed, no to leave everything untouched.\n`);
+  if ((await confirmYesNo(ask, 'yes to proceed, no to leave everything untouched.')) === 'no') {
+    io.output(`Nothing was changed.\n`);
+    return 0;
   }
 
   for (const removal of removals) {

@@ -137,6 +137,8 @@ export async function renderFacts(root = REPO_ROOT) {
   const recipe = smelt.SETUP_RECIPE;
   const recipeFacts = {
     installLibrary: recipe.install?.library,
+    installPnpm: recipe.install?.libraryPnpm,
+    installBun: recipe.install?.libraryBun,
     installGlobal: recipe.install?.globalInstall,
     oneShot: recipe.install?.oneShot,
     brewInstall: recipe.install?.brewInstall,

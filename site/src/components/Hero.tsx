@@ -5,14 +5,15 @@ import { Frame, FrameBar } from '@/components/ui/Frame';
 import { GITHUB } from '@/components/Nav';
 
 /**
- * The install lines. npm's two are recipe facts read off facts.json (the library
- * install, and the one-shot with the recipe's own budget in the example); the pnpm
- * and bun lines are the same library fact in each manager's spelling.
+ * The install lines — every one a recipe fact read off facts.json, including the
+ * manager spellings (npm, pnpm, bun, the one-shot, brew). A spelling typed here was
+ * the `.smelt-store` drift shape reborn: invisible to the exact-match scan, wrong
+ * the day the package name moved.
  */
 const INSTALLS = [
   { id: 'npm', label: 'npm', cmd: facts.recipe.installLibrary },
-  { id: 'pnpm', label: 'pnpm', cmd: 'pnpm add @smeltjs/core' },
-  { id: 'bun', label: 'bun', cmd: 'bun add @smeltjs/core' },
+  { id: 'pnpm', label: 'pnpm', cmd: facts.recipe.installPnpm },
+  { id: 'bun', label: 'bun', cmd: facts.recipe.installBun },
   {
     id: 'npx',
     label: 'npx',

@@ -12,9 +12,10 @@ import { basename, dirname, join } from 'node:path';
 
 import { CliUsageError } from '../errors.ts';
 import { DEFAULT_THRESHOLD_BYTES } from '../hooks/guard-core.ts';
-import { detectedHarnesses, jsonHooksContainOurs, planInstall, presetToggles } from './hooks.ts';
-import { JSON_HOOK_FILES } from '../harness/registry.ts';
-import { OURS_TOKEN } from '../harness/snippet.ts';
+import { detectedHarnesses, planInstall, presetToggles } from './hooks.ts';
+import { fileIsOurs } from './installed.ts';
+import { confirmLoop, listPlannedFiles, walkSteps, wizardAsk } from './wizard.ts';
+import type { Ask, Step } from './wizard.ts';
 import type { HooksChoices } from './hooks.ts';
 import {
   CONFIG_FILE_NAME,
@@ -31,9 +32,9 @@ import { DirectoryElisionStore } from '../store-dir.ts';
 import { createSmelter } from '../smelter.ts';
 import { DEFAULT_STRATEGY } from '../plan/planners.ts';
 import { SETUP_RECIPE } from '../setup/recipe.ts';
-import { answerReader, CLI_NAME, EXIT } from './shell.ts';
+import { CLI_NAME, EXIT } from './shell.ts';
 import type { AnswerStream } from './shell.ts';
-import { colorize, lavaBanner } from './lava.ts';
+import { lavaBanner } from './lava.ts';
 
 /**
  * `smelt setup` — the SetupRecipe (CONTEXT.md) applied end-to-end: config, the hooks
@@ -145,7 +146,6 @@ function readIfExists(path: string): string | undefined {
   return existsSync(path) ? readFileSync(path, 'utf8') : undefined;
 }
 
-type Ask = (prompt: string) => Promise<string>;
 type Say = (text: string) => void;
 
 /**
@@ -155,30 +155,30 @@ type Say = (text: string) => void;
  * exit code without parsing prose.
  */
 export async function runSetup(options: SetupOptions, io: SetupIo): Promise<number> {
-  const lines = options.yes ? undefined : answerReader(io.input!);
-  const ask: Ask = async (prompt) => {
-    if (lines === undefined) {
-      throw new CliUsageError(
-        `${CLI_NAME} setup: a question was reached with no interactive input — ` +
-          `this is a bug in the flow, not an answer you owe.`,
-      );
-    }
-    io.output(colorize(prompt, io.color === true));
-    const next = await lines.next();
-    if (next === undefined) {
-      throw new CliUsageError(
+  const wizard = options.yes
+    ? undefined
+    : wizardAsk(
+        io.input!,
+        io.output,
         `${CLI_NAME} setup: input ended before the wizard finished. Nothing was ` +
           `written. Non-interactive:\n  ${CLI_NAME} setup --yes [--harness <id>]... ` +
           `[--no-mcp] [--json]`,
       );
-    }
-    return next.trim();
-  };
+  const ask: Ask =
+    wizard?.ask ??
+    (async () => {
+      // --yes never asks; a question reached with no stream is a bug in the flow,
+      // not an answer the user owes.
+      throw new CliUsageError(
+        `${CLI_NAME} setup: a question was reached with no interactive input — ` +
+          `this is a bug in the flow, not an answer you owe.`,
+      );
+    });
   // Prose is suppressed in --json mode: the receipt is the whole output, the way the
   // other verbs' envelopes are. A machine parsing the receipt must not also parse
   // around it.
   const say: Say = (text) => {
-    if (!options.json) io.output(colorize(text, io.color === true));
+    if (!options.json) io.output(text);
   };
 
   try {
@@ -188,7 +188,7 @@ export async function runSetup(options: SetupOptions, io: SetupIo): Promise<numb
     if (choices === undefined) return EXIT.ok; // declined at the confirm
     return await finish(choices, io, say, options);
   } finally {
-    await lines?.release();
+    await wizard?.release();
   }
 }
 
@@ -238,12 +238,6 @@ async function wizardPath(
     registerMcp: true,
   };
 
-  if (options.harnessIds.length === 0) {
-    await stepHarnesses(say, ask, choices, detectedHarnesses(io.cwd, io.home ?? homedir()));
-  } else {
-    for (const profile of choices.harnesses) say(`  ${tierLine(profile)}\n`);
-  }
-
   // Budget: the config's own if it carries one, else the recipe's recommendation —
   // Enter is always an answer here, which is the difference from `init`, whose
   // confirm refuses to proceed without a budget someone typed.
@@ -251,30 +245,54 @@ async function wizardPath(
   const existingText = readIfExists(configPath);
   const existing = existingText === undefined ? undefined : parseConfig(existingText, configPath);
   const budgetDefault = existing?.defaultBudgetBytes ?? SETUP_RECIPE.recommendedBudgetBytes;
-  for (;;) {
-    const answer = await ask(`default budget in bytes [${String(budgetDefault)}]> `);
-    if (answer === '') {
-      choices.budgetBytes = budgetDefault;
-      break;
-    }
-    if (/^\d+$/.test(answer) && Number(answer) > 0) {
-      choices.budgetBytes = Number(answer);
-      break;
-    }
-    say(`A whole number of bytes greater than zero, e.g. ${String(budgetDefault)}.\n`);
-  }
 
-  await stepStore(say, ask, choices);
-
+  // The wizard kit's step machine, so back is real back: harnesses ← budget ← store
+  // ← mcp, each step returning to the one before it (the first says so).
+  const steps: readonly Step[] = [
+    async (a) => {
+      if (options.harnessIds.length > 0) {
+        for (const profile of choices.harnesses) say(`  ${tierLine(profile)}\n`);
+        return 'ok';
+      }
+      await stepHarnesses(say, a, choices, detectedHarnesses(io.cwd, io.home ?? homedir()));
+      return 'ok';
+    },
+    async (a) => await stepBudget(say, a, choices, budgetDefault),
+    async (a) => await stepStore(say, a, choices),
+    async (a) => await stepMcp(say, a, choices),
+  ];
+  await walkSteps(steps, ask, say);
   for (;;) {
-    await stepMcp(say, ask, choices);
     const verdict = await confirm(say, ask, choices, io);
     if (verdict === 'done') return choices;
     if (verdict === 'declined') {
       say(`Nothing was written.\n`);
       return undefined;
     }
-    // 'back' lands on the last question, the MCP toggle.
+    // A confirm's back lands on the last step — and from there, real back.
+    await walkSteps(steps, ask, say, steps.length - 1);
+  }
+}
+
+/** Budget, with the config's or the recipe's number as the Enter default. */
+async function stepBudget(
+  say: Say,
+  ask: Ask,
+  choices: SetupChoices,
+  budgetDefault: number,
+): Promise<'ok' | 'back'> {
+  for (;;) {
+    const answer = await ask(`default budget in bytes [${String(budgetDefault)}]> `);
+    if (answer === 'back') return 'back';
+    if (answer === '') {
+      choices.budgetBytes = budgetDefault;
+      return 'ok';
+    }
+    if (/^\d+$/.test(answer) && Number(answer) > 0) {
+      choices.budgetBytes = Number(answer);
+      return 'ok';
+    }
+    say(`A whole number of bytes greater than zero, e.g. ${String(budgetDefault)}.\n`);
   }
 }
 
@@ -285,7 +303,7 @@ async function stepHarnesses(
   ask: Ask,
   choices: SetupChoices,
   detected: readonly HarnessProfile[],
-): Promise<void> {
+): Promise<'ok' | 'back'> {
   const all = [...HARNESSES];
   say(`Harnesses to wire with the guard preset:\n`);
   all.forEach((profile, index) => {
@@ -298,64 +316,61 @@ async function stepHarnesses(
       : `Enter for detected: ${detected.map((profile) => profile.id).join(', ')}`;
   for (;;) {
     const answer = await ask(`numbers, 'all', or Enter (${detectedNote})> `);
-    if (answer === 'back') {
-      say(`This is the first step — there is nothing before it.\n`);
-      continue;
-    }
+    if (answer === 'back') return 'back'; // the step machine answers it
     if (answer === '') {
       choices.harnesses = [...detected];
-      return;
+      return 'ok';
     }
     if (answer === 'all') {
       choices.harnesses = all;
-      return;
+      return 'ok';
     }
     if (/^\d+(?:\s*,\s*\d+)*$/u.test(answer)) {
       const picked = answer.split(',').map((piece) => Number(piece.trim()));
       if (picked.every((n) => n >= 1 && n <= all.length)) {
         choices.harnesses = [...new Set(picked)].map((n) => all[n - 1]!);
-        return;
+        return 'ok';
       }
     }
     say(`A comma-separated list of the numbers above, 'all', or Enter.\n`);
   }
 }
 
-async function stepStore(say: Say, ask: Ask, choices: SetupChoices): Promise<void> {
+async function stepStore(say: Say, ask: Ask, choices: SetupChoices): Promise<'ok' | 'back'> {
   say(
     `\nWhere elided bytes live. Every elision is reversible only while a store holds ` +
       `its bytes (Law 3). An explicit store already in the config is respected.\n`,
   );
   for (;;) {
     const answer = await ask(`store (1 memory / 2 directory) [2]> `);
-    if (answer === 'back') return;
+    if (answer === 'back') return 'back';
     if (answer === '' || answer === '2') {
       const pathDefault =
         choices.store?.kind === 'directory' ? choices.store.path : SETUP_RECIPE.store.defaultDir;
       const path = await ask(`store directory, relative to ${CONFIG_FILE_NAME} [${pathDefault}]> `);
       if (path === 'back') continue;
       choices.store = { kind: 'directory', path: path === '' ? pathDefault : path };
-      return;
+      return 'ok';
     }
     if (answer === '1') {
       choices.store = { kind: 'memory' };
-      return;
+      return 'ok';
     }
     say(`1 for memory, 2 for directory.\n`);
   }
 }
 
-async function stepMcp(say: Say, ask: Ask, choices: SetupChoices): Promise<void> {
+async function stepMcp(say: Say, ask: Ask, choices: SetupChoices): Promise<'ok' | 'back'> {
   for (;;) {
     const answer = await ask(`register the MCP server? (1 yes — prints the command / 2 no) [1]> `);
-    if (answer === 'back') return;
+    if (answer === 'back') return 'back';
     if (answer === '' || answer === '1') {
       choices.registerMcp = true;
-      return;
+      return 'ok';
     }
     if (answer === '2') {
       choices.registerMcp = false;
-      return;
+      return 'ok';
     }
     say(`1 to include the MCP step, 2 to skip it.\n`);
   }
@@ -382,36 +397,41 @@ async function confirm(
   if (plan === undefined) {
     say(`  no harness selected — the guard preset is skipped\n`);
   } else {
-    for (const file of plan.files) {
-      if (basename(file.path) === CONFIG_FILE_NAME) continue;
-      say(`  ${file.name.padEnd(32)} (${fileFate(file)})\n`);
-    }
-    for (const skip of plan.skipped) {
-      say(`  ${skip.name.padEnd(32)} (SKIPPED: ${skip.why})\n`);
-    }
+    listPlannedFiles(
+      say,
+      plan.files.filter((file) => basename(file.path) !== CONFIG_FILE_NAME),
+      plan.skipped,
+      fileFate,
+    );
   }
   say(
     `  mcp ${
       choices.registerMcp ? `(manual step: ${SETUP_RECIPE.mcp.register})` : '(skipped)'
     }\nNothing has been written yet.\n`,
   );
-  for (;;) {
-    const answer = await ask(`confirm (yes / no / back)> `);
-    if (answer === 'back') return 'back';
-    if (answer === 'no') return 'declined';
-    if (answer === 'yes') return 'done';
-    say(`yes to apply, no to leave everything untouched, back to change a step.\n`);
-  }
+  const confirmed = await confirmLoop(
+    ask,
+    'yes to apply, no to leave everything untouched, back to change a step.',
+  );
+  if (confirmed === 'back') return 'back';
+  return confirmed === 'yes' ? 'done' : 'declined';
 }
 
 // ── the one apply path ──────────────────────────────────────────────────────────────
 
-async function finish(
-  choices: SetupChoices,
-  io: SetupIo,
-  say: Say,
-  options: SetupOptions,
-): Promise<number> {
+/** Everything one apply decided, as data — the receipt before it is rendered. */
+interface ApplyOutcome {
+  readonly receipt: Omit<SetupReceipt, 'format' | 'cwd'>;
+  readonly notes: readonly string[];
+  readonly failedChecks: number;
+}
+
+/**
+ * The one apply path: config, hooks preset, MCP verdict, checks. Decides and writes;
+ * renders nothing — the prose and the JSON receipt are two adapters over the outcome,
+ * which is the seam the lava renderer (KOT-253) slots in behind.
+ */
+async function applySetup(choices: SetupChoices, io: SetupIo): Promise<ApplyOutcome> {
   const files: SetupFileAction[] = [];
   const notes: string[] = [];
 
@@ -530,11 +550,24 @@ async function finish(
     checks.push(...(await probeStore(storeDir, budget)));
   }
 
-  // ── report ──
+  const failedChecks = checks.filter((check) => !check.ok).length;
+  return {
+    receipt: { config: { action: configAction }, files, mcp, checks },
+    notes,
+    failedChecks,
+  };
+}
+
+/** The prose renderer — one adapter over the outcome. */
+function renderOutcome(outcome: ApplyOutcome, say: Say): boolean {
+  const { receipt } = outcome;
+  const { files, mcp, checks } = receipt;
+  const ok = outcome.failedChecks === 0;
+
   for (const file of files) {
     say(`  ${file.name}: ${file.action}${file.detail === undefined ? '' : ` — ${file.detail}`}\n`);
   }
-  for (const note of notes) say(`note: ${note}\n`);
+  for (const note of outcome.notes) say(`note: ${note}\n`);
   if (mcp.status === 'applied') {
     say(
       `MCP registration: written to the harness configs beside any servers you already ` +
@@ -551,28 +584,24 @@ async function finish(
   for (const check of checks) {
     say(`${check.ok ? ' ✓' : ' ✗'} ${check.name} — ${check.detail}\n`);
   }
-  const failed = checks.filter((check) => !check.ok);
-  const ok = failed.length === 0;
-  if (!ok) {
-    say(
-      `${CLI_NAME} setup: ${String(failed.length)} check(s) failed — the setup is not ` +
-        `finished. Fix the cause and re-run; setup is idempotent.\n`,
-    );
-  } else {
-    say(
-      `Done. \`${CLI_NAME} hooks install\` edits the hook toggles; ` +
-        `\`${CLI_NAME} hooks remove\` takes it all back out.\n`,
-    );
-  }
 
+  return ok;
+}
+
+/** finish: apply once, render twice — prose for humans, the receipt for machines. */
+async function finish(
+  choices: SetupChoices,
+  io: SetupIo,
+  say: Say,
+  options: SetupOptions,
+): Promise<number> {
+  const outcome = await applySetup(choices, io);
+  const ok = renderOutcome(outcome, say);
   if (options.json) {
     const receipt: SetupReceipt = {
       format: 'smelt.setup.v1',
       cwd: io.cwd,
-      config: { action: configAction },
-      files,
-      mcp,
-      checks,
+      ...outcome.receipt,
     };
     io.output(JSON.stringify(receipt, null, 2) + '\n');
   }
@@ -656,10 +685,7 @@ async function probeStore(storeDir: string, budget: number): Promise<SetupCheck[
  */
 function fileIsOursToRepair(file: { readonly name: string; readonly path: string }): boolean {
   if (basename(file.path) === CONFIG_FILE_NAME) return true;
-  const text = readFileSync(file.path, 'utf8');
-  return JSON_HOOK_FILES.includes(file.name)
-    ? jsonHooksContainOurs(text)
-    : text.includes(OURS_TOKEN);
+  return fileIsOurs(file.name, readFileSync(file.path, 'utf8'));
 }
 
 function hooksChoices(

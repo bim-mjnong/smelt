@@ -103,6 +103,10 @@ describe('the mcp-registration step kind', () => {
 
       // Foreign bytes ride through: the other entries are character-identical.
       expect(applied).toContain('"other" :  {"command" :  "uvx", "args": ["some-server"]}');
+      // And the fresh entry lands at its siblings' depth, its members one unit
+      // deeper — the file's own convention, not a flattened re-render. The fixture
+      // indents members by 8, so `smelt` sits at 8 and `command` at 12.
+      expect(applied).toContain('\n        "smelt": {\n            "command": "npx"');
       expect(applied).toContain('"zeta": {"command": "node", "args": ["zeta.js"]}');
       const merged = JSON.parse(applied) as { mcpServers: Record<string, unknown> };
       expect(Object.keys(merged.mcpServers).toSorted()).toEqual(['other', 'smelt', 'zeta']);
@@ -191,6 +195,14 @@ describe('the mcp-registration step kind', () => {
  * file goes red — see `test/guards/_mutations.ts`.
  */
 export const MUTATIONS: GuardMutation[] = [
+  {
+    kind: 'src',
+    id: 'nested-entry-renders-flat',
+    file: 'text/json-edit.ts',
+    find: '  const memberIndent = /\\n([ \\t]+)"/.exec(inner)?.[1] ?? style.indent + style.indent;',
+    replace: '  const memberIndent = style.indent;',
+    why: 'the fresh member landing at the file\u2019s top-level indent instead of beside its siblings — every nested insert would read as if it had been pasted by a different formatter, and the byte-faithful contract covers layout too',
+  },
   {
     kind: 'src',
     id: 'mcp-roundtrip-leaves-an-empty-container',

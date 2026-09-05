@@ -350,6 +350,32 @@ describe('the interactive wizard completes on Enter alone', () => {
     }
   });
 
+  it('back is real back: budget returns to the harness question', async () => {
+    const cwd = scratch('backnav');
+    try {
+      let stdout = '';
+      const code = await runSetup(
+        { harnessIds: [], yes: false, noMcp: false, json: false },
+        {
+          input: scriptAnswers(['', 'back', '', '', '', '', '', 'yes']),
+          output: (text) => {
+            stdout += text;
+          },
+          cwd,
+          home: join(cwd, 'no-home'),
+        },
+      );
+      expect(code, `wizard exited ${String(code)}:\n${stdout}`).toBe(EXIT.ok);
+      // The harness question was asked twice — the first pass, then again after
+      // budget's back. The wizard kit's step machine is what makes back real;
+      // the first version of this wizard had no back at all.
+      expect(stdout.split("numbers, 'all', or Enter").length - 1).toBe(2);
+      expect(existsSync(join(cwd, 'smelt.config.json'))).toBe(true);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it('a declined confirm writes nothing', async () => {
     const cwd = scratch('declined');
     try {
@@ -438,10 +464,18 @@ export const MUTATIONS: GuardMutation[] = [
   },
   {
     kind: 'src',
+    id: 'wizard-back-advances-instead',
+    file: 'cli/wizard.ts',
+    find: 'else index -= 1;',
+    replace: 'else index += 1;',
+    why: 'the step machine’s back moving forward — a wizard that eats the answer instead of returning for it is the defect the kit itself was extracted to end',
+  },
+  {
+    kind: 'src',
     id: 'setup-stops-repairing-its-own-blocks',
     file: 'cli/setup.ts',
-    find: ': text.includes(OURS_TOKEN);',
-    replace: ': false;',
+    find: "  return fileIsOurs(file.name, readFileSync(file.path, 'utf8'));",
+    replace: '  return false;',
     why: 'setup treating its own instruction blocks as foreign — doctor would name them behind forever and the repair it names would skip them, the update loop this whole arc exists to close, quietly not closing',
   },
   {

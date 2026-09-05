@@ -4,6 +4,7 @@ import { CliUsageError } from '../../errors.ts';
 import { HARNESSES, harnessById } from '../../harness/registry.ts';
 import { SETUP_RECIPE } from '../../setup/recipe.ts';
 import { runSetup } from '../setup.ts';
+import { colorize } from '../lava.ts';
 import { CLI_NAME } from '../shell.ts';
 import type { CliIo } from '../shell.ts';
 
@@ -114,7 +115,8 @@ export const setupCommand: Subcommand<SetupInvocation, SetupInvocation> = {
       // `input` stays absent for `--yes` — exactOptionalPropertyTypes means "absent"
       // is a decision, not a field carrying undefined.
       ...(io.initInput === undefined ? {} : { input: io.initInput }),
-      output: io.stdout,
+      output: (text) =>
+        io.stdout(colorize(text, io.color === true && !resolved.yes && !resolved.json)),
       cwd: io.cwd ?? process.cwd(),
       version: io.version,
       // The lava renderer is for the human at a terminal: --yes and --json are the

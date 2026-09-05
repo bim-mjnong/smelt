@@ -13,8 +13,10 @@
  */
 export const SETUP_RECIPE = {
   install: {
-    /** The library, into a project. */
+    /** The library, into a project — npm's spelling, and its siblings beside it. */
     library: 'npm install @smeltjs/core',
+    libraryPnpm: 'pnpm add @smeltjs/core',
+    libraryBun: 'bun add @smeltjs/core',
     /** The CLI, onto the machine. (Not named `global`: that word is Law 1's.) */
     globalInstall: 'npm install -g @smeltjs/core',
     /** The CLI, without installing it. */

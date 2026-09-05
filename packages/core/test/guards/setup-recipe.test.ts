@@ -100,6 +100,8 @@ describe('the recipe is the only place the facts are spelled', () => {
   const facts = [
     '.smelt/store',
     'npm install @smeltjs/core',
+    'pnpm add @smeltjs/core',
+    'bun add @smeltjs/core',
     'npm install -g @smeltjs/core',
     'npx @smeltjs/core',
     'npx @smeltjs/mcp',

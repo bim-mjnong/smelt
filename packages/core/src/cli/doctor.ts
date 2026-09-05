@@ -1,24 +1,22 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { CONFIG_FILE_NAME, CONFIG_VERSION, findConfigFile, parseConfig } from './config.ts';
-import { GUARD_ONLY_FILES } from '../harness/registry.ts';
-import { OURS_TOKEN, SNIPPET_START_MD, snippetStampVersion } from '../harness/snippet.ts';
-import { HARNESS_PROFILES, JSON_HOOK_FILES } from '../harness/registry.ts';
+import { CONFIG_FILE_NAME, CONFIG_VERSION } from './config.ts';
+import { readInstalledState } from './installed.ts';
+import type { InstalledBlock } from './installed.ts';
 import { CLI_NAME, EXIT } from './shell.ts';
 
 /**
- * `smelt doctor` — the reader `smelt setup` and `smelt hooks` have always lacked.
- * Everything those verbs write, this verb reads back and compares against the binary
- * running it: which release wrote the instruction blocks (the stamp inside each
- * block), whether the config parses and its store directory exists, whether the MCP
- * registration survived, and which pieces are orphans — wired without their partners.
+ * `smelt doctor` — the verdicts over InstalledState. The reading lives in
+ * `cli/installed.ts` (one reader, behind the three consumers); this module decides
+ * and reports: which blocks are behind the running binary, which pieces are orphans,
+ * what the repair is, and what the exit code means. Everything the writers wrote,
+ * this verb reads back and compares — and never writes a byte of (ADR-0003).
  *
- * The verdict is ADR-0003's, verbatim: doctor reports, and never writes. When
- * something is behind, the report ends with the exact repair command — `smelt setup`
- * — and nothing more happens. The exit code carries the verdict (0 current or
- * nothing-installed, the refused exit otherwise), so the other-machine loop —
- * upgrade, `smelt doctor`, `smelt setup` — needs no prose parsing.
+ * When something is behind, the report ends with the exact repair command —
+ * `smelt setup`, per harness where a block is behind — and nothing more happens.
+ * The exit code carries the verdict, so the other-machine loop — upgrade, doctor,
+ * setup — needs no prose parsing.
  */
 
 export interface DoctorIo {
@@ -86,80 +84,32 @@ export function runDoctor(options: DoctorOptions, io: DoctorIo): number {
   const orphans: string[] = [];
   const repair: string[] = [];
 
-  // ── the instruction blocks: every profile's instruction file that exists and is ours ──
-  const blocks: DoctorBlock[] = [];
-  const fileOwners = new Map<string, string[]>();
-  for (const profile of Object.values(HARNESS_PROFILES)) {
-    const owners = fileOwners.get(profile.instructionFile) ?? [];
-    owners.push(profile.id);
-    fileOwners.set(profile.instructionFile, owners);
-  }
-  for (const [file, harnesses] of fileOwners) {
-    const path = join(io.cwd, file);
-    if (!existsSync(path)) continue;
-    const text = readFileSync(path, 'utf8');
-    const ours = text.includes(SNIPPET_START_MD) || text.includes(OURS_TOKEN);
-    if (!ours) continue;
-    const installedBy = snippetStampVersion(text);
-    const stampable = text.includes(SNIPPET_START_MD); // whole-owned files carry no stamp line yet
-    const status = !stampable ? 'unversioned' : installedBy === io.version ? 'current' : 'behind';
-    blocks.push({
-      file,
-      harnesses,
-      ...(installedBy === undefined ? {} : { installedBy }),
-      status,
-    });
-    if (status === 'behind') {
-      repair.push(...harnesses.map((id) => `${CLI_NAME} setup --harness ${id}`));
-    }
-  }
+  const state = readInstalledState(io.cwd);
+
+  // ── verdict: blocks vs the running binary ──
+  const blocks: DoctorBlock[] = state.blocks.map((block) => ({
+    file: block.file,
+    harnesses: block.harnesses,
+    ...(block.installedBy === undefined ? {} : { installedBy: block.installedBy }),
+    status: blockStatus(block, io.version),
+  }));
   const behindBlocks = blocks.filter((block) => block.status === 'behind');
-
-  // ── the hook files: JSON wiring and guard-only shims, presence and ours-ness ──
-  const hookFiles: string[] = [];
-  for (const name of [...JSON_HOOK_FILES, ...GUARD_ONLY_FILES]) {
-    const path = join(io.cwd, name);
-    if (!existsSync(path)) continue;
-    if (readFileSync(path, 'utf8').includes(OURS_TOKEN)) hookFiles.push(name);
+  for (const block of behindBlocks) {
+    repair.push(...block.harnesses.map((id) => `${CLI_NAME} setup --harness ${id}`));
   }
 
-  // ── the MCP registrations: every profile's declared step, checked on disk ──
-  const mcpSeen = new Map<string, DoctorMcp>();
-  for (const profile of Object.values(HARNESS_PROFILES)) {
-    for (const step of profile.install) {
-      if (step.kind !== 'mcp-registration') continue;
-      const key = `${step.file}·${step.path[1]}`;
-      if (mcpSeen.has(key)) continue;
-      const path = join(io.cwd, step.file);
-      let registered = false;
-      if (existsSync(path)) {
-        try {
-          const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
-          registered =
-            typeof parsed === 'object' &&
-            parsed !== null &&
-            (parsed as Record<string, unknown>)[step.path[0]] !== undefined &&
-            typeof (parsed as Record<string, Record<string, unknown>>)[step.path[0]] === 'object' &&
-            (parsed as Record<string, Record<string, unknown>>)[step.path[0]]![step.path[1]] !==
-              undefined;
-        } catch {
-          registered = false;
-        }
-      }
-      mcpSeen.set(key, { file: step.file, server: step.path[1], registered });
-    }
-  }
-  const mcp = [...mcpSeen.values()];
-
-  // ── the config: present, parseable, and its store's directory real ──
-  const configPath = findConfigFile(io.cwd);
-  let config: DoctorConfig = {
-    present: false,
-    store: {},
-  };
-  if (configPath !== undefined) {
-    try {
-      const parsed = parseConfig(readFileSync(configPath, 'utf8'), configPath);
+  // ── config detail + the store-directory orphan ──
+  let config: DoctorConfig = { present: false, store: {} };
+  if (state.config.present) {
+    if (state.config.malformed === true || state.config.parsed === undefined) {
+      config = { present: true, malformed: true, store: {} };
+      orphans.push(
+        `${CONFIG_FILE_NAME} is malformed: ${state.config.malformedWhy ?? 'unparseable JSON'}`,
+      );
+      repair.push(`${CLI_NAME} setup`);
+    } else {
+      const parsed = state.config.parsed;
+      const configPath = state.config.path ?? join(io.cwd, CONFIG_FILE_NAME);
       const dirExists =
         parsed.store?.kind === 'directory'
           ? existsSync(join(dirname(configPath), parsed.store.path))
@@ -183,24 +133,18 @@ export function runDoctor(options: DoctorOptions, io: DoctorIo): number {
         );
         repair.push(`${CLI_NAME} setup`);
       }
-    } catch (error) {
-      config = { present: true, malformed: true, store: {} };
-      orphans.push(
-        `${CONFIG_FILE_NAME} is malformed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      repair.push(`${CLI_NAME} setup`);
     }
   }
 
   // ── orphans: pieces whose partners are missing ──
-  const wired = blocks.length > 0 || hookFiles.length > 0;
-  if (mcp.some((one) => one.registered) && !wired) {
+  const wired = state.blocks.length > 0 || state.hookFiles.length > 0;
+  if (state.mcp.some((one) => one.registered) && !wired) {
     orphans.push(
       'an MCP registration is present but no hooks wiring is — the guard and the retrieval contract travel together',
     );
     repair.push(`${CLI_NAME} setup`);
   }
-  if (wired && !config.present) {
+  if (wired && !state.config.present) {
     orphans.push(
       'hooks are wired but there is no smelt.config.json — the store and budget the hooks promise live there',
     );
@@ -208,7 +152,7 @@ export function runDoctor(options: DoctorOptions, io: DoctorIo): number {
   }
 
   // ── verdict ──
-  const installed = wired || config.present || mcp.some((one) => one.registered);
+  const installed = wired || state.config.present || state.mcp.some((one) => one.registered);
   const current = installed && behindBlocks.length === 0 && orphans.length === 0;
 
   say(`${CLI_NAME} doctor — binary ${io.version}, reading ${io.cwd}\n`);
@@ -235,8 +179,8 @@ export function runDoctor(options: DoctorOptions, io: DoctorIo): number {
         } [${block.status}] — ${block.harnesses.join(', ')}\n`,
       );
     }
-    for (const name of hookFiles) say(`  ${name}: wired\n`);
-    for (const one of mcp) {
+    for (const name of state.hookFiles) say(`  ${name}: wired\n`);
+    for (const one of state.mcp) {
       if (one.registered) say(`  ${one.file}: ${one.server} registered\n`);
     }
     for (const orphan of orphans) say(`  ORPHAN: ${orphan}\n`);
@@ -264,14 +208,20 @@ export function runDoctor(options: DoctorOptions, io: DoctorIo): number {
       installed,
       config,
       blocks,
-      hookFiles,
-      mcp,
+      hookFiles: [...state.hookFiles],
+      mcp: [...state.mcp],
       orphans,
       repair: [...new Set(repair)],
     };
     io.output(JSON.stringify(receipt, null, 2) + '\n');
   }
   return current || !installed ? EXIT.ok : EXIT.refused;
+}
+
+/** The verdict over one block: whole-owned files carry no stamp to compare. */
+function blockStatus(block: InstalledBlock, binaryVersion: string): DoctorBlock['status'] {
+  if (!block.stampable) return 'unversioned';
+  return block.installedBy === binaryVersion ? 'current' : 'behind';
 }
 
 function describeStore(config: DoctorConfig): string {

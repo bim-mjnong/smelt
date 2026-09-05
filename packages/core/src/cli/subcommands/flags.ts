@@ -36,6 +36,12 @@ export const CLI_FLAGS = {
   strategy: { type: 'string' },
   ignore: { type: 'string', multiple: true },
   cache: { type: 'string' },
+  /**
+   * Repeatable because `setup` wires several harnesses in one run. `hooks` takes one
+   * per run and refuses a second id in its own parse — arity is a per-verb fact,
+   * expressed where the verb validates, with the one generated refusal; the table
+   * records how argv is read, not how many a verb accepts.
+   */
   harness: { type: 'string', multiple: true },
   yes: { type: 'boolean' },
   'no-mcp': { type: 'boolean' },
