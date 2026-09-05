@@ -1,6 +1,6 @@
 {
-  "guards": 29,
-  "mutations": 137,
+  "guards": 30,
+  "mutations": 140,
   "byGuard": [
     {
       "guard": "packages/core/test/guards/agents-lint.test.ts",
@@ -51,6 +51,10 @@
       "count": 2
     },
     {
+      "guard": "packages/core/test/guards/mcp-registration.test.ts",
+      "count": 2
+    },
+    {
       "guard": "packages/core/test/guards/no-network.test.ts",
       "count": 6
     },
@@ -84,7 +88,7 @@
     },
     {
       "guard": "packages/core/test/guards/setup-verb.test.ts",
-      "count": 3
+      "count": 4
     },
     {
       "guard": "packages/core/test/guards/site-facts.test.ts",

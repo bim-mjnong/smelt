@@ -30,6 +30,7 @@ import {
 import { DEFAULT_SUGGESTION_BUDGET_BYTES, DEFAULT_THRESHOLD_BYTES } from '../hooks/guard-core.ts';
 import type { EnforcementMode } from '../hooks/guard-core.ts';
 import {
+  editJsonProperty,
   editTopLevelProperty,
   jsonStyle,
   stripMarkerBlock,
@@ -450,6 +451,26 @@ export function planInstall(cwd: string, choices: HooksChoices): InstallPlan {
           if (step.guardOnly && !ctx.guard) break;
           files.set(join(cwd, step.file), planFile(cwd, step.file, step.content(ctx), step.mode));
           break;
+        case 'mcp-registration': {
+          // Byte-faithful beside whatever servers the user already registered —
+          // sibling entries, key order and indentation all ride through.
+          const existing = readIfExists(join(cwd, step.file));
+          const merged = editJsonProperty(
+            existing ?? '{}',
+            step.path,
+            step.entry(ctx),
+            existing === undefined ? undefined : jsonStyle(existing),
+          );
+          if (merged === undefined) {
+            skipped.push({
+              name: step.file,
+              why: 'exists but is not a JSON object — fix or remove it, then re-run',
+            });
+            break;
+          }
+          files.set(join(cwd, step.file), planFile(cwd, step.file, merged));
+          break;
+        }
       }
     }
 
@@ -556,6 +577,32 @@ export function planRemove(
     removals.set(path, { name, path, action: 'delete' });
   };
 
+  /**
+   * The registration comes back out the way it went in: the server entry lifted,
+   * byte-faithfully, from its container. A container this install created — empty
+   * once the entry is gone — is removed with it, so a file that never carried the
+   * key round-trips to byte-identical; one that carries other servers keeps them.
+   */
+  const planMcpStrip = (name: string, keys: readonly [string, string]): void => {
+    const path = join(cwd, name);
+    const existing = readIfExists(path);
+    if (existing === undefined) return;
+    const removed = editJsonProperty(existing, keys, undefined);
+    if (removed === undefined || removed === existing) return;
+    let remains: unknown;
+    try {
+      remains = JSON.parse(removed);
+    } catch {
+      return; // unreachable — the editor only returns parseable text; refuse to guess
+    }
+    const empty =
+      typeof remains === 'object' && remains !== null && Object.keys(remains).length === 0;
+    removals.set(
+      path,
+      empty ? { name, path, action: 'delete' } : { name, path, action: 'modify', content: removed },
+    );
+  };
+
   for (const profile of harnesses) {
     for (const step of profile.install) {
       switch (step.kind) {
@@ -567,6 +614,9 @@ export function planRemove(
           break;
         case 'own-file':
           planWholeFileDelete(step.file);
+          break;
+        case 'mcp-registration':
+          planMcpStrip(step.file, step.path);
           break;
       }
     }

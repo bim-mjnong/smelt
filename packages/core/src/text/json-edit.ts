@@ -215,6 +215,73 @@ function insertJsonProperty(
   return `${text.slice(0, last.valueEnd)},${newline}${indent}${entry}${text.slice(last.valueEnd)}`;
 }
 
+/**
+ * `editJsonProperty`: the same contract, one level deeper. Replace, insert or remove
+ * the property at `path` — e.g. `['mcpServers', 'smelt']` — where the *container* is a
+ * top-level property whose value is itself a JSON object. Everything outside the
+ * edited bytes rides through verbatim, including sibling entries inside the container.
+ *
+ * When the container key is absent and a value is given, the container is created
+ * fresh around the entry. When a removal empties the container, the container is
+ * lifted out too — a file that never carried the key comes back byte-identical after
+ * an apply → remove round trip, and one that carried other entries keeps them
+ * untouched. Returns `undefined` when the container's value is not a JSON object the
+ * scanner can walk (the caller refuses or skips, as with {@link editTopLevelProperty}).
+ */
+export function editJsonProperty(
+  text: string,
+  path: readonly [string, ...(readonly string[])],
+  value: unknown,
+  style: JsonStyle = jsonStyle(text),
+): string | undefined {
+  return editJsonPropertyAt(text, path, value, style);
+}
+
+/** The walker: same body, `path` as a plain (runtime-checked) array. */
+function editJsonPropertyAt(
+  text: string,
+  path: readonly string[],
+  value: unknown,
+  style: JsonStyle,
+): string | undefined {
+  const head = path[0]!;
+  const rest = path.slice(1);
+  if (rest.length === 0) return editTopLevelProperty(text, head, value, style);
+  const scan = scanJsonTopLevel(text);
+  if (scan === undefined) return undefined;
+  const property = scan.properties.find((candidate) => candidate.key === head);
+  if (property === undefined) {
+    if (value === undefined) return text; // nothing to remove under an absent container
+    // Build the fresh container from the tail of the path, then hand it to the
+    // top-level editor as a plain value — one renderer, one indent story.
+    const container: Record<string, unknown> = {};
+    let cursor = container;
+    for (const key of rest.slice(0, -1)) {
+      const next: Record<string, unknown> = {};
+      cursor[key] = next;
+      cursor = next;
+    }
+    cursor[rest[rest.length - 1]!] = value;
+    return editTopLevelProperty(text, head, container, style);
+  }
+  const inner = text.slice(property.valueStart, property.valueEnd);
+  const edited = editJsonPropertyAt(inner, rest, value, style);
+  if (edited === undefined) return undefined; // the container's value is not an object
+  if (edited === inner) return text;
+  if (value === undefined && removesToEmptyObject(edited)) {
+    // The container is now `{}` and it only got that way because of this removal —
+    // lift it out, so a file that never carried the key round-trips byte-identical.
+    return editTopLevelProperty(text, head, undefined, style) ?? text;
+  }
+  return `${text.slice(0, property.valueStart)}${edited}${text.slice(property.valueEnd)}`;
+}
+
+/** True when `text` is exactly a JSON object with no properties. */
+function removesToEmptyObject(text: string): boolean {
+  const scan = scanJsonTopLevel(text);
+  return scan !== undefined && scan.properties.length === 0;
+}
+
 /* ------------------------------------------------------------------------------------
  * Marker blocks
  * ---------------------------------------------------------------------------------- */

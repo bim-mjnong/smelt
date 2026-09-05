@@ -109,8 +109,17 @@ describe('smelt setup applies the recipe in one command', () => {
       expect(instruction, `no instruction file written: ${JSON.stringify(written)}`).toBeDefined();
       expect(readFileSync(join(cwd, 'CLAUDE.md'), 'utf8')).toContain('smelt:hooks');
 
-      // The MCP step is honest: manual, with the exact command from the recipe.
-      expect(receipt.mcp).toEqual({ status: 'manual', command: SETUP_RECIPE.mcp.register });
+      // The MCP step: claude-code's profile carries the registration, so it is
+      // applied to `.mcp.json` — byte-faithfully, with the recipe's own command.
+      expect(receipt.mcp.status).toBe('applied');
+      expect(receipt.mcp.command).toBe(SETUP_RECIPE.mcp.register);
+      const mcpConfig = JSON.parse(readFileSync(join(cwd, '.mcp.json'), 'utf8')) as {
+        mcpServers: { smelt: { command: string; args: readonly string[] } };
+      };
+      expect(mcpConfig.mcpServers.smelt).toEqual({
+        command: SETUP_RECIPE.mcp.run.split(' ')[0],
+        args: SETUP_RECIPE.mcp.run.split(' ').slice(1),
+      });
 
       // The checks passed — the round trip is the one that makes "set up" true.
       expect(receipt.checks.length).toBeGreaterThan(0);
@@ -369,5 +378,13 @@ export const MUTATIONS: GuardMutation[] = [
     find: "        action: 'skipped',",
     replace: "        action: 'written',",
     why: 'the receipt claiming a skipped file was written — the receipt is what an agent reads to verify the run, and a receipt that lies is worse than no receipt',
+  },
+  {
+    kind: 'src',
+    id: 'setup-claims-applied-when-manual',
+    file: 'cli/setup.ts',
+    find: "? { status: 'applied', command: SETUP_RECIPE.mcp.register }",
+    replace: "? { status: 'manual', command: SETUP_RECIPE.mcp.register }",
+    why: 'the receipt calling an applied registration manual — the agent reading --json would re-register by hand what setup already wrote, and the receipt would be wrong in the direction that costs work',
   },
 ];

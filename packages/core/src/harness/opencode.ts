@@ -4,6 +4,7 @@ import {
   REWRITE_ANNOUNCEMENT_OPENING,
 } from '../hooks/shim.ts';
 
+import { SETUP_RECIPE } from '../setup/recipe.ts';
 import { guardCoreScriptPath, portablePath } from './paths.ts';
 import type { HarnessInstallContext, HarnessProfile } from './profile.ts';
 
@@ -82,6 +83,10 @@ export const SmeltGuard = async () => ({
 `;
 }
 
+// Same derivation as claude-code's: the recipe's run command, split into opencode's
+// spawn shape (a single `command` array, `type: "local"`).
+const MCP_ARGS = SETUP_RECIPE.mcp.run.split(' ');
+
 export const opencode: HarnessProfile = {
   id: 'opencode',
   name: 'opencode',
@@ -99,6 +104,12 @@ export const opencode: HarnessProfile = {
       file: '.opencode/plugin/smelt-guard.js',
       content: opencodePluginSource,
       guardOnly: true,
+    },
+    {
+      kind: 'mcp-registration',
+      file: 'opencode.json',
+      path: ['mcp', 'smelt'],
+      entry: () => ({ type: 'local', command: [...MCP_ARGS] }),
     },
   ],
 };

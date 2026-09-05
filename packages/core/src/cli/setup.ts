@@ -94,7 +94,11 @@ export interface SetupReceipt {
   readonly cwd: string;
   readonly config: { readonly action: 'written' | 'updated' | 'current' };
   readonly files: readonly SetupFileAction[];
-  readonly mcp: { readonly status: 'manual' | 'skipped'; readonly command?: string };
+  readonly mcp: {
+    readonly status: 'applied' | 'manual' | 'skipped';
+    /** The recipe's registration command — what was written, or what is left to you. */
+    readonly command?: string;
+  };
   readonly checks: readonly SetupCheck[];
 }
 
@@ -454,11 +458,17 @@ async function finish(
     notes.push(...plan.notes);
   }
 
-  // ── mcp: manual today (KOT-251 carries it into the profiles), so setup hands
-  //    over the exact command instead of pretending it ran something ──
-  const mcp: SetupReceipt['mcp'] = choices.registerMcp
-    ? { status: 'manual', command: SETUP_RECIPE.mcp.register }
-    : { status: 'skipped' };
+  // ── mcp: applied where a profile carries the registration, handed over as the
+  //    exact command where none does (no harness named, or a TOML harness) — never
+  //    pretending it ran something it did not ──
+  const mcpApplied = choices.harnesses.some((profile) =>
+    profile.install.some((step) => step.kind === 'mcp-registration'),
+  );
+  const mcp: SetupReceipt['mcp'] = !choices.registerMcp
+    ? { status: 'skipped' }
+    : mcpApplied
+      ? { status: 'applied', command: SETUP_RECIPE.mcp.register }
+      : { status: 'manual', command: SETUP_RECIPE.mcp.register };
 
   // ── verify: the checks that make "set up" a claim with evidence ──
   const checks: SetupCheck[] = [];
@@ -486,9 +496,15 @@ async function finish(
     say(`  ${file.name}: ${file.action}${file.detail === undefined ? '' : ` — ${file.detail}`}\n`);
   }
   for (const note of notes) say(`note: ${note}\n`);
+  if (mcp.status === 'applied') {
+    say(
+      `MCP registration: written to the harness configs beside any servers you already ` +
+        `had — \`smelt hooks remove\` takes it back out.\n`,
+    );
+  }
   if (mcp.status === 'manual') {
     say(
-      `MCP registration stays in your hands (no harness profile carries it yet):\n` +
+      `MCP registration stays in your hands (no selected harness carries it):\n` +
         `  ${mcp.command}\n` +
         `Codex and Grok spell it in TOML — packages/mcp/README.md has both.\n`,
     );
