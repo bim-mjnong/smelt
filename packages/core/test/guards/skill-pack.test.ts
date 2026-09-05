@@ -57,17 +57,15 @@ function generated(): string {
 }
 
 describe('the SkillPack is the generator\u2019s output and states only package facts', () => {
-  const committed = (): string => readFileSync(SKILL, 'utf8');
-
   it('regenerating leaves the committed skill byte-identical', () => {
     expect(
-      committed(),
+      committedSkill(),
       'the committed SKILL.md is not the generator\u2019s output — run `pnpm generate:skill` and commit the result, never edit the skill by hand',
     ).toBe(generated());
   });
 
   it('teaches every command the recipe carries, none beside them', () => {
-    const text = committed();
+    const text = committedSkill();
     for (const step of SETUP_STEPS) {
       expect(
         text.includes(step.command),
