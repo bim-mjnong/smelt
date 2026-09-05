@@ -123,6 +123,14 @@ export {
   runInit,
 } from './cli/init.ts';
 export type { InitIo } from './cli/init.ts';
+export { runSetup } from './cli/setup.ts';
+export type {
+  SetupCheck,
+  SetupFileAction,
+  SetupIo,
+  SetupOptions,
+  SetupReceipt,
+} from './cli/setup.ts';
 export { retrieveStats } from './stats.ts';
 export type { RawRetrieveCounters } from './stats.ts';
 

@@ -144,10 +144,11 @@ try {
     stdin: readStdin,
     version: packageVersion(),
     cwd: process.cwd(),
-    // `smelt init` reads answers line by line, so it gets the stream, not readStdin's
-    // one-shot slurp of fd 0. A *getter*, because touching `process.stdin` at all
-    // flips fd 0 into non-blocking mode and breaks readStdin's readFileSync(0) for
-    // every other mode — only the `init` branch of runCli ever reads this property.
+    // The wizard verbs (`init`, `hooks`, `agents split`, `setup`) read answers line by
+    // line, so they get the stream, not readStdin's one-shot slurp of fd 0. A
+    // *getter*, because touching `process.stdin` at all flips fd 0 into non-blocking
+    // mode and breaks readStdin's readFileSync(0) for every other mode — only a
+    // wizard branch of runCli ever reads this property.
     get initInput() {
       return process.stdin;
     },

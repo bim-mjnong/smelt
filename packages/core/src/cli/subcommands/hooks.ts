@@ -84,10 +84,18 @@ export const hooksCommand: Subcommand<HooksInvocation, HooksInvocation> = {
           `${positionals.slice(2).join(', ')}.`,
       );
     }
+    // `--harness` is repeatable for setup; this verb wires one action per run, and a
+    // second id would be a second install the user believed had happened.
+    if (values.harness !== undefined && values.harness.length > 1) {
+      throw new CliUsageError(
+        `${CLI_NAME}: hooks takes one --harness per run — repeat the command for ` +
+          `each harness.`,
+      );
+    }
     return {
       mode: 'hooks',
       action,
-      ...(values.harness === undefined ? {} : { harness: values.harness }),
+      ...(values.harness === undefined ? {} : { harness: values.harness[0] }),
     };
   },
 

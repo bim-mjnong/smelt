@@ -15,6 +15,8 @@ import { retrieveCommand } from './retrieve.ts';
 import type { RetrieveInvocation } from './retrieve.ts';
 import { smeltCommand } from './smelt.ts';
 import type { SmeltInvocation } from './smelt.ts';
+import { setupCommand } from './setup.ts';
+import type { SetupInvocation } from './setup.ts';
 import { statsCommand } from './stats.ts';
 import type { StatsInvocation } from './stats.ts';
 import { DEFAULT_VERB } from './subcommand.ts';
@@ -41,6 +43,7 @@ export const SUBCOMMANDS: Readonly<Record<Verb, AnySubcommand>> = {
   stats: statsCommand,
   hooks: hooksCommand,
   agents: agentsCommand,
+  setup: setupCommand,
 };
 
 /** Everything `parseSmeltArgs` can return. Narrow on `mode`. */
@@ -51,7 +54,8 @@ export type CliInvocation =
   | RetrieveInvocation
   | StatsInvocation
   | HooksInvocation
-  | AgentsInvocation;
+  | AgentsInvocation
+  | SetupInvocation;
 
 /**
  * One registry entry, with its verb's own invocation and resolved types erased.
@@ -102,6 +106,7 @@ const VERB_BY_MODE = {
   stats: 'stats',
   hooks: 'hooks',
   agents: 'agents',
+  setup: 'setup',
 } as const satisfies Record<Exclude<CliInvocation['mode'], 'help' | 'version'>, Verb>;
 
 /** The command that produced an invocation, for dispatch. */

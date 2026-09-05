@@ -867,8 +867,11 @@ async function stepThreshold(
  * command each entry runs**, not by the key it sits under. Reading `SessionStart` as
  * one boolean would make a re-run with the map on and the lint off write both back —
  * or neither — which is a toggle the user believed they had set.
+ *
+ * Exported for `smelt setup`, which applies the preset's *current* state the same way
+ * — read off what is installed — rather than keeping a second copy of the defaults.
  */
-function presetToggles(
+export function presetToggles(
   cwd: string,
 ): Pick<HooksChoices, 'guard' | 'statsOnStop' | 'mapOnStart' | 'lintOnStart'> {
   const defaults = { guard: true, statsOnStop: true, mapOnStart: false, lintOnStart: false };
