@@ -19,6 +19,12 @@ export const SETUP_RECIPE = {
     globalInstall: 'npm install -g @smeltjs/core',
     /** The CLI, without installing it. */
     oneShot: 'npx @smeltjs/core',
+    /** The CLI over Homebrew, from smelt's own tap (KOT-248 seeds it). */
+    brewInstall: 'brew install smeltjs/tap/smelt',
+    /** The Homebrew upgrade — the first half of the update loop doctor completes. */
+    brewUpgrade: 'brew upgrade smelt',
+    /** The SkillPack, installed by an agent's owner (ADR-0002). */
+    skillInstall: 'npx skills add smeltjs/smelt',
   },
   /**
    * The budget the setup path writes when its caller names none — the number every

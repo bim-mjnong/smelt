@@ -68,6 +68,9 @@ interface Facts {
     readonly installLibrary: string;
     readonly installGlobal: string;
     readonly oneShot: string;
+    readonly brewInstall: string;
+    readonly brewUpgrade: string;
+    readonly skillInstall: string;
     readonly recommendedBudgetBytes: number;
     readonly storeDir: string;
     readonly mcpRun: string;
@@ -208,6 +211,9 @@ describe('the site states the packages, and nothing it made up', () => {
     expect(facts.recipe.installGlobal).toBe(SETUP_RECIPE.install.globalInstall);
     expect(facts.recipe.installLibrary).toBe(SETUP_RECIPE.install.library);
     expect(facts.recipe.oneShot).toBe(SETUP_RECIPE.install.oneShot);
+    expect(facts.recipe.brewInstall).toBe(SETUP_RECIPE.install.brewInstall);
+    expect(facts.recipe.brewUpgrade).toBe(SETUP_RECIPE.install.brewUpgrade);
+    expect(facts.recipe.skillInstall).toBe(SETUP_RECIPE.install.skillInstall);
     expect(facts.recipe.mcpRun).toBe(SETUP_RECIPE.mcp.run);
     expect(facts.recipe.mcpRegister).toBe(SETUP_RECIPE.mcp.register);
     expect(facts.recipe.recommendedBudgetBytes).toBe(SETUP_RECIPE.recommendedBudgetBytes);

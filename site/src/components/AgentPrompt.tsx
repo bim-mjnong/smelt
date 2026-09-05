@@ -15,16 +15,24 @@ import { Reveal } from '@/components/ui/Reveal';
  * hooks installer lists files before a final confirm, and the verification is a real
  * smelt → retrieve → stats round trip.
  */
-const { installGlobal, oneShot, storeDir, recommendedBudgetBytes, mcpRegister } = facts.recipe;
+const {
+  installGlobal,
+  oneShot,
+  storeDir,
+  recommendedBudgetBytes,
+  mcpRegister,
+  skillInstall,
+} = facts.recipe;
 
 const budget = String(recommendedBudgetBytes);
+const setupLine = `${oneShot} setup --yes --harness HARNESS --json`;
 
 const PROMPTS = {
   'claude-code': `Set up smelt (https://github.com/smeltjs/smelt) in this project so oversized files and tool outputs stop flooding your context window:
 
 1. Install the CLI: \`${installGlobal}\` (or use \`${oneShot}\` everywhere a step says \`smelt\`).
-2. Run \`smelt init\` and choose a directory store (e.g. \`${storeDir}\`) — retrieval across turns and processes needs one. The wizard shows every file before a final confirm and never overwrites without a per-file yes.
-3. Run \`smelt hooks install --harness claude-code\`. Review what it offers: a PreToolUse size-guard that refuses raw reads above the threshold and names the exact \`smelt\` replacement command, \`smelt stats\` on Stop, an opt-in repo map on SessionStart, and the instruction snippet in CLAUDE.md.
+2. Run \`${setupLine.replace('HARNESS', 'claude-code')}\` — one command: it writes smelt.config.json, wires the guard hooks preset, registers the MCP server, and proves the loop with a real smelt → retrieve round trip. The JSON receipt names every file written and every check, and the exit code says whether setup is complete.
+3. Re-run \`smelt doctor\` — it reads installed state back and exits 0 when everything agrees with the binary.
 4. Verify the round trip on a real file:
    - \`smelt <a large file in this repo> --budget ${budget} --focus <a symbol the task cares about>\`
    - take a hash from a \`retrieve("…")\` marker in the output and run \`smelt retrieve <that hash>\` — the exact original bytes come back
@@ -34,8 +42,8 @@ From now on: read big files through \`smelt <file> --budget ${budget} --focus <w
   codex: `Set up smelt (https://github.com/smeltjs/smelt) in this project so oversized files and tool outputs stop flooding your context window:
 
 1. Install the CLI: \`${installGlobal}\` (or use \`${oneShot}\` everywhere a step says \`smelt\`).
-2. Run \`smelt init\` and choose a directory store (e.g. \`${storeDir}\`) — retrieval across turns and processes needs one. The wizard shows every file before a final confirm and never overwrites without a per-file yes.
-3. Run \`smelt hooks install --harness codex\`. Review what it offers: the size-guard that refuses raw reads above the threshold and names the exact \`smelt\` replacement command, stats at session end, and the instruction snippet in AGENTS.md.
+2. Run \`${setupLine.replace('HARNESS', 'codex')}\` — one command: it writes smelt.config.json, wires the guard hooks preset, and proves the loop with a real smelt → retrieve round trip. The JSON receipt names every file written and every check, and the exit code says whether setup is complete.
+3. Re-run \`smelt doctor\` — it reads installed state back and exits 0 when everything agrees with the binary.
 4. Verify the round trip on a real file:
    - \`smelt <a large file in this repo> --budget ${budget} --focus <a symbol the task cares about>\`
    - take a hash from a \`retrieve("…")\` marker in the output and run \`smelt retrieve <that hash>\` — the exact original bytes come back
@@ -46,10 +54,11 @@ From now on: read big files through \`smelt <file> --budget ${budget} --focus <w
 
 1. Install the CLI: \`${installGlobal}\` — the store and config live with the project either way.
 2. Run \`smelt init\` and choose a directory store (e.g. \`${storeDir}\`). The MCP server discovers the same store through \`smelt.config.json\`, so \`smelt retrieve <hash>\` from a shell and the model's \`smelt_retrieve\` hit one store and move one set of counters.
-3. Add the server — Claude Code shown; Codex and Grok TOML snippets are in packages/mcp/README.md:
+3. Add the server — Claude Code shown; setup writes this file for you when run with --harness claude-code, and Codex and Grok TOML snippets are in packages/mcp/README.md:
    \`${mcpRegister}\`
-4. Use the four tools: \`smelt_file\` to shrink a file under a byte budget with a focus, \`repo_map\` for orientation in an unfamiliar tree, \`smelt_retrieve\` to get elided bytes back, \`smelt_stats\` to watch the expansion rate.
-5. Verify: \`smelt_file\` on a large file, then \`smelt_retrieve\` with a hash from a marker — the exact original bytes come back, and \`smelt_stats\` counts the round trip.`,
+4. Teach the agent the CLI without touching any config files: \`${skillInstall}\`.
+5. Use the four tools: \`smelt_file\` to shrink a file under a byte budget with a focus, \`repo_map\` for orientation in an unfamiliar tree, \`smelt_retrieve\` to get elided bytes back, \`smelt_stats\` to watch the expansion rate.
+6. Verify: \`smelt_file\` on a large file, then \`smelt_retrieve\` with a hash from a marker — the exact original bytes come back, and \`smelt_stats\` counts the round trip.`,
 };
 
 type PromptId = keyof typeof PROMPTS;
@@ -127,13 +136,14 @@ export function AgentPrompt() {
           }
           lead={
             <>
-              Copy the prompt for your harness and hand it to the agent. It installs the CLI, runs
-              the{' '}
+              Copy the prompt for your harness and hand it to the agent. It installs the CLI and
+              runs{' '}
               <code className="rounded-[2px] bg-lift px-1 font-mono text-[13px] text-ash">
-                smelt init
+                smelt setup
               </code>{' '}
-              wizard, wires the hooks preset, and proves the loop with a real retrieve round trip —
-              nothing is written without a confirm.
+              — config, the guard hooks preset, the MCP registration — and proves the loop with a
+              real retrieve round trip, every file named in the JSON receipt. Existing files are
+              never overwritten: setup skips them and says so.
             </>
           }
         />

@@ -18,6 +18,7 @@ const INSTALLS = [
     label: 'npx',
     cmd: `${facts.recipe.oneShot} src/server.ts --budget ${facts.recipe.recommendedBudgetBytes} --focus handleRequest`,
   },
+  { id: 'brew', label: 'brew', cmd: facts.recipe.brewInstall },
 ];
 
 function InstallLine({ cmd }: { cmd: string }) {

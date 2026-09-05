@@ -104,6 +104,9 @@ describe('the recipe is the only place the facts are spelled', () => {
     'npx @smeltjs/core',
     'npx @smeltjs/mcp',
     'claude mcp add smelt -- npx @smeltjs/mcp',
+    'npx skills add smeltjs/smelt',
+    'brew install smeltjs/tap/smelt',
+    'brew upgrade smelt',
   ] as const;
 
   it('each fact appears exactly once in source — inside the recipe module', () => {
@@ -129,6 +132,16 @@ describe('the docs stay pinned to the recipe', () => {
       SETUP_RECIPE.mcp.register,
     );
     expect(readme).toContain(SETUP_RECIPE.store.defaultDir);
+    // The distribution and update narrative, pinned to the recipe the same way:
+    const setupLine = `${SETUP_RECIPE.install.oneShot} setup --yes --harness claude-code --json`;
+    expect(lines, 'the README quickstart no longer teaches the agent setup line').toContain(
+      setupLine,
+    );
+    expect(lines).toContain(SETUP_RECIPE.install.skillInstall);
+    expect(lines).toContain(SETUP_RECIPE.install.brewInstall);
+    for (const command of ['smelt setup', 'smelt doctor']) {
+      expect(lines, `the README update loop no longer names \`${command}\``).toContain(command);
+    }
     expect(
       readme.includes('.smelt-store'),
       'the README spells the store default `.smelt-store` — the typo the recipe exists ' +
