@@ -3,6 +3,8 @@ import { CLI_NAME } from '../shell.ts';
 
 import { agentsCommand } from './agents.ts';
 import type { AgentsInvocation } from './agents.ts';
+import { doctorCommand } from './doctor.ts';
+import type { DoctorInvocation } from './doctor.ts';
 import { flagList, VERB_FLAGS } from './flags.ts';
 import type { FlagName, FlagValues, VerbFlag } from './flags.ts';
 import { hooksCommand } from './hooks.ts';
@@ -44,6 +46,7 @@ export const SUBCOMMANDS: Readonly<Record<Verb, AnySubcommand>> = {
   hooks: hooksCommand,
   agents: agentsCommand,
   setup: setupCommand,
+  doctor: doctorCommand,
 };
 
 /** Everything `parseSmeltArgs` can return. Narrow on `mode`. */
@@ -55,7 +58,8 @@ export type CliInvocation =
   | StatsInvocation
   | HooksInvocation
   | AgentsInvocation
-  | SetupInvocation;
+  | SetupInvocation
+  | DoctorInvocation;
 
 /**
  * One registry entry, with its verb's own invocation and resolved types erased.
@@ -107,6 +111,7 @@ const VERB_BY_MODE = {
   hooks: 'hooks',
   agents: 'agents',
   setup: 'setup',
+  doctor: 'doctor',
 } as const satisfies Record<Exclude<CliInvocation['mode'], 'help' | 'version'>, Verb>;
 
 /** The command that produced an invocation, for dispatch. */

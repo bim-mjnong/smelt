@@ -117,6 +117,7 @@ export const hooksCommand: Subcommand<HooksInvocation, HooksInvocation> = {
       input: io.initInput,
       output: io.stdout,
       cwd: io.cwd ?? process.cwd(),
+      version: io.version,
     });
   },
 };

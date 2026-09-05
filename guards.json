@@ -1,6 +1,6 @@
 {
-  "guards": 30,
-  "mutations": 140,
+  "guards": 31,
+  "mutations": 143,
   "byGuard": [
     {
       "guard": "packages/core/test/guards/agents-lint.test.ts",
@@ -21,6 +21,10 @@
     {
       "guard": "packages/core/test/guards/config-writer.test.ts",
       "count": 2
+    },
+    {
+      "guard": "packages/core/test/guards/doctor.test.ts",
+      "count": 3
     },
     {
       "guard": "packages/core/test/guards/expansion-counter.test.ts",

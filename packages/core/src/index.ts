@@ -131,6 +131,15 @@ export type {
   SetupOptions,
   SetupReceipt,
 } from './cli/setup.ts';
+export { runDoctor } from './cli/doctor.ts';
+export type {
+  DoctorBlock,
+  DoctorConfig,
+  DoctorIo,
+  DoctorMcp,
+  DoctorOptions,
+  DoctorReceipt,
+} from './cli/doctor.ts';
 export { retrieveStats } from './stats.ts';
 export type { RawRetrieveCounters } from './stats.ts';
 

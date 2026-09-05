@@ -9,6 +9,7 @@ USAGE
   smelt hooks install [--harness <id>]
   smelt hooks remove [--harness <id>]
   smelt agents lint [dir] [--strict] [--json]
+  smelt doctor [--json]
   smelt --reconstruct <result.json>
   smelt --reconstruct < result.json
   smelt init
@@ -118,6 +119,17 @@ SETUP
   files are never overwritten — they are skipped with a note; hooks install edits
   them, and it asks per file. Re-running on a current machine writes nothing and
   exits 0. --json prints a receipt: every file, every check, the exit's meaning.
+
+DOCTOR
+  smelt doctor reads installed state and compares it with the binary running:
+  which release wrote the instruction blocks, whether the config parses and its
+  store directory exists, whether the MCP registration is intact, and which pieces
+  are orphans. Exit 0 when current (or nothing installed), the refused exit when
+  something is behind — and the report names the exact repair command, which is
+  always smelt setup. Doctor never writes. The update loop is:
+
+    upgrade → smelt doctor → smelt setup
+
 
 OPTIONS
   --budget <bytes>     Required, unless smelt.config.json sets defaultBudgetBytes.

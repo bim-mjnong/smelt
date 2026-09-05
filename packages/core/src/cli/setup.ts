@@ -62,6 +62,8 @@ export interface SetupIo {
   readonly cwd: string;
   /** The home directory, for harness detection. Defaults to the real one. */
   readonly home?: string;
+  /** The release running setup — stamped into the instruction block for `smelt doctor`. */
+  readonly version?: string;
 }
 
 /** Everything the verb resolved before the flow ran. Pure data, both paths. */
@@ -352,7 +354,9 @@ async function confirm(
   io: SetupIo,
 ): Promise<ConfirmVerdict> {
   const plan =
-    choices.harnesses.length === 0 ? undefined : planInstall(io.cwd, hooksChoices(choices, io.cwd));
+    choices.harnesses.length === 0
+      ? undefined
+      : planInstall(io.cwd, hooksChoices(choices, io.cwd, io.version));
   say(`\nAbout to apply, into ${io.cwd}:\n`);
   say(
     `  ${CONFIG_FILE_NAME.padEnd(32)} (budget ` +
@@ -432,7 +436,9 @@ async function finish(
 
   // ── hooks preset: the installer's own plan, over the settled config ──
   const plan =
-    choices.harnesses.length === 0 ? undefined : planInstall(io.cwd, hooksChoices(choices, io.cwd));
+    choices.harnesses.length === 0
+      ? undefined
+      : planInstall(io.cwd, hooksChoices(choices, io.cwd, io.version));
   if (plan !== undefined) {
     for (const file of plan.files) {
       if (basename(file.path) === CONFIG_FILE_NAME) continue; // settled above
@@ -573,9 +579,14 @@ async function probeRoundTrip(storeDir: string, budget: number): Promise<SetupCh
 
 // ── small shared pieces ─────────────────────────────────────────────────────────────
 
-function hooksChoices(choices: SetupChoices, cwd: string): HooksChoices {
+function hooksChoices(
+  choices: SetupChoices,
+  cwd: string,
+  version: string | undefined,
+): HooksChoices {
   return {
     harnesses: choices.harnesses,
+    ...(version === undefined ? {} : { writtenBy: version }),
     // Read off what is actually installed, falling back to the installer's defaults
     // when nothing of smelt's is on disk — the same "edit, never reset" reading the
     // hooks installer itself uses. No second copy of the defaults lives here.

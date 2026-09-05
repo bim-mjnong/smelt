@@ -116,6 +116,7 @@ export const setupCommand: Subcommand<SetupInvocation, SetupInvocation> = {
       ...(io.initInput === undefined ? {} : { input: io.initInput }),
       output: io.stdout,
       cwd: io.cwd ?? process.cwd(),
+      version: io.version,
     });
   },
 };

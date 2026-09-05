@@ -98,6 +98,11 @@ export interface HooksIo {
   readonly cwd: string;
   /** Home directory for detection only. Tests point it at a temp dir; nothing writes here. */
   readonly home?: string;
+  /**
+   * The release running the install — stamped into the instruction block so
+   * `smelt doctor` can tell what wrote it. Absent (legacy callers) writes no stamp.
+   */
+  readonly version?: string;
 }
 
 export { instructionSnippet, SNIPPET_END_MD, SNIPPET_START_MD };
@@ -320,6 +325,8 @@ interface PlannedRemoval {
 
 export interface HooksChoices {
   harnesses: HarnessProfile[];
+  /** The release writing these bytes — stamped into the snippet for `smelt doctor`. */
+  writtenBy?: string;
   guard: boolean;
   statsOnStop: boolean;
   mapOnStart: boolean;
@@ -382,6 +389,7 @@ export function planInstall(cwd: string, choices: HooksChoices): InstallPlan {
 
   const ctx: HarnessInstallContext = {
     cwd,
+    ...(choices.writtenBy === undefined ? {} : { writtenBy: choices.writtenBy }),
     guard: choices.guard,
     statsOnStop: choices.statsOnStop,
     mapOnStart: choices.mapOnStart,
@@ -389,7 +397,7 @@ export function planInstall(cwd: string, choices: HooksChoices): InstallPlan {
     thresholdBytes: choices.thresholdBytes,
     budgetBytes,
   };
-  const snippet = instructionSnippet(choices.thresholdBytes, budgetBytes);
+  const snippet = instructionSnippet(choices.thresholdBytes, budgetBytes, choices.writtenBy);
 
   const planJsonHooks = (
     name: string,
@@ -699,6 +707,7 @@ async function installFlow(
 
   const choices: HooksChoices = {
     harnesses: harnessFlag !== undefined ? [resolveHarnessFlag(harnessFlag)] : [...detected],
+    ...(io.version === undefined ? {} : { writtenBy: io.version }),
     ...presetToggles(io.cwd),
     enforcement: 'deny',
     thresholdBytes: DEFAULT_THRESHOLD_BYTES,

@@ -45,6 +45,7 @@ const SHIPPED: Record<Verb, readonly string[]> = {
   hooks: ['hooks', 'install'],
   agents: ['agents', 'lint'],
   setup: ['setup'],
+  doctor: ['doctor'],
 };
 const SHIPPED_VERBS = Object.keys(SHIPPED).toSorted();
 
@@ -74,6 +75,7 @@ const OWNED: Record<Verb, readonly VerbFlag[]> = {
   hooks: ['harness'],
   agents: ['strict', 'json'],
   setup: ['harness', 'yes', 'no-mcp', 'json'],
+  doctor: ['json'],
 };
 
 /** How a verb is named in its own refusal — the default verb has no word to use. */

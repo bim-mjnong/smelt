@@ -136,6 +136,8 @@ export function harnessLabel(profile: HarnessProfile): string {
 export interface HarnessInstallContext {
   /** Project directory: every path a renderer emits is portable relative to it. */
   readonly cwd: string;
+  /** The release writing these bytes — stamped into shared blocks for `smelt doctor`. */
+  readonly writtenBy?: string;
   readonly guard: boolean;
   readonly statsOnStop: boolean;
   readonly mapOnStart: boolean;
