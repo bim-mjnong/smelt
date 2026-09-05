@@ -75,8 +75,9 @@ describe('smelt doctor reads installed state back', () => {
       const receipt = receiptOf(stdout);
       expect(receipt.current).toBe(true);
       expect(receipt.installed).toBe(true);
-      expect(receipt.blocks[0]?.installedBy).toBe('0.5.0');
-      expect(receipt.blocks[0]?.status).toBe('current');
+      const block = receipt.blocks.find((one) => one.file === 'CLAUDE.md');
+      expect(block?.installedBy).toBe('0.5.0');
+      expect(block?.status).toBe('current');
       expect(readFileSync(join(cwd, 'CLAUDE.md'), 'utf8')).toBe(before);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -91,8 +92,9 @@ describe('smelt doctor reads installed state back', () => {
       expect(code).toBe(EXIT.refused);
       const receipt = receiptOf(stdout);
       expect(receipt.current).toBe(false);
-      expect(receipt.blocks[0]?.installedBy).toBe('0.5.0');
-      expect(receipt.blocks[0]?.status).toBe('behind');
+      const block = receipt.blocks.find((one) => one.file === 'CLAUDE.md');
+      expect(block?.installedBy).toBe('0.5.0');
+      expect(block?.status).toBe('behind');
       expect(receipt.repair).toContain('smelt setup --harness claude-code');
       expect(stdout).toContain('smelt setup --harness claude-code');
     } finally {
@@ -139,6 +141,9 @@ describe('smelt doctor reads installed state back', () => {
       const receipt = receiptOf(stdout);
       expect(receipt.orphans.join('\n')).toContain('MCP registration');
       expect(receipt.orphans.join('\n')).toContain('no hooks wiring');
+      // Every orphan names its repair — a report that ends without one has not
+      // finished its sentence.
+      expect(receipt.repair).toContain('smelt setup');
 
       // And the store-directory orphan, off a real config:
       writeFileSync(
@@ -227,8 +232,8 @@ export const MUTATIONS: GuardMutation[] = [
     kind: 'src',
     id: 'doctor-version-comparison-flipped',
     file: 'cli/doctor.ts',
-    find: ': installedBy !== io.version',
-    replace: ': installedBy === io.version',
+    find: "? 'current' : 'behind';",
+    replace: "? 'behind' : 'current';",
     why: 'current and behind trading places — the verdict the exit code carries would tell an upgraded machine it is current and a current machine it needs repair',
   },
   {

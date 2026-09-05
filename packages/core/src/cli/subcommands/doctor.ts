@@ -2,6 +2,7 @@ import process from 'node:process';
 
 import { CliUsageError } from '../../errors.ts';
 import { runDoctor } from '../doctor.ts';
+import { colorize } from '../lava.ts';
 import { CLI_NAME } from '../shell.ts';
 import type { CliIo } from '../shell.ts';
 
@@ -35,8 +36,9 @@ export const doctorCommand: Subcommand<DoctorInvocation, DoctorInvocation> = {
         `  which release wrote the instruction blocks, whether the config parses and its\n` +
         `  store directory exists, whether the MCP registration is intact, and which pieces\n` +
         `  are orphans. Exit 0 when current (or nothing installed), the refused exit when\n` +
-        `  something is behind — and the report names the exact repair command, which is\n` +
-        `  always ${CLI_NAME} setup. Doctor never writes. The update loop is:\n\n` +
+        `  something is behind — and the report names the exact repair command:\n` +
+        `  ${CLI_NAME} setup, per harness where a block is behind. Doctor never writes.\n` +
+        `  The update loop is:\n\n` +
         `    upgrade → ${CLI_NAME} doctor → ${CLI_NAME} setup\n`,
     },
   },
@@ -60,7 +62,7 @@ export const doctorCommand: Subcommand<DoctorInvocation, DoctorInvocation> = {
     return runDoctor(
       { json: resolved.json },
       {
-        output: io.stdout,
+        output: (text) => io.stdout(colorize(text, io.color === true && !resolved.json)),
         cwd: io.cwd ?? process.cwd(),
         version: io.version,
       },

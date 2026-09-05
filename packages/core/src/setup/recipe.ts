@@ -50,6 +50,13 @@ export const SETUP_RECIPE = {
 
 export type SetupRecipe = typeof SETUP_RECIPE;
 
+/**
+ * The recipe's run command as a spawn array — derived once, beside the fact it comes
+ * from, because two harness profiles need the array and a second `.split(' ')` would
+ * be the second spelling this module exists to end.
+ */
+export const MCP_RUN_ARGS: readonly string[] = SETUP_RECIPE.mcp.run.split(' ');
+
 /** One step of the recipe, in the order a new machine walks it. */
 export interface SetupStep {
   readonly id: 'install' | 'init' | 'hooks' | 'mcp';
@@ -58,8 +65,9 @@ export interface SetupStep {
 }
 
 /**
- * The recipe's steps, in order. Every command is a named fact above — a step that
- * retyped its command here would be the second copy this module exists to end.
+ * The recipe's steps, in order. The install and MCP commands are named facts above;
+ * the init and hooks steps name the verbs that walk them interactively — the wizard
+ * each is, not a fact the recipe owns.
  */
 export const SETUP_STEPS: readonly SetupStep[] = [
   { id: 'install', title: 'install the CLI', command: SETUP_RECIPE.install.globalInstall },

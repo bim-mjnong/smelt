@@ -1,10 +1,20 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
 import { CliUsageError } from '../errors.ts';
 import { DEFAULT_THRESHOLD_BYTES } from '../hooks/guard-core.ts';
-import { detectedHarnesses, planInstall, presetToggles } from './hooks.ts';
+import { detectedHarnesses, jsonHooksContainOurs, planInstall, presetToggles } from './hooks.ts';
+import { JSON_HOOK_FILES } from '../harness/registry.ts';
+import { OURS_TOKEN } from '../harness/snippet.ts';
 import type { HooksChoices } from './hooks.ts';
 import {
   CONFIG_FILE_NAME,
@@ -153,11 +163,13 @@ export async function runSetup(options: SetupOptions, io: SetupIo): Promise<numb
           `this is a bug in the flow, not an answer you owe.`,
       );
     }
-    io.output(prompt);
+    io.output(colorize(prompt, io.color === true));
     const next = await lines.next();
     if (next === undefined) {
       throw new CliUsageError(
-        `${CLI_NAME} setup: input ended before the wizard finished. Nothing was written.`,
+        `${CLI_NAME} setup: input ended before the wizard finished. Nothing was ` +
+          `written. Non-interactive:\n  ${CLI_NAME} setup --yes [--harness <id>]... ` +
+          `[--no-mcp] [--json]`,
       );
     }
     return next.trim();
@@ -252,7 +264,7 @@ async function wizardPath(
     say(`A whole number of bytes greater than zero, e.g. ${String(budgetDefault)}.\n`);
   }
 
-  stepStore(say, ask, choices);
+  await stepStore(say, ask, choices);
 
   for (;;) {
     await stepMcp(say, ask, choices);
@@ -438,14 +450,16 @@ async function finish(
     files.push({ name: CONFIG_FILE_NAME, action: 'unchanged' });
   }
 
-  // ── hooks preset: the installer's own plan, over the settled config ──
+  // ── hooks preset: the installer's own plan, over the settled config. The plan's
+  //    config entry rides too — renderConfigWithHooks adds the hooks block the shims
+  //    read, so setup and hooks install leave the same file, and a re-run plans
+  //    `unchanged` for it. ──
   const plan =
     choices.harnesses.length === 0
       ? undefined
       : planInstall(io.cwd, hooksChoices(choices, io.cwd, io.version));
   if (plan !== undefined) {
     for (const file of plan.files) {
-      if (basename(file.path) === CONFIG_FILE_NAME) continue; // settled above
       if (file.unchanged) {
         files.push({ name: file.name, action: 'unchanged' });
         continue;
@@ -457,7 +471,22 @@ async function finish(
         files.push({ name: file.name, action: 'written' });
         continue;
       }
-      // The hard rule, inherited: an existing file that is not smelt's config is
+      if (fileIsOursToRepair(file)) {
+        // Repair, not consent: this file already carries smelt's own entries, and
+        // every byte the plan would change is inside them — a marker-block upsert,
+        // a strip-merge of our hook entries, a nested edit of our server entry.
+        // That is the doctor → setup loop actually closing: a block written by an
+        // older release is brought to this one.
+        writeFileSync(file.path, file.content);
+        if (file.mode !== undefined) chmodSync(file.path, file.mode);
+        files.push({
+          name: file.name,
+          action: basename(file.path) === CONFIG_FILE_NAME ? 'updated' : 'written',
+          detail: "repaired — only smelt's own entries in it changed",
+        });
+        continue;
+      }
+      // The hard rule, inherited: an existing file with nothing of smelt's in it is
       // never written — not by --yes, not by a wizard answer. Point at the editor.
       files.push({
         name: file.name,
@@ -498,7 +527,7 @@ async function finish(
       detail: 'memory store — per-process by choice; retrieval works inside one process',
     });
   } else {
-    checks.push(await probeRoundTrip(storeDir, budget));
+    checks.push(...(await probeStore(storeDir, budget)));
   }
 
   // ── report ──
@@ -550,38 +579,88 @@ async function finish(
   return ok ? EXIT.ok : EXIT.refused;
 }
 
-/** The flow's own probe: elide, then read the exact bytes back out of the store. */
-async function probeRoundTrip(storeDir: string, budget: number): Promise<SetupCheck> {
-  mkdirSync(storeDir, { recursive: true });
-  const store = new DirectoryElisionStore(storeDir);
-  const smelter = createSmelter({ store });
-  const result = await smelter.smelt(PROBE_SOURCE, {
-    path: 'setup-probe.ts',
-    focus: ['renderTicket'],
-    budgetBytes: Math.min(budget, PROBE_BUDGET_BYTES),
-  });
-  if (result.elisions.length === 0) {
-    return {
-      name: 'round trip',
+/**
+ * The flow's own probe, split where honesty demanded it: the **real** store directory
+ * is proven creatable and writable with a scratch file that is removed again — the
+ * user's counters stay untouched — and the elide → retrieve round trip runs against a
+ * **disposable** store beside it, deleted with the check. The first version of this
+ * probe ran the round trip in the production store: its blobs and its one retrieval
+ * are permanent (a store that can forget is not reversible), so a fresh machine's
+ * first `smelt stats` would have reported setup's probe as the user's work — noise in
+ * the exact honest signal the product leads with.
+ */
+async function probeStore(storeDir: string, budget: number): Promise<SetupCheck[]> {
+  const checks: SetupCheck[] = [];
+  try {
+    mkdirSync(storeDir, { recursive: true });
+    const scratch = join(storeDir, '.setup-probe-writable');
+    writeFileSync(scratch, 'writable');
+    rmSync(scratch, { force: true });
+    checks.push({
+      name: 'store writable',
+      ok: true,
+      detail: `${storeDir} accepts and removes a scratch file`,
+    });
+  } catch (error) {
+    checks.push({
+      name: 'store writable',
       ok: false,
-      detail: `the probe produced no elisions at a ${String(PROBE_BUDGET_BYTES)}-byte budget`,
-    };
+      detail: `${storeDir} is not writable: ${error instanceof Error ? error.message : String(error)}`,
+    });
+    return checks; // the round trip cannot prove more than this
   }
-  const first = result.elisions[0]!;
-  const original = PROBE_SOURCE.slice(first.range.start, first.range.end);
-  const back = store.retrieve(first.hash);
-  const ok = back === original;
-  return {
-    name: 'round trip',
-    ok,
-    detail: ok
-      ? `${String(result.elisions.length)} elisions under the budget; the first cut's ` +
-        `${String(first.range.end - first.range.start)} bytes retrieved byte-identical`
-      : 'the store returned different bytes than were elided',
-  };
+
+  const disposable = mkdtempSync(join(tmpdir(), 'smelt-setup-probe-'));
+  try {
+    const store = new DirectoryElisionStore(disposable);
+    const smelter = createSmelter({ store });
+    const result = await smelter.smelt(PROBE_SOURCE, {
+      path: 'setup-probe.ts',
+      focus: ['renderTicket'],
+      budgetBytes: Math.min(budget, PROBE_BUDGET_BYTES),
+    });
+    if (result.elisions.length === 0) {
+      checks.push({
+        name: 'round trip',
+        ok: false,
+        detail: `the probe produced no elisions at a ${String(PROBE_BUDGET_BYTES)}-byte budget`,
+      });
+      return checks;
+    }
+    const first = result.elisions[0]!;
+    const original = PROBE_SOURCE.slice(first.range.start, first.range.end);
+    const back = store.retrieve(first.hash);
+    checks.push({
+      name: 'round trip',
+      ok: back === original,
+      detail:
+        back === original
+          ? `${String(result.elisions.length)} elisions under the budget; the first cut's ` +
+            `${String(first.range.end - first.range.start)} bytes retrieved byte-identical, in a throwaway store`
+          : 'the store returned different bytes than were elided',
+    });
+    return checks;
+  } finally {
+    rmSync(disposable, { recursive: true, force: true });
+  }
 }
 
 // ── small shared pieces ─────────────────────────────────────────────────────────────
+
+/**
+ * Whether an existing planned file is smelt's to repair. The config is smelt's own;
+ * every other file is ours exactly when it already carries our entries — the marker
+ * token in text, or our hook entries in a JSON hooks file (the guard command carries
+ * no token, hence the entry-level predicate). A file with nothing of ours in it is
+ * somebody else's, and consent — not --yes — is what opens it.
+ */
+function fileIsOursToRepair(file: { readonly name: string; readonly path: string }): boolean {
+  if (basename(file.path) === CONFIG_FILE_NAME) return true;
+  const text = readFileSync(file.path, 'utf8');
+  return JSON_HOOK_FILES.includes(file.name)
+    ? jsonHooksContainOurs(text)
+    : text.includes(OURS_TOKEN);
+}
 
 function hooksChoices(
   choices: SetupChoices,

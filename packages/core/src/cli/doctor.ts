@@ -2,9 +2,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { CONFIG_FILE_NAME, CONFIG_VERSION, findConfigFile, parseConfig } from './config.ts';
-import { GUARD_ONLY_FILES, JSON_HOOK_FILES } from '../harness/registry.ts';
+import { GUARD_ONLY_FILES } from '../harness/registry.ts';
 import { OURS_TOKEN, SNIPPET_START_MD, snippetStampVersion } from '../harness/snippet.ts';
-import { HARNESS_PROFILES } from '../harness/registry.ts';
+import { HARNESS_PROFILES, JSON_HOOK_FILES } from '../harness/registry.ts';
 import { CLI_NAME, EXIT } from './shell.ts';
 
 /**
@@ -102,13 +102,7 @@ export function runDoctor(options: DoctorOptions, io: DoctorIo): number {
     if (!ours) continue;
     const installedBy = snippetStampVersion(text);
     const stampable = text.includes(SNIPPET_START_MD); // whole-owned files carry no stamp line yet
-    const status = !stampable
-      ? 'unversioned'
-      : installedBy === undefined
-        ? 'behind'
-        : installedBy !== io.version
-          ? 'behind'
-          : 'current';
+    const status = !stampable ? 'unversioned' : installedBy === io.version ? 'current' : 'behind';
     blocks.push({
       file,
       harnesses,
@@ -194,6 +188,7 @@ export function runDoctor(options: DoctorOptions, io: DoctorIo): number {
       orphans.push(
         `${CONFIG_FILE_NAME} is malformed: ${error instanceof Error ? error.message : String(error)}`,
       );
+      repair.push(`${CLI_NAME} setup`);
     }
   }
 
@@ -203,6 +198,7 @@ export function runDoctor(options: DoctorOptions, io: DoctorIo): number {
     orphans.push(
       'an MCP registration is present but no hooks wiring is — the guard and the retrieval contract travel together',
     );
+    repair.push(`${CLI_NAME} setup`);
   }
   if (wired && !config.present) {
     orphans.push(

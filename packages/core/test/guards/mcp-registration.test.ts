@@ -203,8 +203,8 @@ export const MUTATIONS: GuardMutation[] = [
     kind: 'src',
     id: 'mcp-entry-retyped-not-derived',
     file: 'harness/claude-code.ts',
-    find: "const MCP_ARGS = SETUP_RECIPE.mcp.run.split(' ');",
-    replace: "const MCP_ARGS = ['npx', 'example'];",
+    find: 'entry: () => ({ command: MCP_RUN_ARGS[0], args: MCP_RUN_ARGS.slice(1) }),',
+    replace: "entry: () => ({ command: 'npx', args: ['example'] }),",
     why: 'the registration spelled beside the recipe instead of from it — the second owner the setup-recipe guard exists to refuse, reaching into the file a model is told to retrieve from',
   },
 ];

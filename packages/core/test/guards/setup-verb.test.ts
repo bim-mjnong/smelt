@@ -68,6 +68,21 @@ async function runYes(cwd: string, argv: readonly string[] = []): Promise<SetupR
   return JSON.parse(stdout) as SetupReceipt;
 }
 
+/** `smelt setup --yes --json --harness claude-code` in `cwd`, stamped as `version`. */
+async function setupWith(cwd: string, version: string): Promise<void> {
+  let stdout = '';
+  const code = await runCli(['setup', '--yes', '--json', '--harness', 'claude-code'], {
+    stdout: (text) => {
+      stdout += text;
+    },
+    stderr: () => {},
+    stdin: () => '',
+    version,
+    cwd,
+  });
+  expect(code, `setup failed:\n${stdout}`).toBe(EXIT.ok);
+}
+
 async function usageErrorFor(argv: readonly string[]): Promise<string> {
   let stderr = '';
   const code = await runCli(argv, {
@@ -166,6 +181,49 @@ describe('smelt setup applies the recipe in one command', () => {
       if (agentsBefore !== undefined) {
         expect(readFileSync(join(cwd, 'AGENTS.md'), 'utf8')).toBe(agentsBefore);
       }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('repairs what doctor names behind — the update loop closes', async () => {
+    const cwd = scratch('repair');
+    try {
+      await setupWith(cwd, '1.0.0');
+      expect(readFileSync(join(cwd, 'CLAUDE.md'), 'utf8')).toContain(
+        'written-by @smeltjs/core 1.0.0',
+      );
+
+      // A newer binary re-runs setup: our own blocks are repaired, not skipped —
+      // doctor said behind, and setup is the repair it named.
+      let stdout = '';
+      const code = await runCli(['setup', '--yes', '--json', '--harness', 'claude-code'], {
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: () => {},
+        stdin: () => '',
+        version: '2.0.0',
+        cwd,
+      });
+      expect(code, `repair run failed:\n${stdout}`).toBe(EXIT.ok);
+      expect(readFileSync(join(cwd, 'CLAUDE.md'), 'utf8')).toContain(
+        'written-by @smeltjs/core 2.0.0',
+      );
+
+      // And the loop closes: doctor on the new binary says current, exit 0.
+      let doctorOut = '';
+      const doctorCode = await runCli(['doctor', '--json'], {
+        stdout: (text) => {
+          doctorOut += text;
+        },
+        stderr: () => {},
+        stdin: () => '',
+        version: '2.0.0',
+        cwd,
+      });
+      expect(doctorCode).toBe(EXIT.ok);
+      expect((JSON.parse(doctorOut) as { current: boolean }).current).toBe(true);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -273,6 +331,12 @@ describe('the interactive wizard completes on Enter alone', () => {
         },
       );
       expect(code, `wizard exited ${String(code)}:\n${stdout}`).toBe(EXIT.ok);
+      // The questions arrive in order — the store question before the MCP one. The
+      // first version of this wizard launched a step without awaiting it and the
+      // two prompts raced; scripted Enters masked it, a human would not.
+      expect(stdout.indexOf('store (1 memory')).toBeLessThan(
+        stdout.indexOf('register the MCP server'),
+      );
       expect(stdout).toContain('Nothing has been written yet.'); // the confirm listing
       expect(existsSync(join(cwd, 'smelt.config.json'))).toBe(true);
       const config = parseConfig(
@@ -330,6 +394,7 @@ describe('the installed binary drives setup end to end', () => {
     });
     expect(eof.status).toBe(EXIT.usage);
     expect(eof.stderr).toContain('input ended');
+    expect(eof.stderr).toContain('--yes');
 
     const cwd = mkdtempSync(join(tmpdir(), 'smelt-setup-bin-'));
     try {
@@ -370,6 +435,14 @@ export const MUTATIONS: GuardMutation[] = [
     find: '} else if (before !== rendered) {',
     replace: '} else if (true) {',
     why: 'setup that rewrites what it already wrote cannot be the update story — a second run must be a byte-neutral no-op, or the other-machine flow upgrades by rewriting a file that was already right',
+  },
+  {
+    kind: 'src',
+    id: 'setup-stops-repairing-its-own-blocks',
+    file: 'cli/setup.ts',
+    find: ': text.includes(OURS_TOKEN);',
+    replace: ': false;',
+    why: 'setup treating its own instruction blocks as foreign — doctor would name them behind forever and the repair it names would skip them, the update loop this whole arc exists to close, quietly not closing',
   },
   {
     kind: 'src',

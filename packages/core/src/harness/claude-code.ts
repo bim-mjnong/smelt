@@ -1,6 +1,6 @@
 import type { HarnessHookSchema } from '../hooks/shim.ts';
 
-import { SETUP_RECIPE } from '../setup/recipe.ts';
+import { MCP_RUN_ARGS } from '../setup/recipe.ts';
 import type { ShimmedHarnessProfile } from './profile.ts';
 
 /**
@@ -50,10 +50,9 @@ const HOOKS: HarnessHookSchema = {
   },
 };
 
-// The registration's bytes come from the SetupRecipe's run command — `npx
-// @smeltjs/mcp` split into the spawn shape `.mcp.json` wants — so the CLI command the
-// README teaches and the file setup writes cannot disagree.
-const MCP_ARGS = SETUP_RECIPE.mcp.run.split(' ');
+// The registration's bytes come from the SetupRecipe's run command (MCP_RUN_ARGS,
+// derived once beside the fact) — so the CLI command the README teaches and the file
+// setup writes cannot disagree.
 
 export const claudeCode: ShimmedHarnessProfile = {
   id: 'claude-code',
@@ -78,7 +77,7 @@ export const claudeCode: ShimmedHarnessProfile = {
       kind: 'mcp-registration',
       file: '.mcp.json',
       path: ['mcpServers', 'smelt'],
-      entry: () => ({ command: MCP_ARGS[0], args: MCP_ARGS.slice(1) }),
+      entry: () => ({ command: MCP_RUN_ARGS[0], args: MCP_RUN_ARGS.slice(1) }),
     },
   ],
 };

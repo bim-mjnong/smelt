@@ -90,9 +90,9 @@ export const setupCommand: Subcommand<SetupInvocation, SetupInvocation> = {
   },
 
   /**
-   * Nothing to merge: the flow reads `smelt.config.json` itself, with the wizard's
-   * own tolerance, because a command that *fixes* a setup must not refuse to start
-   * because the config it should complete is malformed.
+   * Nothing to merge: the flow reads `smelt.config.json` itself. A *missing* config
+   * is the thing setup writes; a *malformed* one is a loud refusal — doctor names it,
+   * the user fixes it, and setup never guesses around bytes it cannot parse.
    */
   resolve(invocation: SetupInvocation): SetupInvocation {
     return invocation;

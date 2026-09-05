@@ -125,8 +125,9 @@ DOCTOR
   which release wrote the instruction blocks, whether the config parses and its
   store directory exists, whether the MCP registration is intact, and which pieces
   are orphans. Exit 0 when current (or nothing installed), the refused exit when
-  something is behind — and the report names the exact repair command, which is
-  always smelt setup. Doctor never writes. The update loop is:
+  something is behind — and the report names the exact repair command:
+  smelt setup, per harness where a block is behind. Doctor never writes.
+  The update loop is:
 
     upgrade → smelt doctor → smelt setup
 

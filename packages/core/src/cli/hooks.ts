@@ -930,6 +930,36 @@ async function stepThreshold(
  * Exported for `smelt setup`, which applies the preset's *current* state the same way
  * — read off what is installed — rather than keeping a second copy of the defaults.
  */
+/**
+ * Whether a JSON hook file's text carries entries of ours — the **one** predicate for
+ * this fact, shared by the readers (`smelt doctor`, `smelt setup`'s repair policy) and
+ * backed by the same `isOursEntry` the writer's strip-merge uses. The guard command
+ * itself carries only the shim path (no token), so a text-level `OURS_TOKEN` search
+ * would miss a guard-only install — the exact drift this exists to prevent.
+ */
+export function jsonHooksContainOurs(text: string): boolean {
+  let hooks: Record<string, unknown> | undefined;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    const hooksValue =
+      typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)['hooks']
+        : undefined;
+    hooks =
+      typeof hooksValue === 'object' && hooksValue !== null && !Array.isArray(hooksValue)
+        ? (hooksValue as Record<string, unknown>)
+        : undefined;
+  } catch {
+    hooks = undefined;
+  }
+  if (hooks === undefined) return false;
+  return MANAGED_EVENTS.some((event) =>
+    Array.isArray(hooks[event])
+      ? (hooks[event] as unknown[]).some((entry) => isOursEntry(entry))
+      : false,
+  );
+}
+
 export function presetToggles(
   cwd: string,
 ): Pick<HooksChoices, 'guard' | 'statsOnStop' | 'mapOnStart' | 'lintOnStart'> {
