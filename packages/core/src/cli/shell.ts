@@ -152,4 +152,10 @@ export interface CliIo {
    * can answer it). See {@link AnswerStream} for why the type is structural.
    */
   readonly initInput?: AnswerStream;
+  /**
+   * True when stdout is an interactive, colour-honouring terminal and `NO_COLOR` is
+   * unset — the lava renderer's only switch. Absent or false, every wizard's bytes
+   * are exactly what they have always been; `bin.ts` computes it once.
+   */
+  readonly color?: boolean;
 }

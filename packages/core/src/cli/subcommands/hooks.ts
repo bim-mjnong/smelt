@@ -3,6 +3,7 @@ import process from 'node:process';
 import { CliUsageError } from '../../errors.ts';
 import { harnessesByTier, harnessNames } from '../../harness/registry.ts';
 import type { HarnessTier } from '../../harness/profile.ts';
+import { colorize } from '../lava.ts';
 import { runHooks } from '../hooks.ts';
 import { CLI_NAME } from '../shell.ts';
 import type { CliIo } from '../shell.ts';
@@ -115,7 +116,7 @@ export const hooksCommand: Subcommand<HooksInvocation, HooksInvocation> = {
     }
     return await runHooks(resolved.action, resolved.harness, {
       input: io.initInput,
-      output: io.stdout,
+      output: (text) => io.stdout(colorize(text, io.color === true)),
       cwd: io.cwd ?? process.cwd(),
       version: io.version,
     });

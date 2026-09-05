@@ -144,6 +144,10 @@ try {
     stdin: readStdin,
     version: packageVersion(),
     cwd: process.cwd(),
+    // The lava renderer's switch: a real interactive terminal that has not been
+    // told to keep its bytes plain. Piped output, agents and NO_COLOR all mean
+    // exactly the bytes the wizards have always written.
+    color: process.stdout.isTTY === true && process.env['NO_COLOR'] === undefined,
     // The wizard verbs (`init`, `hooks`, `agents split`, `setup`) read answers line by
     // line, so they get the stream, not readStdin's one-shot slurp of fd 0. A
     // *getter*, because touching `process.stdin` at all flips fd 0 into non-blocking

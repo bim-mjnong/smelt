@@ -1,6 +1,6 @@
 {
-  "guards": 32,
-  "mutations": 145,
+  "guards": 33,
+  "mutations": 147,
   "byGuard": [
     {
       "guard": "packages/core/test/guards/agents-lint.test.ts",
@@ -48,6 +48,10 @@
     },
     {
       "guard": "packages/core/test/guards/json-edit.test.ts",
+      "count": 2
+    },
+    {
+      "guard": "packages/core/test/guards/lava.test.ts",
       "count": 2
     },
     {

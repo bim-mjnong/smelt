@@ -117,6 +117,9 @@ export const setupCommand: Subcommand<SetupInvocation, SetupInvocation> = {
       output: io.stdout,
       cwd: io.cwd ?? process.cwd(),
       version: io.version,
+      // The lava renderer is for the human at a terminal: --yes and --json are the
+      // machine paths, and their bytes stay plain however pretty the screen is.
+      ...(io.color === true && !resolved.yes && !resolved.json ? { color: true } : {}),
     });
   },
 };

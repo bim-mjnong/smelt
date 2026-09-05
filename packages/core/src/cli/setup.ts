@@ -23,6 +23,7 @@ import { DEFAULT_STRATEGY } from '../plan/planners.ts';
 import { SETUP_RECIPE } from '../setup/recipe.ts';
 import { answerReader, CLI_NAME, EXIT } from './shell.ts';
 import type { AnswerStream } from './shell.ts';
+import { colorize, lavaBanner } from './lava.ts';
 
 /**
  * `smelt setup` — the SetupRecipe (CONTEXT.md) applied end-to-end: config, the hooks
@@ -64,6 +65,8 @@ export interface SetupIo {
   readonly home?: string;
   /** The release running setup — stamped into the instruction block for `smelt doctor`. */
   readonly version?: string;
+  /** The lava renderer's switch — computed by the verb from CliIo, interactive-only. */
+  readonly color?: boolean;
 }
 
 /** Everything the verb resolved before the flow ran. Pure data, both paths. */
@@ -163,7 +166,7 @@ export async function runSetup(options: SetupOptions, io: SetupIo): Promise<numb
   // other verbs' envelopes are. A machine parsing the receipt must not also parse
   // around it.
   const say: Say = (text) => {
-    if (!options.json) io.output(text);
+    if (!options.json) io.output(colorize(text, io.color === true));
   };
 
   try {
@@ -210,8 +213,9 @@ async function wizardPath(
   say: Say,
   ask: Ask,
 ): Promise<SetupChoices | undefined> {
+  say(lavaBanner('smelt setup', io.color === true));
   say(
-    `${CLI_NAME} setup — one command through the whole recipe. Enter accepts every ` +
+    `\n${CLI_NAME} setup — one command through the whole recipe. Enter accepts every ` +
       `default; nothing is written until the final confirm.\n\n`,
   );
 
